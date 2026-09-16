@@ -89,6 +89,7 @@ describe('orchestration fleet projection', () => {
       workers: [
         worker('1', {
           parentTaskId: 'task-parent',
+          durableProvider: { id: 'codex', model: null },
           resource: {
             id: 'resource-1',
             ownerDispatchId: '1',
@@ -117,6 +118,20 @@ describe('orchestration fleet projection', () => {
       resource: { state: 'owned', id: 'resource-1' }
     })
     expect(JSON.stringify(result)).not.toContain('secret transcript body')
+  })
+
+  it('keeps the durable provider selection when observed status differs', () => {
+    const result = projectOrchestrationFleet({
+      workers: [
+        worker('provider', {
+          durableProvider: { id: 'claude', model: 'opus' }
+        })
+      ],
+      statuses: [status('provider', 100, { agentType: 'claude', model: 'sonnet' })],
+      now: 100
+    })
+
+    expect(result.workers[0]?.provider).toEqual({ id: 'claude', model: 'opus' })
   })
 
   it('keeps local folder and unsupervised rows instead of assuming git resources', () => {
@@ -170,7 +185,7 @@ describe('orchestration fleet projection', () => {
   it('does not promote stale or restored status to live evidence', () => {
     const now = 2_000_000
     const stale = projectOrchestrationFleet({
-      workers: [worker('stale')],
+      workers: [worker('stale', { durableProvider: { id: 'codex', model: null } })],
       statuses: [status('stale', 1)],
       now
     }).workers[0]
@@ -190,6 +205,7 @@ describe('orchestration fleet projection', () => {
       verdict: 'unverifiable',
       reason: 'restored_unconfirmed'
     })
+    expect(restored.provider).toEqual({ id: 'unknown', model: null })
     expect(restored.evidence.liveStatus).toBe('redacted_restore')
   })
 
@@ -261,7 +277,7 @@ describe('orchestration fleet projection', () => {
       verdict: 'unverifiable',
       reason: 'missing_status'
     })
-    expect(result.workers[0]?.provider).toBeNull()
+    expect(result.workers[0]?.provider).toEqual({ id: 'unknown', model: null })
   })
 
   it('accepts a reminted pane when the Dispatch and terminal handle both match', () => {
@@ -327,6 +343,7 @@ describe('orchestration fleet projection', () => {
     const result = projectOrchestrationFleet({
       workers: [
         worker('session-only', {
+          durableProvider: { id: 'codex', model: null },
           resource: {
             id: 'resource-session',
             ownerDispatchId: 'session-only',

@@ -1,3 +1,4 @@
+import { isTuiAgent } from '../../../../../../shared/tui-agent-config'
 import type { OrchestrationWorkerLaunchReceipt } from '../worker/worker-launch-preferences'
 
 export type RemoteFederatedWorkerStartReceipt = {
@@ -35,6 +36,9 @@ export function parseRemoteFederatedWorkerStartReceipt(
   ) {
     throw new Error('The worker server returned an invalid ready receipt.')
   }
+  if (value.launch !== undefined && !isWorkerLaunchReceipt(value.launch)) {
+    throw new Error('The worker server returned an invalid launch receipt.')
+  }
   return value as RemoteFederatedWorkerStartReceipt
 }
 
@@ -50,4 +54,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0
+}
+
+function isNullableNonEmptyString(value: unknown): value is string | null {
+  return value === null || isNonEmptyString(value)
+}
+
+function isNullableTuiAgent(value: unknown): boolean {
+  return value === null || isTuiAgent(value)
+}
+
+function isWorkerLaunchSelection(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isNullableTuiAgent(value.agent) &&
+    isNullableNonEmptyString(value.model) &&
+    isNullableNonEmptyString(value.effort)
+  )
+}
+
+function isWorkerLaunchReceipt(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isWorkerLaunchSelection(value.requested) &&
+    (value.effective === null || isWorkerLaunchSelection(value.effective))
+  )
 }

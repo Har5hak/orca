@@ -16,6 +16,7 @@ import {
   countWorkerTerminalInventory,
   scanWorkerTerminalStates
 } from './worker-terminal-inventory-counts'
+import { readWorkerTerminalResourceRelations } from './worker-terminal-resource-relations'
 import { markWorkerTerminalUserOwned } from './worker-terminal-user-takeover'
 
 export {
@@ -101,6 +102,7 @@ export function listWorkerTerminalResources(
   pendingInput: boolean
   pendingApproval: boolean
   terminationReason: TerminalExitCause['kind'] | null
+  startOptions: string | null
   resource: WorkerTerminalResourceRow | null
   createdAt: string
   databaseId: number
@@ -155,6 +157,7 @@ export function listWorkerTerminalResources(
   if (detailLimit !== undefined) {
     detailValues.push(detailLimit)
   }
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: The type mirrors the SELECT aliases below.
   const rows = this.db
     .prepare(
       `SELECT d.id AS dispatch_id,
@@ -165,6 +168,7 @@ export function listWorkerTerminalResources(
               COALESCE(r.pane_key, d.assignee_pane_key) AS pane_key,
               COALESCE(w.worktree_id, r.worktree_id) AS worktree_id,
               w.stage AS worker_stage,
+              w.start_options,
               t.parent_id AS parent_task_id,
               d.task_id, d.run_id, d.status AS dispatch_status,
               d.termination_reason,
@@ -190,6 +194,7 @@ export function listWorkerTerminalResources(
     pane_key: string | null
     worktree_id: string | null
     worker_stage: string | null
+    start_options: string | null
     parent_task_id: string | null
     task_id: string
     run_id: string
@@ -200,20 +205,13 @@ export function listWorkerTerminalResources(
     created_at: string
     database_id: number
   }[]
-  const resources =
-    rows.length === 0
-      ? []
-      : (this.db
-          .prepare(
-            `SELECT r.* FROM worker_terminal_resources r
-               WHERE r.owner_dispatch_id IN (${rows.map(() => '?').join(',')})`
-          )
-          .all(...rows.map((row) => row.dispatch_id)) as WorkerTerminalResourceRow[])
-  const resourceByOwner = new Map(
-    resources.map((resource) => [resource.owner_dispatch_id, resource])
+  const resourceRelations = readWorkerTerminalResourceRelations(
+    this,
+    rows.map((row) => row.dispatch_id)
   )
   return rows.map((row) => {
-    const resource = resourceByOwner.get(row.dispatch_id) ?? null
+    const resourceRelation = resourceRelations.get(row.dispatch_id)
+    const resource = resourceRelation?.resource ?? null
     return {
       dispatchId: row.dispatch_id,
       taskId: row.task_id,
@@ -228,11 +226,13 @@ export function listWorkerTerminalResources(
       terminalState: deriveWorkerTerminalListState({
         workerState: row.worker_state,
         agentTerminalHandle: row.agent_terminal_handle,
-        resource
+        resource,
+        isCurrentResourceOwner: resourceRelation?.relation === 'current_owner'
       }),
       pendingInput: row.pending_input === 1,
       pendingApproval: row.pending_approval === 1,
       terminationReason: row.termination_reason,
+      startOptions: row.start_options,
       resource,
       createdAt: row.created_at,
       databaseId: row.database_id

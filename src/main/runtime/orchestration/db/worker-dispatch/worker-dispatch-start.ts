@@ -187,12 +187,37 @@ export function createStartingWorkerDispatch(
   }
 }
 
+export function recordWorkerLaunchReceipt(
+  this: OrchestrationDb,
+  dispatchId: string,
+  launchReceipt: unknown
+): WorkerDispatchRow {
+  const result = this.db
+    .prepare(
+      `UPDATE worker_dispatches
+          SET start_options = json_set(start_options, '$.launch', json(?)),
+              updated_at = datetime('now')
+        WHERE dispatch_id = ?`
+    )
+    .run(JSON.stringify(launchReceipt), dispatchId)
+  if (result.changes !== 1) {
+    throw new OrchestrationError('dispatch_not_found', `Dispatch ${dispatchId} was not found.`)
+  }
+  const worker = this.getWorkerDispatch(dispatchId)
+  if (!worker) {
+    throw new OrchestrationError('dispatch_not_found', `Dispatch ${dispatchId} was not found.`)
+  }
+  return worker
+}
+
 export type WorkerDispatchStartMethods = {
   createStartingWorkerDispatch: typeof createStartingWorkerDispatch
+  recordWorkerLaunchReceipt: typeof recordWorkerLaunchReceipt
 }
 
 export function attachWorkerDispatchStart(ctor: { prototype: object }): void {
   Object.assign(ctor.prototype, {
-    createStartingWorkerDispatch
+    createStartingWorkerDispatch,
+    recordWorkerLaunchReceipt
   })
 }

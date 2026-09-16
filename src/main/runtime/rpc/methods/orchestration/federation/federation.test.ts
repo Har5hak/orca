@@ -172,6 +172,45 @@ describe('orchestration federation', () => {
     )
   })
 
+  it('keeps the confirmed federated provider after live status disappears', async () => {
+    const task = createHomeTask()
+
+    const started = await homeDispatcher.dispatch(
+      startRequest(task.id, {
+        agent: 'cursor',
+        model: 'gpt-5.3-codex',
+        effort: 'high'
+      })
+    )
+    expect(started).toMatchObject({ ok: true, result: { state: 'ready' } })
+    const dispatch = homeDb.getDispatchContext(task.id)!
+    expect(JSON.parse(homeDb.getWorkerDispatch(dispatch.id)!.start_options)).toMatchObject({
+      launch: {
+        effective: { agent: 'cursor', model: 'gpt-5.3-codex', effort: 'high' }
+      }
+    })
+
+    vi.spyOn(homeRuntime, 'getOrchestrationFleetAgentStatusSnapshot').mockReturnValue([])
+    const listed = await homeDispatcher.dispatch({
+      id: 'rpc_federated_worker_list',
+      authToken: 'coordinator-token',
+      method: 'orchestration.workerList',
+      params: { run: task.run_id }
+    })
+
+    expect(listed).toMatchObject({
+      ok: true,
+      result: {
+        workers: [
+          {
+            dispatchId: dispatch.id,
+            projection: { provider: { id: 'cursor', model: 'gpt-5.3-codex' } }
+          }
+        ]
+      }
+    })
+  })
+
   it('does not report remotely rejected preferences as effective', async () => {
     const task = createHomeTask()
 
@@ -187,6 +226,24 @@ describe('orchestration federation', () => {
           requested: { agent: 'grok', model: 'unsupported-model', effort: null },
           effective: null
         }
+      }
+    })
+    const dispatch = homeDb.getDispatchContext(task.id)!
+    const listed = await homeDispatcher.dispatch({
+      id: 'rpc_rejected_federated_worker_list',
+      authToken: 'coordinator-token',
+      method: 'orchestration.workerList',
+      params: { run: task.run_id }
+    })
+    expect(listed).toMatchObject({
+      ok: true,
+      result: {
+        workers: [
+          {
+            dispatchId: dispatch.id,
+            projection: { provider: { id: 'grok', model: null } }
+          }
+        ]
       }
     })
   })

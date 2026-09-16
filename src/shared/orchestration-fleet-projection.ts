@@ -33,6 +33,7 @@ export type FleetDurableWorker = {
   pendingApproval?: boolean
   terminationReason?: 'operator_close' | 'signaled' | 'exited' | 'unknown' | null
   outcome?: 'in_progress' | 'succeeded' | 'failed' | 'outcome_unknown' | 'finished_unverified'
+  durableProvider?: { id: string; model: string | null } | null
   resource: {
     id: string
     ownerDispatchId: string
@@ -95,7 +96,7 @@ export type OrchestrationFleetWorker = {
   runId: string
   role: 'worker'
   parent: { taskId: string } | null
-  provider: { id: string; model: string | null } | null
+  provider: { id: string; model: string | null }
   host: { kind: 'local' | 'remote'; id: string }
   workspace: { id: string; kind: 'folder_or_worktree' } | null
   stage: {

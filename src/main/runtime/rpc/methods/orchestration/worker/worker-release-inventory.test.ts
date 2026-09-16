@@ -1,6 +1,23 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createOrchestrationWorkerReleaseHarness } from './worker-release.test-support'
 
+type ListedInventoryWorker = {
+  dispatchId: string
+  terminalState: string | null
+  resource: { ownerDispatchId: string; releaseState: string } | null
+  projection: {
+    provider: { id: string; model: string | null }
+    liveness: { verdict: string }
+    resource: { state: string }
+  }
+}
+
+type ListedInventory = {
+  workers: ListedInventoryWorker[]
+  counts: Record<string, number>
+  page: { total: number }
+}
+
 describe('orchestration worker release inventory', () => {
   const h = createOrchestrationWorkerReleaseHarness()
 
@@ -18,6 +35,37 @@ describe('orchestration worker release inventory', () => {
     expect(transferred?.terminal_handle).toBe('term_reminted')
     expect(h.db.getWorkerTerminalResourceByOwner(first.dispatchId)).toBeUndefined()
 
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This narrows the RPC method's response shape under test.
+    const beforeRelease = (await h.call('orchestration.workerList', {
+      run: h.activeRunId
+    })) as ListedInventory
+    expect(beforeRelease.workers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          dispatchId: first.dispatchId,
+          terminalState: null,
+          resource: expect.objectContaining({ ownerDispatchId: second.dispatchId }),
+          projection: expect.objectContaining({
+            provider: { id: 'codex', model: null },
+            liveness: expect.objectContaining({ verdict: 'unverifiable' }),
+            resource: { state: 'transferred' }
+          })
+        }),
+        expect.objectContaining({
+          dispatchId: second.dispatchId,
+          projection: expect.objectContaining({ provider: { id: 'unknown', model: null } })
+        })
+      ])
+    )
+    expect(beforeRelease.counts).toEqual({ active: 1 })
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This narrows the RPC method's response shape under test.
+    const retainedBeforeRelease = (await h.call('orchestration.workerList', {
+      run: h.activeRunId,
+      terminalState: 'retained'
+    })) as ListedInventory
+    expect(retainedBeforeRelease.workers).toEqual([])
+    expect(retainedBeforeRelease.page.total).toBe(0)
+
     h.inspectProcessLiveness.mockResolvedValueOnce('exited')
     const oldRelease = (await h.call('orchestration.workerRelease', {
       dispatch: first.dispatchId
@@ -32,6 +80,46 @@ describe('orchestration worker release inventory', () => {
     expect(newRelease.state).toBe('released')
     expect(h.runtime.closeTerminal).toHaveBeenCalledTimes(1)
     expect(h.runtime.closeTerminal).toHaveBeenCalledWith('term_reminted')
+
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This narrows the RPC method's response shape under test.
+    const afterRelease = (await h.call('orchestration.workerList', {
+      run: h.activeRunId
+    })) as ListedInventory
+    expect(afterRelease.workers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          dispatchId: first.dispatchId,
+          terminalState: 'released',
+          resource: expect.objectContaining({
+            ownerDispatchId: second.dispatchId,
+            releaseState: 'released'
+          }),
+          projection: expect.objectContaining({
+            liveness: expect.objectContaining({ verdict: 'exited' }),
+            resource: { state: 'transferred' }
+          })
+        }),
+        expect.objectContaining({
+          dispatchId: second.dispatchId,
+          terminalState: 'released',
+          projection: expect.objectContaining({
+            liveness: expect.objectContaining({ verdict: 'exited' }),
+            resource: { state: 'released' }
+          })
+        })
+      ])
+    )
+    expect(afterRelease.counts).toEqual({ released: 2 })
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This narrows the RPC method's response shape under test.
+    const releasedAfterRelease = (await h.call('orchestration.workerList', {
+      run: h.activeRunId,
+      terminalState: 'released'
+    })) as ListedInventory
+    expect(releasedAfterRelease.workers.map((worker) => worker.dispatchId)).toEqual([
+      first.dispatchId,
+      second.dispatchId
+    ])
+    expect(releasedAfterRelease.page.total).toBe(2)
   })
 
   it('refuses to settle dead transferred ownership with no durable archive', async () => {

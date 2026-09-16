@@ -206,6 +206,7 @@ export async function startFederatedWorker(args: {
       requestedLaunch,
       remote.state === 'ready'
     )
+    db.recordWorkerLaunchReceipt(started.dispatch.id, remote.launch ?? requestedLaunch)
     if (isReadyRemoteFederatedWorkerStartReceipt(remote)) {
       db.updateFederatedDispatchResources({
         dispatchId: started.dispatch.id,
