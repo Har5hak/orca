@@ -1,4 +1,9 @@
 import { groupFederatedDispatches } from './federated-fleet-host-groups'
+import {
+  decodeFederatedFleetSnapshot,
+  hostIndeterminateItems,
+  type FederatedFleetObservation
+} from './federated-fleet-snapshot-wire'
 import { mapWithConcurrency } from '../../../../../../shared/map-with-concurrency'
 import { ORCHESTRATION_FEDERATION_FLEET_SNAPSHOT_RUNTIME_CAPABILITY } from '../../../../../../shared/protocol-version'
 import {
@@ -7,6 +12,7 @@ import {
   type OrchestrationFleetPage
 } from '../../../../../../shared/orchestration-fleet-projection'
 import { projectFleetNextAction } from '../../../../../../shared/orchestration-fleet-worker-projection'
+import { resolveWorkerTerminalHostAuthority } from '../../../../../../shared/worker-terminal-host-scope'
 import { getOrchestrationPeerCapabilityCache } from '../../../../orchestration/orchestration-peer-capability-cache'
 import type { OrchestrationDb } from '../../../../orchestration/db'
 import { OrchestrationError } from '../../../../orchestration/orchestration-error'
@@ -17,11 +23,7 @@ const FLEET_HOST_CONCURRENCY = 4
 const FLEET_HOST_TIMEOUT_MS = 3_000
 const FLEET_TOTAL_TIMEOUT_MS = 5_000
 
-export type FederatedFleetObservation = {
-  status: 'live' | 'unverifiable' | 'exited'
-  exactWorker: boolean
-  reason?: string
-}
+export type { FederatedFleetObservation } from './federated-fleet-snapshot-wire'
 
 export type FederatedFleetHostError = {
   environmentId: string
@@ -37,7 +39,6 @@ export async function readFederatedFleetSnapshots(args: {
 }): Promise<{
   observations: Map<string, FederatedFleetObservation>
   errors: FederatedFleetHostError[]
-  hosts: Map<string, string>
 }> {
   const groups = groupFederatedDispatches(args)
   const deadline = Date.now() + FLEET_TOTAL_TIMEOUT_MS
@@ -77,17 +78,25 @@ export async function readFederatedFleetSnapshots(args: {
       if (snapshotRemainingMs <= 0) {
         return { observations: [], error: error('home_budget_exhausted') }
       }
-      const snapshot = (await args.runtime.callOrchestrationWorkerServer(
+      const wireSnapshot = await args.runtime.callOrchestrationWorkerServer(
         server.environmentId,
         'orchestration.federationFleetSnapshot',
         { dispatchIds },
         Math.min(timeoutMs, snapshotRemainingMs),
         undefined,
         { expectedEnvironmentPairingRevision: server.pairingRevision }
-      )) as {
-        runtimeEpoch: string
-        items: { dispatchId: string; observation: FederatedFleetObservation }[]
+      )
+      const decoded = decodeFederatedFleetSnapshot(wireSnapshot, dispatchIds)
+      if (!decoded) {
+        const projectedDispatches = projectFleetObservationFences(args.db, observationFences)
+        return {
+          observations: hostIndeterminateItems(dispatchIds).filter((item) =>
+            projectedDispatches.has(item.dispatchId)
+          ),
+          error: null
+        }
       }
+      const snapshot = decoded
       cache.remember(
         first.peer_fingerprint,
         snapshot.runtimeEpoch,
@@ -141,12 +150,6 @@ export async function readFederatedFleetSnapshots(args: {
   })
   const observations = new Map<string, FederatedFleetObservation>()
   const errors: FederatedFleetHostError[] = []
-  const hosts = new Map<string, string>()
-  for (const group of groups) {
-    for (const dispatch of group.dispatches) {
-      hosts.set(dispatch.dispatch_id, group.environmentId)
-    }
-  }
   for (const result of results) {
     for (const item of result.observations) {
       observations.set(item.dispatchId, item.observation)
@@ -155,7 +158,7 @@ export async function readFederatedFleetSnapshots(args: {
       errors.push(result.error)
     }
   }
-  return { observations, errors, hosts }
+  return { observations, errors }
 }
 
 function projectFleetRuntimeEpochs(
@@ -179,6 +182,22 @@ function projectFleetRuntimeEpochs(
   return projectedDispatches
 }
 
+function projectFleetObservationFences(
+  db: OrchestrationDb,
+  fences: Map<
+    string,
+    NonNullable<ReturnType<OrchestrationDb['captureFederatedDispatchObservationFence']>>
+  >
+): Set<string> {
+  const projectedDispatches = new Set<string>()
+  for (const [dispatchId, fence] of fences) {
+    if (db.projectFederatedDispatchObservation(fence, () => {})) {
+      projectedDispatches.add(dispatchId)
+    }
+  }
+  return projectedDispatches
+}
+
 export function applyFederatedFleetObservations(
   fleet: OrchestrationFleetPage,
   federated: Awaited<ReturnType<typeof readFederatedFleetSnapshots>>,
@@ -193,11 +212,25 @@ export function applyFederatedFleetObservations(
     )
   )
   for (const worker of fleet.workers) {
-    const hostId = federated.hosts.get(worker.dispatchId)
-    if (hostId) {
-      worker.host = { kind: 'remote', id: hostId }
-    }
     const observation = federated.observations.get(worker.dispatchId)
+    const row = durable.get(worker.dispatchId)
+    if (
+      observation &&
+      row &&
+      resolveWorkerTerminalHostAuthority(
+        row.dispatchHostScope,
+        row.federatedEnvironmentId,
+        row.resource?.hostScope
+      ).kind === 'indeterminate'
+    ) {
+      if (worker.liveness.verdict !== 'exited') {
+        worker.liveness = { verdict: 'unverifiable', reason: 'host_indeterminate' }
+        worker.evidence.liveStatus = 'unavailable'
+        worker.evidence.lastObservedAt = null
+        refreshFleetWorkerVerdict(worker, durable)
+      }
+      continue
+    }
     if (!observation) {
       const unavailableReason = unavailableDispatches.get(worker.dispatchId)
       if (unavailableReason) {
