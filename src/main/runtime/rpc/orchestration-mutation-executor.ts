@@ -99,9 +99,11 @@ export class OrchestrationMutationExecutor {
     const atomicWorkerAcceptance =
       request.method === 'orchestration.workerStart' ||
       request.method === 'orchestration.federationAttachStart'
-    // Worker starts perform asynchronous topology validation before their durable
-    // acceptance claim. Join an identical in-process attempt before that boundary.
-    if (atomicWorkerAcceptance) {
+    const atomicTaskDelivery = request.method === 'orchestration.taskCreateByDeliveryKey'
+    const atomicAcceptance = atomicWorkerAcceptance || atomicTaskDelivery
+    // Worker starts validate topology before their acceptance claim; Task delivery claims the
+    // mutation inside the same transaction as its binding. Join identical attempts before either boundary.
+    if (atomicAcceptance) {
       const active = this.inFlight.get(key)
       if (active) {
         if (active.method !== request.method || active.payloadHash !== payloadHash) {
@@ -115,7 +117,7 @@ export class OrchestrationMutationExecutor {
     }
     const begun = existingPromptReceipt
       ? { disposition: existingPromptReceipt.state, row: existingPromptReceipt }
-      : atomicWorkerAcceptance
+      : atomicAcceptance
         ? (() => {
             const row = db.getMutationReceipt(callerFingerprint, requestId)
             if (!row) {
@@ -133,9 +135,15 @@ export class OrchestrationMutationExecutor {
     const resumedPendingWorkerDone =
       begun.disposition === 'pending' &&
       isResumablePendingWorkerDone(request.method, params, begun.row.receipt)
+    const resumedPendingTaskDelivery =
+      begun.disposition === 'pending' &&
+      atomicTaskDelivery &&
+      db.isCurrentTaskDeliveryMutationCheckpoint(begun.row.receipt)
     const resumedPendingMutation =
       begun.disposition === 'pending' &&
-      (request.method === 'orchestration.workerRelease' || resumedPendingWorkerDone)
+      (request.method === 'orchestration.workerRelease' ||
+        resumedPendingWorkerDone ||
+        resumedPendingTaskDelivery)
 
     if (begun.disposition === 'completed') {
       const active = this.inFlight.get(key)
@@ -143,6 +151,16 @@ export class OrchestrationMutationExecutor {
         return attachMutationReceipt(await active.promise, requestId, true)
       }
       const receipt = JSON.parse(begun.row.receipt ?? 'null')
+      if (
+        request.method === 'orchestration.taskCreateByDeliveryKey' &&
+        !db.isCurrentTaskDeliveryReceipt(receipt)
+      ) {
+        throw new OrchestrationError(
+          'operation_unknown',
+          `Mutation ${requestId} completed before its Task delivery binding was removed or replaced. The stale receipt will not be replayed.`,
+          { requestId }
+        )
+      }
       if (promptBindingChanged) {
         return attachMutationReceipt(
           markReplayedPromptIncarnationReplaced(receipt),
@@ -193,7 +211,18 @@ export class OrchestrationMutationExecutor {
           { requestId }
         )
       }
-      if (request.method !== 'orchestration.workerRelease' && !resumedPendingWorkerDone) {
+      if (atomicTaskDelivery && !resumedPendingTaskDelivery) {
+        throw new OrchestrationError(
+          'operation_unknown',
+          `Mutation ${requestId} has no live matching Task delivery binding and will not be resumed.`,
+          { requestId }
+        )
+      }
+      if (
+        request.method !== 'orchestration.workerRelease' &&
+        !resumedPendingWorkerDone &&
+        !resumedPendingTaskDelivery
+      ) {
         const recovery = getPendingWorkerStartRecovery(request.method, begun.row.receipt)
         throw new OrchestrationError(
           'operation_unknown',
@@ -244,6 +273,7 @@ export class OrchestrationMutationExecutor {
     } catch (error) {
       if (
         (!isPromptMutation || !effectPossible) &&
+        !atomicTaskDelivery &&
         !(error instanceof OrchestrationError && error.code === 'operation_unknown')
       ) {
         db.discardPendingMutationReceipt(callerFingerprint, requestId)

@@ -5,6 +5,11 @@ import {
   OptionalString,
   requiredString
 } from './rpc-param-primitives'
+import {
+  isValidTaskDeliveryKeyLength,
+  TASK_DELIVERY_KEY_LENGTH_GUIDANCE,
+  TASK_DELIVERY_KEY_NUL_GUIDANCE
+} from '../orchestration-task-delivery-key'
 
 export type DispatchMutationMessageType =
   | 'worker_done'
@@ -83,6 +88,14 @@ export const TaskCreateParams = z.object({
   parent: OptionalString,
   callerTerminalHandle: OptionalString,
   run: OptionalString
+})
+
+export const TaskCreateByDeliveryKeyParams = TaskCreateParams.extend({
+  deliveryKey: z
+    .string()
+    .min(1, 'Missing --delivery-key')
+    .refine(isValidTaskDeliveryKeyLength, TASK_DELIVERY_KEY_LENGTH_GUIDANCE)
+    .refine((value) => !value.includes('\0'), TASK_DELIVERY_KEY_NUL_GUIDANCE)
 })
 
 export const TaskListParams = z.object({

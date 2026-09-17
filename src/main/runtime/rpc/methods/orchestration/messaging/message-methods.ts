@@ -14,6 +14,7 @@ import { recordReceiptBeforeNudge, replayMutationNudge } from './mutation-replay
 import {
   ReplyParams,
   InboxParams,
+  TaskCreateByDeliveryKeyParams,
   TaskCreateParams,
   TaskListParams,
   TaskUpdateParams
@@ -174,6 +175,46 @@ export const ORCHESTRATION_MESSAGE_METHODS = [
         runId: run.id
       })
       return { task }
+    }
+  }),
+
+  defineMethod({
+    name: 'orchestration.taskCreateByDeliveryKey',
+    params: TaskCreateByDeliveryKeyParams,
+    handler: (
+      params,
+      { orchestrationCompatibilityEvidence, orchestrationMutation, runtime, legacyCoordinatorRunId }
+    ) => {
+      const db = runtime.getOrchestrationDb()
+      const deps = params.deps ? parseOrchestrationTaskDepsFlag(params.deps) : undefined
+      const run = resolveRunScope(runtime, {
+        runId: params.run,
+        callerTerminalHandle: params.callerTerminalHandle,
+        requireCurrentConsumer: true,
+        legacyCoordinatorRunId,
+        callerEvidence: orchestrationCompatibilityEvidence
+      })
+      const creatorAuthority = params.callerTerminalHandle
+        ? runtime.getOrchestrationDispatchAuthority(params.callerTerminalHandle)
+        : null
+      return db.createOrAdoptRootTask({
+        deliveryKey: params.deliveryKey,
+        spec: params.spec,
+        taskTitle: params.taskTitle,
+        displayName: params.displayName,
+        deps,
+        parentId: params.parent,
+        createdByTerminalHandle: params.callerTerminalHandle,
+        ...(creatorAuthority?.paneKey && creatorAuthority.processIncarnation
+          ? {
+              createdByPaneKey: creatorAuthority.paneKey,
+              createdByProcessIncarnation: creatorAuthority.processIncarnation,
+              createdByRunGeneration: run.consumer_generation
+            }
+          : {}),
+        runId: run.id,
+        mutationReceipt: orchestrationMutation
+      })
     }
   }),
 

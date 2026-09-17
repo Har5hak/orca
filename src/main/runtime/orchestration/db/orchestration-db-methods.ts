@@ -51,6 +51,7 @@ import type { MigrateLegacyContractStorageMethods } from './schema/migrate-legac
 import type { SchemaMigrateMethods } from './schema/migrate'
 import type { SchemaColumnProbesMethods } from './schema/schema-column-probes'
 import type { TaskStoreMethods } from './tasks/task-store'
+import type { TaskDeliveryKeyMethods } from './tasks/task-delivery-key'
 import type { TaskStatusTransitionMethods } from './tasks/task-status-transition'
 import type { FederatedWorkerStartReconcileMethods } from './worker-dispatch/federated-worker-start-reconcile'
 import type { WorkerDispatchAbandonMethods } from './worker-dispatch/worker-dispatch-abandon'
@@ -99,6 +100,7 @@ export type OrchestrationDbMethods = AttemptObservationStoreMethods &
   DirectMailboxRoutingMethods &
   ForeignDirectMailboxRoutingMethods &
   QuestionThreadsMethods &
+  TaskDeliveryKeyMethods &
   TaskStoreMethods &
   TaskStatusTransitionMethods &
   WorkerDispatchStartMethods &

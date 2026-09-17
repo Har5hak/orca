@@ -17,6 +17,7 @@ export {
   InboxParams,
   ReplyParams,
   ResetParams,
+  TaskCreateByDeliveryKeyParams,
   TaskCreateParams,
   TaskListParams
 } from '../../../../../shared/rpc-contract/orchestration-params'

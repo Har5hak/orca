@@ -4,6 +4,7 @@ import {
   RUN_PANE_KEY_MATCH_SUFFIX_SQL
 } from '../pane-key-match'
 import { potentiallyLiveRemoteAttachmentSql } from '../federation/remote-attachment-liveness'
+import { TASK_DELIVERY_KEY_SCHEMA_SQL } from './migrate-v42'
 
 // Additive tables outlive v30 writers, so legacy parent deletes must clean their rows too.
 export const ADDITIVE_LIFECYCLE_DELETE_TRIGGERS_SQL = `
@@ -136,6 +137,8 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id);
+
+${TASK_DELIVERY_KEY_SCHEMA_SQL}
 
 CREATE TABLE IF NOT EXISTS dispatch_contexts (
   id                  TEXT PRIMARY KEY,

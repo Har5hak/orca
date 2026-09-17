@@ -16,6 +16,7 @@ import { LegacyCoordinatorAuthority } from './orchestration-legacy-coordinator-a
 
 const COORDINATOR_PREFLIGHT_METHODS = new Set([
   'orchestration.taskCreate',
+  'orchestration.taskCreateByDeliveryKey',
   'orchestration.taskList',
   'orchestration.taskUpdate',
   'orchestration.dispatch',
@@ -265,6 +266,7 @@ function stringValue(value: unknown): string | undefined {
 function currentCallerHandle(method: string, params: Record<string, unknown>): string | undefined {
   if (
     method === 'orchestration.taskCreate' ||
+    method === 'orchestration.taskCreateByDeliveryKey' ||
     method === 'orchestration.taskList' ||
     method === 'orchestration.taskUpdate'
   ) {
