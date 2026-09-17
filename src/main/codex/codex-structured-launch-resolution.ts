@@ -151,6 +151,13 @@ function resolveCodexLabStructuredLaunch(
     env: { ...plan.environment.injected },
     environmentMode: 'exact',
     workerAccessMode: 'lab-gateway',
+    labAppServerAttestationExpected: Object.freeze({
+      cwd: workspacePath,
+      codexHome: plan.runtimePaths.codexHome,
+      fakeHome: plan.runtimePaths.fakeHome,
+      workspaceId: plan.enforcedWorkspaceId,
+      permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID
+    }),
     permissionPolicy: {
       approvalPolicy: 'never',
       permissions: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID,

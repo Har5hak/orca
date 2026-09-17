@@ -23,6 +23,11 @@ export type CodexOpenedThread = {
   effort?: string
   /** Present, including null, only when this app-server reports the effective tier. */
   serviceTier?: string | null
+  /** Exact live request and response retained only long enough to attest a fresh lab thread. */
+  labAttestation?: Readonly<{
+    threadStartParams: Readonly<Record<string, unknown>>
+    openedThread: unknown
+  }>
 }
 
 function nonEmptyString(value: unknown): string | null {
@@ -86,19 +91,18 @@ export async function openCodexThread(
         ...(launch.resumePath ? { path: launch.resumePath } : {})
       }
     : null
+  const threadStartParams = resumeParams
+    ? undefined
+    : {
+        cwd: launch.cwd,
+        ...launch.permissionPolicy,
+        ...(launch.workerAccessMode === 'lab-gateway'
+          ? { ephemeral: true, dynamicTools: CODEX_LAB_DYNAMIC_TOOL_SPECS }
+          : {})
+      }
   const opened = resumeParams
     ? await resumeCodexThread(connection, resumeParams, timeoutMs)
-    : await connection.request(
-        'thread/start',
-        {
-          cwd: launch.cwd,
-          ...launch.permissionPolicy,
-          ...(launch.workerAccessMode === 'lab-gateway'
-            ? { dynamicTools: CODEX_LAB_DYNAMIC_TOOL_SPECS }
-            : {})
-        },
-        { timeoutMs }
-      )
+    : await connection.request('thread/start', threadStartParams, { timeoutMs })
   const threadId = readCodexThreadId(opened)
   if (!threadId) {
     throw new Error('codex app-server did not name the thread it opened')
@@ -124,6 +128,9 @@ export async function openCodexThread(
       : {}),
     ...(model ? { model } : {}),
     ...(effort ? { effort } : {}),
-    ...(serviceTierKnown ? { serviceTier } : {})
+    ...(serviceTierKnown ? { serviceTier } : {}),
+    ...(launch.workerAccessMode === 'lab-gateway' && threadStartParams
+      ? { labAttestation: { threadStartParams, openedThread: opened } }
+      : {})
   }
 }

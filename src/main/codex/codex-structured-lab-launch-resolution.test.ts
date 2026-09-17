@@ -92,6 +92,13 @@ describe('structured Codex lab launch resolution', () => {
         },
         environmentMode: 'exact',
         workerAccessMode: 'lab-gateway',
+        labAppServerAttestationExpected: {
+          cwd: TEST_LAB_WORKTREE_PATH,
+          codexHome: binding.plan.runtimePaths.codexHome,
+          fakeHome: binding.plan.runtimePaths.fakeHome,
+          workspaceId: binding.plan.enforcedWorkspaceId,
+          permissionProfileId: 'orca-lab-readonly-v1'
+        },
         permissionPolicy: {
           approvalPolicy: 'never',
           permissions: 'orca-lab-readonly-v1',

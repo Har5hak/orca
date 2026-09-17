@@ -5,7 +5,14 @@ import {
   guardCodexAppServerConnectionForWorkerAccess
 } from './codex-lab-app-server-connection-guard'
 import { CodexLabAppServerMethodRefusedError } from './codex-lab-app-server-attestation-contract'
+import {
+  testCodexLabAccount,
+  testCodexLabEffectiveConfig,
+  testCodexLabOpenedThread,
+  testCodexLabPermissionProfiles
+} from './codex-lab-session-attestation-test-support'
 import { adapterFor, fakeCodex, identityFor } from './codex-structured-session-adapter-fixture'
+import { CODEX_LAB_READONLY_PERMISSION_PROFILE_ID } from './codex-structured-permission-policy'
 
 function connection(): CodexAppServerConnection & {
   request: ReturnType<typeof vi.fn<CodexAppServerConnection['request']>>
@@ -128,8 +135,37 @@ describe('Codex laboratory app-server connection guard', () => {
   )
 
   it('guards the connection published by a real lab acquisition', async () => {
-    const codex = fakeCodex()
-    const adapter = adapterFor(codex, { workerAccessMode: 'lab-gateway' })
+    const expected = Object.freeze({
+      cwd: '/private/tmp/orca-lab/worktrees/guard',
+      codexHome: '/private/tmp/orca-lab/runtime/dispatches/guard/codex-home',
+      fakeHome: '/private/tmp/orca-lab/runtime/dispatches/guard/fake-home',
+      workspaceId: '00000000-0000-4000-8000-000000000757',
+      permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID
+    })
+    const codex = fakeCodex({
+      'thread/start': () => testCodexLabOpenedThread(expected, false, 'thread-abc'),
+      'account/read': () => testCodexLabAccount(expected),
+      'config/read': () => ({
+        config: testCodexLabEffectiveConfig(expected),
+        origins: {},
+        layers: []
+      }),
+      'configRequirements/read': () => ({ requirements: null }),
+      'permissionProfile/list': () => testCodexLabPermissionProfiles(expected)
+    })
+    const adapter = adapterFor(codex, {
+      cwd: expected.cwd,
+      codexHome: expected.codexHome,
+      env: { CODEX_HOME: expected.codexHome, HOME: expected.fakeHome },
+      environmentMode: 'exact',
+      workerAccessMode: 'lab-gateway',
+      labAppServerAttestationExpected: expected,
+      permissionPolicy: {
+        approvalPolicy: 'never',
+        permissions: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID,
+        runtimeWorkspaceRoots: [expected.cwd]
+      }
+    })
     await adapter.acquire({
       identity: identityFor('session-lab-guard'),
       fence: 7,
@@ -139,6 +175,12 @@ describe('Codex laboratory app-server connection guard', () => {
     await expect(
       adapter.compact({ sessionId: 'session-lab-guard', fence: 7, turnId: 'turn-lab-guard' })
     ).rejects.toEqual(new CodexLabAppServerMethodRefusedError('thread/compact/start'))
-    expect(codex.connections[0].calls.map(({ method }) => method)).toEqual(['thread/start'])
+    expect(codex.connections[0].calls.map(({ method }) => method)).toEqual([
+      'thread/start',
+      'account/read',
+      'config/read',
+      'configRequirements/read',
+      'permissionProfile/list'
+    ])
   })
 })

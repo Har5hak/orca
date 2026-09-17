@@ -14,6 +14,10 @@ import { createCodexDispatchEchoes } from './codex-structured-dispatch-echo'
 import { createCodexJournalTranslator } from './codex-structured-journal-translation'
 import { openCodexAppServerConnection } from './codex-app-server-connection'
 import { guardCodexAppServerConnectionForWorkerAccess } from './codex-lab-app-server-connection-guard'
+import {
+  attestCodexLabOpenedThread,
+  codexLabAttestationExpectedForLaunch
+} from './codex-lab-session-attestation'
 import { codexProcessIdentity, codexProviderHandleLink } from './codex-structured-owner-identity'
 import { buildCodexStructuredChildEnvironment } from './codex-structured-child-environment'
 import { openCodexThread } from './codex-structured-thread-open'
@@ -131,6 +135,13 @@ export async function acquireCodexStructuredSession(input: {
       )
     }
     labDynamicToolHost = launch.labDynamicToolHost
+    const labAttestationExpected = (() => {
+      try {
+        return codexLabAttestationExpectedForLaunch(launch)
+      } catch (error) {
+        throw new AgentSessionPreSpawnError(error)
+      }
+    })()
     acquisitions.assertCurrent(sessionId, attempt)
     const upstreamConnection = await open(
       {
@@ -207,6 +218,13 @@ export async function acquireCodexStructuredSession(input: {
     }
     acquisitions.assertCurrent(sessionId, attempt)
     const opened = await openCodexThread(connection, launch, deps.requestTimeoutMs)
+    acquisitions.assertCurrent(sessionId, attempt)
+    await attestCodexLabOpenedThread({
+      connection,
+      expected: labAttestationExpected,
+      opened,
+      ...(deps.requestTimeoutMs === undefined ? {} : { timeoutMs: deps.requestTimeoutMs })
+    })
     acquisitions.assertCurrent(sessionId, attempt)
     primaryThreadId = opened.threadId
     const restoreAdmission = translator?.restoreThread(opened.threadId, opened.thread ?? {})

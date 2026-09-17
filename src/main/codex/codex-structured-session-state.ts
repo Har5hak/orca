@@ -18,6 +18,7 @@ import type { StructuredAgentSessionLifecycleEvent } from '../native-chat/agent-
 import type { CodexStructuredPermissionPolicy } from './codex-structured-permission-policy'
 import type { CodexAppServerEnvironmentMode } from './codex-app-server-environment'
 import type { CodexLabDynamicToolHostPort } from './codex-lab-dynamic-tool-host'
+import type { CodexLabAppServerAttestationExpected } from './codex-lab-app-server-attestation'
 
 export type CodexStructuredLaunch = {
   command: string
@@ -30,6 +31,8 @@ export type CodexStructuredLaunch = {
   env?: Record<string, string>
   environmentMode?: CodexAppServerEnvironmentMode
   workerAccessMode?: 'orca-cli' | 'lab-gateway'
+  /** Host-only expectations derived from the sealed laboratory launch binding. */
+  labAppServerAttestationExpected?: CodexLabAppServerAttestationExpected
   /** Host-only Dispatch bridge. Never serialized into the provider launch environment. */
   labDynamicToolHost?: CodexLabDynamicToolHostPort
 }

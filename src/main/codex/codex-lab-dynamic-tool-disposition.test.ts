@@ -20,6 +20,13 @@ import type {
   CodexAppServerConnectionHandlers,
   openCodexAppServerConnection
 } from './codex-app-server-connection'
+import {
+  testCodexLabAccount,
+  testCodexLabEffectiveConfig,
+  testCodexLabOpenedThread,
+  testCodexLabPermissionProfiles
+} from './codex-lab-session-attestation-test-support'
+import { CODEX_LAB_READONLY_PERMISSION_PROFILE_ID } from './codex-structured-permission-policy'
 
 const SESSION_ID = 'session-lab'
 const THREAD_ID = 'thread-lab'
@@ -297,8 +304,31 @@ describe('Codex laboratory dynamic-tool server-request disposition', () => {
   it('carries the host-only bridge through lab acquisition and aborts it on provider exit', async () => {
     const dynamicHost = host()
     const exactConnection = connection()
-    exactConnection.request = async (method) =>
-      method === 'thread/start' ? { thread: { id: THREAD_ID } } : {}
+    const expected = Object.freeze({
+      cwd: '/private/tmp/orca-lab/disposable-757',
+      codexHome: '/private/tmp/orca-lab/homes/session-757/codex-home',
+      fakeHome: '/private/tmp/orca-lab/homes/session-757/fake-home',
+      workspaceId: '00000000-0000-4000-8000-000000000757',
+      permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID
+    })
+    exactConnection.request = async (method) => {
+      if (method === 'thread/start') {
+        return testCodexLabOpenedThread(expected, false, THREAD_ID)
+      }
+      if (method === 'account/read') {
+        return testCodexLabAccount(expected)
+      }
+      if (method === 'config/read') {
+        return { config: testCodexLabEffectiveConfig(expected), origins: {}, layers: [] }
+      }
+      if (method === 'configRequirements/read') {
+        return { requirements: null }
+      }
+      if (method === 'permissionProfile/list') {
+        return testCodexLabPermissionProfiles(expected)
+      }
+      throw new Error(`unexpected laboratory request: ${method}`)
+    }
     let handlers: CodexAppServerConnectionHandlers = {}
     const openConnection: typeof openCodexAppServerConnection = async (
       _launch,
@@ -311,10 +341,18 @@ describe('Codex laboratory dynamic-tool server-request disposition', () => {
       resolveLaunch: async () => ({
         command: 'codex',
         args: ['app-server'],
-        cwd: '/private/tmp/orca-lab/disposable-757',
-        codexHome: '/private/tmp/orca-lab/homes/session-757/codex-home',
+        cwd: expected.cwd,
+        codexHome: expected.codexHome,
         resumeThreadId: null,
+        env: { CODEX_HOME: expected.codexHome, HOME: expected.fakeHome },
+        environmentMode: 'exact',
         workerAccessMode: 'lab-gateway',
+        labAppServerAttestationExpected: expected,
+        permissionPolicy: {
+          approvalPolicy: 'never',
+          permissions: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID,
+          runtimeWorkspaceRoots: [expected.cwd]
+        },
         labDynamicToolHost: dynamicHost
       }),
       openConnection,
