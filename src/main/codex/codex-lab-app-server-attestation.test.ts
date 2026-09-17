@@ -82,6 +82,7 @@ function makeConfig(): Record<string, unknown> {
     check_for_update_on_startup: false,
     file_opener: 'none',
     allow_login_shell: false,
+    analytics: { enabled: false },
     history: { persistence: 'none', max_bytes: null },
     tools: {
       web_search: null,
@@ -302,6 +303,26 @@ describe('TASK-757 Codex app-server policy attestation', () => {
       ready: false,
       reason: 'effective_config_broadened',
       field: `config.permissions.${EXPECTED.permissionProfileId}.network`
+    })
+  })
+
+  it('rejects enabled or missing analytics', async () => {
+    const enabled = makeConfig()
+    enabled.analytics = { enabled: true }
+    const enabledCase = fakeInput({ config: { config: enabled, origins: {}, layers: [] } })
+    await expect(probeCodexLabAppServerReadiness(enabledCase.input)).resolves.toEqual({
+      ready: false,
+      reason: 'effective_config_broadened',
+      field: 'config.analytics'
+    })
+
+    const missing = makeConfig()
+    delete missing.analytics
+    const missingCase = fakeInput({ config: { config: missing, origins: {}, layers: [] } })
+    await expect(probeCodexLabAppServerReadiness(missingCase.input)).resolves.toEqual({
+      ready: false,
+      reason: 'effective_config_broadened',
+      field: 'config.analytics'
     })
   })
 

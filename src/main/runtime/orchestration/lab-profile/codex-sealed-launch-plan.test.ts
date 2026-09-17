@@ -103,6 +103,11 @@ describe('sealed Codex laboratory launch plan', () => {
     expect(plan.configToml).toContain('web_search = "disabled"')
     expect(plan.configToml).toContain('experimental_use_profile = false')
     expect(plan.configToml).toContain('persistence = "none"')
+    expect(plan.configToml).toContain('[analytics]\nenabled = false')
+    expect(plan.configToml).toContain('[feedback]\nenabled = false')
+    expect(plan.configToml).toContain(
+      '[otel]\nlog_user_prompt = false\nexporter = "none"\ntrace_exporter = "none"\nmetrics_exporter = "none"'
+    )
     expect(plan.configToml).toContain('multi_agent = false')
     expect(plan.configToml).toContain('memories = false')
     expect(plan.configToml).toContain('shell_snapshot = false')
