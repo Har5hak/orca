@@ -16,11 +16,14 @@ describe('sealed Codex laboratory host executor', () => {
     const host = new FakeCodexLabHost(plan)
     const preparationHost: CodexLabPreparationHost = {
       observePath: (path) => host.observePath(path),
-      makeDirectoryExclusive: (path, mode) => host.makeDirectoryExclusive(path, mode),
-      writeFileExclusive: (path, contents, mode) => host.writeFileExclusive(path, contents, mode),
-      sha256File: (path) => host.sha256File(path),
+      makeDirectoryExclusive: (path, mode, parent) =>
+        host.makeDirectoryExclusive(path, mode, parent),
+      writeFileExclusive: (path, contents, mode, parent) =>
+        host.writeFileExclusive(path, contents, mode, parent),
+      sha256File: (path, identity) => host.sha256File(path, identity),
       probeEffectivePolicy: (request) => host.probeEffectivePolicy(request),
-      removeTree: (path) => host.removeTree(path)
+      removeTree: (path, rootIdentity, parentIdentity) =>
+        host.removeTree(path, rootIdentity, parentIdentity)
     }
 
     const result = await prepareSealedCodexLabHostPlan(plan, preparationHost)
@@ -30,16 +33,40 @@ describe('sealed Codex laboratory host executor', () => {
       throw new Error(result.message)
     }
     expect(host.calls).toEqual([
+      'observe:/private',
+      'observe:/private/tmp',
+      'observe:/private',
+      'observe:/private/tmp/orca-lab',
+      'mkdir:/private/tmp/orca-lab:700',
+      'observe:/private/tmp',
+      'observe:/private/tmp/orca-lab',
+      'observe:/private/tmp/orca-lab/runtime',
+      'mkdir:/private/tmp/orca-lab/runtime:700',
+      'observe:/private/tmp/orca-lab',
+      'observe:/private/tmp/orca-lab/runtime',
+      'observe:/private/tmp/orca-lab/runtime/dispatches',
+      'mkdir:/private/tmp/orca-lab/runtime/dispatches:700',
+      'observe:/private/tmp/orca-lab/runtime',
+      'observe:/private/tmp/orca-lab/runtime/dispatches',
       `observe:${dirname(plan.runtimePaths.codexHome)}`,
+      'observe:/private/tmp/orca-lab/runtime/dispatches',
       `mkdir:${dirname(plan.runtimePaths.codexHome)}:700`,
+      'observe:/private/tmp/orca-lab/runtime/dispatches',
       `mkdir:${plan.runtimePaths.codexHome}:700`,
       `mkdir:${plan.runtimePaths.fakeHome}:700`,
       `write:${host.configPath()}:600`,
+      'observe:/private',
+      'observe:/private/tmp',
+      'observe:/private/tmp/orca-lab',
+      'observe:/private/tmp/orca-lab/runtime',
+      'observe:/private/tmp/orca-lab/runtime/dispatches',
       `observe:${dirname(plan.runtimePaths.codexHome)}`,
       `observe:${plan.runtimePaths.codexHome}`,
       `observe:${plan.runtimePaths.fakeHome}`,
       `observe:${host.configPath()}`,
       `sha256:${host.configPath()}`,
+      `observe:${host.configPath()}`,
+      `observe:${dirname(plan.runtimePaths.codexHome)}`,
       'probe-effective'
     ])
     expect(host.spawnRequests).toEqual([])
@@ -64,7 +91,8 @@ describe('sealed Codex laboratory host executor', () => {
     const attestationHost: CodexLabProviderAttestationHost = {
       probeRuntimeBoundaries: (request) => host.probeRuntimeBoundaries(request),
       terminateProcess: (processId) => host.terminateProcess(processId),
-      removeTree: (path) => host.removeTree(path)
+      removeTree: (path, rootIdentity, parentIdentity) =>
+        host.removeTree(path, rootIdentity, parentIdentity)
     }
 
     const result = await attestSealedCodexLabProviderAcquisition(
@@ -124,16 +152,40 @@ describe('sealed Codex laboratory host executor', () => {
     }
     const dispatchRoot = dirname(plan.runtimePaths.codexHome)
     expect(host.calls).toEqual([
+      'observe:/private',
+      'observe:/private/tmp',
+      'observe:/private',
+      'observe:/private/tmp/orca-lab',
+      'mkdir:/private/tmp/orca-lab:700',
+      'observe:/private/tmp',
+      'observe:/private/tmp/orca-lab',
+      'observe:/private/tmp/orca-lab/runtime',
+      'mkdir:/private/tmp/orca-lab/runtime:700',
+      'observe:/private/tmp/orca-lab',
+      'observe:/private/tmp/orca-lab/runtime',
+      'observe:/private/tmp/orca-lab/runtime/dispatches',
+      'mkdir:/private/tmp/orca-lab/runtime/dispatches:700',
+      'observe:/private/tmp/orca-lab/runtime',
+      'observe:/private/tmp/orca-lab/runtime/dispatches',
       `observe:${dispatchRoot}`,
+      'observe:/private/tmp/orca-lab/runtime/dispatches',
       `mkdir:${dispatchRoot}:700`,
+      'observe:/private/tmp/orca-lab/runtime/dispatches',
       `mkdir:${plan.runtimePaths.codexHome}:700`,
       `mkdir:${plan.runtimePaths.fakeHome}:700`,
       `write:${host.configPath()}:600`,
+      'observe:/private',
+      'observe:/private/tmp',
+      'observe:/private/tmp/orca-lab',
+      'observe:/private/tmp/orca-lab/runtime',
+      'observe:/private/tmp/orca-lab/runtime/dispatches',
       `observe:${dispatchRoot}`,
       `observe:${plan.runtimePaths.codexHome}`,
       `observe:${plan.runtimePaths.fakeHome}`,
       `observe:${host.configPath()}`,
       `sha256:${host.configPath()}`,
+      `observe:${host.configPath()}`,
+      `observe:${dispatchRoot}`,
       'probe-effective',
       'spawn',
       'probe-runtime'
@@ -191,7 +243,24 @@ describe('sealed Codex laboratory host executor', () => {
       reason: 'dispatch_root_not_fresh',
       rollback: []
     })
-    expect(host.calls).toEqual([`observe:${dirname(plan.runtimePaths.codexHome)}`])
+    expect(host.calls).toEqual([
+      'observe:/private',
+      'observe:/private/tmp',
+      'observe:/private',
+      'observe:/private/tmp/orca-lab',
+      'mkdir:/private/tmp/orca-lab:700',
+      'observe:/private/tmp',
+      'observe:/private/tmp/orca-lab',
+      'observe:/private/tmp/orca-lab/runtime',
+      'mkdir:/private/tmp/orca-lab/runtime:700',
+      'observe:/private/tmp/orca-lab',
+      'observe:/private/tmp/orca-lab/runtime',
+      'observe:/private/tmp/orca-lab/runtime/dispatches',
+      'mkdir:/private/tmp/orca-lab/runtime/dispatches:700',
+      'observe:/private/tmp/orca-lab/runtime',
+      'observe:/private/tmp/orca-lab/runtime/dispatches',
+      `observe:${dirname(plan.runtimePaths.codexHome)}`
+    ])
   })
 
   it('verifies the written config digest before probing or spawning', async () => {

@@ -4,6 +4,12 @@ import {
   DISABLED_CODEX_LAB_FEATURES,
   ENABLED_CODEX_LAB_CONFINEMENT_FEATURES
 } from './codex-lab-launch-policy'
+import type {
+  CodexLabRuntimeLayoutHost,
+  PreparedCodexLabRuntimeLayout
+} from './codex-lab-runtime-layout'
+
+export type { CodexLabPathObservation } from './codex-lab-runtime-layout'
 
 export const CODEX_LAB_EXPECTED_TOOL_INVENTORY = ['filesystem.read', 'shell.read-only'] as const
 
@@ -17,10 +23,6 @@ export const CODEX_LAB_ACTUAL_HOST_GAPS = [
   'persistent-process-and-cleanup-recovery',
   'database-and-rpc-integration'
 ] as const
-
-export type CodexLabPathObservation =
-  | Readonly<{ kind: 'absent' }>
-  | Readonly<{ kind: 'directory' | 'file' | 'other'; mode: number }>
 
 export type CodexLabEffectivePolicyEvidence = Readonly<{
   configSha256: string
@@ -105,39 +107,29 @@ export type CodexLabRuntimeProbeRequest = Readonly<{
   worktreePath: string
 }>
 
-export type CodexLabPreparationHost = {
-  observePath(path: string): Promise<CodexLabPathObservation>
-  makeDirectoryExclusive(path: string, mode: number): Promise<void>
-  writeFileExclusive(path: string, contents: string, mode: number): Promise<void>
-  sha256File(path: string): Promise<string>
+export type CodexLabPreparationHost = CodexLabRuntimeLayoutHost & {
   probeEffectivePolicy(
     request: CodexLabEffectivePolicyProbeRequest
   ): Promise<CodexLabEffectivePolicyObservation>
-  removeTree(path: string): Promise<Readonly<{ evidence: string }>>
 }
 
 export type CodexLabProviderSpawnHost = {
   spawnNoShell(request: CodexLabSpawnRequest): Promise<Readonly<{ processId: string }>>
 }
 
-export type CodexLabProviderAttestationHost = {
+export type CodexLabProviderAttestationHost = Pick<CodexLabRuntimeLayoutHost, 'removeTree'> & {
   probeRuntimeBoundaries(request: CodexLabRuntimeProbeRequest): Promise<CodexLabRuntimeObservations>
   terminateProcess(processId: string): Promise<Readonly<{ evidence: string }>>
-  removeTree(path: string): Promise<Readonly<{ evidence: string }>>
 }
 
 export type CodexLabHost = CodexLabPreparationHost &
   CodexLabProviderSpawnHost &
   CodexLabProviderAttestationHost
 
-export type PreparedCodexLabHostPlan = Readonly<{
-  schemaVersion: 1
-  dispatchId: string
-  dispatchRoot: string
-  configPath: string
-  configSha256: string
-  effectivePolicy: VerifiedCodexLabEffectivePolicyObservation
-}>
+export type PreparedCodexLabHostPlan = PreparedCodexLabRuntimeLayout &
+  Readonly<{
+    effectivePolicy: VerifiedCodexLabEffectivePolicyObservation
+  }>
 
 export type AcquiredCodexLabProvider = Readonly<{
   processId: string
@@ -145,6 +137,7 @@ export type AcquiredCodexLabProvider = Readonly<{
 
 export type CodexLabHostExecutionStage =
   | 'validate_plan'
+  | 'prepare_parents'
   | 'freshness'
   | 'create_layout'
   | 'write_config'
@@ -157,6 +150,8 @@ export type CodexLabHostExecutionStage =
 
 export type CodexLabHostExecutionReason =
   | 'plan_invalid'
+  | 'layout_path_invalid'
+  | 'parent_layout_invalid'
   | 'dispatch_root_not_fresh'
   | 'layout_verification_failed'
   | 'config_digest_mismatch'
@@ -172,6 +167,7 @@ export type CodexLabRollbackEvidence = Readonly<{
   order: number
   action: 'terminate_process' | 'remove_dispatch_root'
   status: 'succeeded' | 'failed' | 'skipped'
+  reason?: 'cleanup_incomplete' | 'cleanup_failed'
   evidence: string
 }>
 

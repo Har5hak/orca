@@ -17,6 +17,10 @@ import {
   type CodexLabRuntimeObservations,
   type CodexLabSpawnRequest
 } from './codex-lab-host-executor-contract'
+import type {
+  CodexLabExistingPathObservation,
+  CodexLabPathIdentity
+} from './codex-lab-runtime-layout'
 
 const SHA256_A = 'a'.repeat(64)
 const WORKSPACE_ID = '018f47a2-9d72-7cc1-b046-7a2868411f42'
@@ -72,12 +76,15 @@ export class FakeCodexLabHost implements CodexLabHost {
   readonly runtimeProbeRequests: CodexLabRuntimeProbeRequest[] = []
   readonly spawnRequests: CodexLabSpawnRequest[] = []
   readonly failOperations = new Set<string>()
-  readonly pathKinds = new Map<string, 'directory' | 'file'>()
+  readonly pathKinds = new Map<string, 'directory' | 'file' | 'other'>()
   readonly pathModes = new Map<string, number>()
+  readonly pathOwners = new Map<string, boolean>()
+  readonly pathIdentities = new Map<string, CodexLabPathIdentity>()
   readonly fileContents = new Map<string, string>()
   effectivePolicy: CodexLabEffectivePolicyObservation
   runtimeObservations: CodexLabRuntimeObservations
   configDigestOverride?: string
+  private nextInode = 1
 
   constructor(readonly plan: SealedCodexLabLaunchPlan) {
     const dispatchRoot = dirname(plan.runtimePaths.codexHome)
@@ -87,45 +94,67 @@ export class FakeCodexLabHost implements CodexLabHost {
       dispatchRoot,
       'fake-process-757'
     )
+    this.setPath('/private', 'directory', 0o755, false)
+    this.setPath('/private/tmp', 'directory', 0o1777, false)
   }
 
   setExistingDispatchRoot(): void {
     const root = dirname(this.plan.runtimePaths.codexHome)
-    this.pathKinds.set(root, 'directory')
-    this.pathModes.set(root, 0o700)
+    this.setPath(root, 'directory', 0o700)
   }
 
   async observePath(path: string) {
     this.maybeFail(`observe:${path}`)
     this.calls.push(`observe:${path}`)
     const kind = this.pathKinds.get(path)
-    return kind ? { kind, mode: this.pathModes.get(path) ?? 0 } : { kind: 'absent' as const }
+    return kind
+      ? {
+          kind,
+          mode: this.pathModes.get(path) ?? 0,
+          ownedByCurrentUser: this.pathOwners.get(path) ?? false,
+          identity: this.requireIdentity(path)
+        }
+      : { kind: 'absent' as const }
   }
 
-  async makeDirectoryExclusive(path: string, mode: number): Promise<void> {
+  async makeDirectoryExclusive(
+    path: string,
+    mode: number,
+    expectedParent: CodexLabPathIdentity
+  ): Promise<CodexLabExistingPathObservation> {
     this.maybeFail(`mkdir:${path}`)
     this.calls.push(`mkdir:${path}:${mode.toString(8)}`)
     if (this.pathKinds.has(path)) {
       throw new Error(`already exists: ${path}`)
     }
-    this.pathKinds.set(path, 'directory')
-    this.pathModes.set(path, mode)
+    this.assertParent(path, expectedParent)
+    this.setPath(path, 'directory', mode)
+    return this.requireObservation(path)
   }
 
-  async writeFileExclusive(path: string, contents: string, mode: number): Promise<void> {
+  async writeFileExclusive(
+    path: string,
+    contents: string,
+    mode: number,
+    expectedParent: CodexLabPathIdentity
+  ): Promise<CodexLabExistingPathObservation> {
     this.maybeFail(`write:${path}`)
     this.calls.push(`write:${path}:${mode.toString(8)}`)
     if (this.pathKinds.has(path)) {
       throw new Error(`already exists: ${path}`)
     }
-    this.pathKinds.set(path, 'file')
-    this.pathModes.set(path, mode)
+    this.assertParent(path, expectedParent)
+    this.setPath(path, 'file', mode)
     this.fileContents.set(path, contents)
+    return this.requireObservation(path)
   }
 
-  async sha256File(path: string): Promise<string> {
+  async sha256File(path: string, expectedFile: CodexLabPathIdentity): Promise<string> {
     this.maybeFail(`sha256:${path}`)
     this.calls.push(`sha256:${path}`)
+    if (!this.sameIdentity(this.requireIdentity(path), expectedFile)) {
+      throw new Error(`identity changed: ${path}`)
+    }
     if (this.configDigestOverride) {
       return this.configDigestOverride
     }
@@ -165,13 +194,23 @@ export class FakeCodexLabHost implements CodexLabHost {
     return { evidence: `terminated ${processId}` }
   }
 
-  async removeTree(path: string) {
+  async removeTree(
+    path: string,
+    expectedRoot: CodexLabPathIdentity,
+    expectedParent: CodexLabPathIdentity
+  ) {
     this.maybeFail('remove-tree')
     this.calls.push(`remove-tree:${path}`)
+    this.assertParent(path, expectedParent)
+    if (!this.sameIdentity(this.requireIdentity(path), expectedRoot)) {
+      throw new Error(`identity changed: ${path}`)
+    }
     for (const existing of this.pathKinds.keys()) {
       if (existing === path || existing.startsWith(`${path}/`)) {
         this.pathKinds.delete(existing)
         this.pathModes.delete(existing)
+        this.pathOwners.delete(existing)
+        this.pathIdentities.delete(existing)
         this.fileContents.delete(existing)
       }
     }
@@ -186,5 +225,49 @@ export class FakeCodexLabHost implements CodexLabHost {
     if (this.failOperations.has(operation) || this.failOperations.has(operation.split(':')[0])) {
       throw new Error(`fake host failure: ${operation}`)
     }
+  }
+
+  private setPath(
+    path: string,
+    kind: 'directory' | 'file' | 'other',
+    mode: number,
+    ownedByCurrentUser = true
+  ): void {
+    this.pathKinds.set(path, kind)
+    this.pathModes.set(path, mode)
+    this.pathOwners.set(path, ownedByCurrentUser)
+    this.pathIdentities.set(path, { device: 'fake-device', inode: `${this.nextInode}` })
+    this.nextInode += 1
+  }
+
+  private requireIdentity(path: string): CodexLabPathIdentity {
+    const identity = this.pathIdentities.get(path)
+    if (!identity) {
+      throw new Error(`missing fake identity: ${path}`)
+    }
+    return identity
+  }
+
+  private requireObservation(path: string): CodexLabExistingPathObservation {
+    const kind = this.pathKinds.get(path)
+    if (!kind) {
+      throw new Error(`missing fake path: ${path}`)
+    }
+    return {
+      kind,
+      mode: this.pathModes.get(path) ?? 0,
+      ownedByCurrentUser: this.pathOwners.get(path) ?? false,
+      identity: this.requireIdentity(path)
+    }
+  }
+
+  private assertParent(path: string, expected: CodexLabPathIdentity): void {
+    if (!this.sameIdentity(this.requireIdentity(dirname(path)), expected)) {
+      throw new Error(`parent identity changed: ${path}`)
+    }
+  }
+
+  private sameIdentity(left: CodexLabPathIdentity, right: CodexLabPathIdentity): boolean {
+    return left.device === right.device && left.inode === right.inode
   }
 }

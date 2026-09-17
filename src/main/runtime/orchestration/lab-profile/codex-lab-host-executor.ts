@@ -2,6 +2,11 @@ import { dirname, join } from 'node:path'
 import type { SealedCodexLabLaunchPlan } from './codex-lab-launch-contract'
 import { assertSealedCodexLabLaunchPlan } from './codex-sealed-launch-plan'
 import {
+  prepareCodexLabRuntimeLayout,
+  removeCodexLabRuntimeLayout,
+  type CodexLabRuntimeLayoutRollback
+} from './codex-lab-runtime-layout'
+import {
   CODEX_LAB_ACTUAL_HOST_GAPS,
   buildExpectedCodexLabEffectivePolicy,
   buildExpectedCodexLabRuntimeObservations,
@@ -60,71 +65,27 @@ function sameEvidence(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
-async function assertSecureLayout(
-  host: CodexLabPreparationHost,
-  paths: Readonly<{
-    dispatchRoot: string
-    codexHome: string
-    fakeHome: string
-    configPath: string
-  }>
-): Promise<void> {
-  const expected = [
-    [paths.dispatchRoot, 'directory', 0o700],
-    [paths.codexHome, 'directory', 0o700],
-    [paths.fakeHome, 'directory', 0o700],
-    [paths.configPath, 'file', 0o600]
-  ] as const
-  for (const [path, kind, mode] of expected) {
-    const observed = await host.observePath(path)
-    if (observed.kind !== kind || observed.mode !== mode) {
-      throw new HostExecutionRefusal('layout_verification_failed')
-    }
-  }
+function layoutRollbackEvidence(
+  rollback: readonly CodexLabRuntimeLayoutRollback[]
+): readonly CodexLabRollbackEvidence[] {
+  return rollback.map((step, index) => ({ ...step, order: index + 1 }))
 }
 
-async function removeCreatedDispatchRoot(args: {
-  host: Pick<CodexLabPreparationHost, 'removeTree'>
-  dispatchRoot: string
-  createdRoot: boolean
-}): Promise<readonly CodexLabRollbackEvidence[]> {
-  if (!args.createdRoot) {
-    return []
-  }
-  try {
-    const removed = await args.host.removeTree(args.dispatchRoot)
-    return [
-      {
-        order: 1,
-        action: 'remove_dispatch_root',
-        status: 'succeeded',
-        evidence: removed.evidence
-      }
-    ]
-  } catch (error) {
-    return [
-      {
-        order: 1,
-        action: 'remove_dispatch_root',
-        status: 'failed',
-        evidence: errorMessage(error)
-      }
-    ]
-  }
+async function removePreparedLayout(
+  host: Pick<CodexLabPreparationHost, 'removeTree'>,
+  prepared: PreparedCodexLabHostPlan
+): Promise<readonly CodexLabRollbackEvidence[]> {
+  return layoutRollbackEvidence(await removeCodexLabRuntimeLayout(prepared, host))
 }
 
 async function rollbackAcquiredProvider(args: {
   host: CodexLabProviderAttestationHost
-  dispatchRoot: string
+  prepared: PreparedCodexLabHostPlan
   processId: string
 }): Promise<readonly CodexLabRollbackEvidence[]> {
   try {
     const terminated = await args.host.terminateProcess(args.processId)
-    const rootRollback = await removeCreatedDispatchRoot({
-      host: args.host,
-      dispatchRoot: args.dispatchRoot,
-      createdRoot: true
-    })
+    const rootRollback = await removePreparedLayout(args.host, args.prepared)
     return [
       {
         order: 1,
@@ -195,8 +156,14 @@ function preparationMatchesPlan(
     prepared.schemaVersion === 1 &&
     prepared.dispatchId === plan.dispatchId &&
     prepared.dispatchRoot === dispatchRoot &&
+    prepared.codexHome === plan.runtimePaths.codexHome &&
+    prepared.fakeHome === plan.runtimePaths.fakeHome &&
     prepared.configPath === join(plan.runtimePaths.codexHome, 'config.toml') &&
     prepared.configSha256 === plan.receiptInputs.configSha256 &&
+    prepared.dispatchRootIdentity.device.length > 0 &&
+    prepared.dispatchRootIdentity.inode.length > 0 &&
+    prepared.dispatchesRootIdentity.device.length > 0 &&
+    prepared.dispatchesRootIdentity.inode.length > 0 &&
     sameEvidence(prepared.effectivePolicy, buildExpectedCodexLabEffectivePolicy(plan))
   )
 }
@@ -206,38 +173,29 @@ export async function prepareSealedCodexLabHostPlan(
   host: CodexLabPreparationHost
 ): Promise<CodexLabHostPreparationResult> {
   let stage: CodexLabHostExecutionStage = 'validate_plan'
-  let createdRoot = false
   let effectivePolicy: CodexLabEffectivePolicyObservation = {
     state: 'unverified',
     reason: 'effective policy not observed'
   }
   const observations = unverifiedRuntime('runtime boundaries not observed')
-  const dispatchRoot = dirname(plan.runtimePaths.codexHome)
-  const configPath = join(plan.runtimePaths.codexHome, 'config.toml')
+  let preparedLayout: PreparedCodexLabHostPlan | undefined
   try {
-    assertSealedCodexLabLaunchPlan(plan)
-    stage = 'freshness'
-    if ((await host.observePath(dispatchRoot)).kind !== 'absent') {
-      throw new HostExecutionRefusal('dispatch_root_not_fresh')
+    const layout = await prepareCodexLabRuntimeLayout(plan, host)
+    if (!layout.ok) {
+      return hostFailure({
+        stage: layout.stage,
+        reason: layout.reason,
+        error: new Error(layout.message),
+        effectivePolicy,
+        observations,
+        rollback: layoutRollbackEvidence(layout.rollback)
+      })
     }
-    stage = 'create_layout'
-    await host.makeDirectoryExclusive(dispatchRoot, 0o700)
-    createdRoot = true
-    await host.makeDirectoryExclusive(plan.runtimePaths.codexHome, 0o700)
-    await host.makeDirectoryExclusive(plan.runtimePaths.fakeHome, 0o700)
-    stage = 'write_config'
-    await host.writeFileExclusive(configPath, plan.configToml, 0o600)
-    stage = 'verify_layout'
-    await assertSecureLayout(host, {
-      dispatchRoot,
-      codexHome: plan.runtimePaths.codexHome,
-      fakeHome: plan.runtimePaths.fakeHome,
-      configPath
-    })
-    stage = 'verify_config_digest'
-    if ((await host.sha256File(configPath)) !== plan.receiptInputs.configSha256) {
-      throw new HostExecutionRefusal('config_digest_mismatch')
+    preparedLayout = {
+      ...layout.prepared,
+      effectivePolicy: buildExpectedCodexLabEffectivePolicy(plan)
     }
+    const configPath = layout.prepared.configPath
     stage = 'probe_effective_policy'
     effectivePolicy = await host.probeEffectivePolicy({
       executable: plan.executable,
@@ -258,19 +216,12 @@ export async function prepareSealedCodexLabHostPlan(
     const verifiedPolicy: VerifiedCodexLabEffectivePolicyObservation = effectivePolicy
     return {
       ok: true,
-      prepared: {
-        schemaVersion: 1,
-        dispatchId: plan.dispatchId,
-        dispatchRoot,
-        configPath,
-        configSha256: plan.receiptInputs.configSha256,
-        effectivePolicy: verifiedPolicy
-      },
+      prepared: { ...preparedLayout, effectivePolicy: verifiedPolicy },
       effectivePolicy: verifiedPolicy,
       rollback: []
     }
   } catch (error) {
-    const rollback = await removeCreatedDispatchRoot({ host, dispatchRoot, createdRoot })
+    const rollback = preparedLayout ? await removePreparedLayout(host, preparedLayout) : []
     return hostFailure({
       stage,
       reason:
@@ -344,13 +295,9 @@ export async function attestSealedCodexLabProviderAcquisition(
     }
   } catch (error) {
     const rollback = providerIdentityValid
-      ? await rollbackAcquiredProvider({ host, dispatchRoot: prepared.dispatchRoot, processId })
+      ? await rollbackAcquiredProvider({ host, prepared, processId })
       : preparationValidated
-        ? await removeCreatedDispatchRoot({
-            host,
-            dispatchRoot: prepared.dispatchRoot,
-            createdRoot: true
-          })
+        ? await removePreparedLayout(host, prepared)
         : []
     return hostFailure({
       stage,
@@ -389,11 +336,7 @@ export async function executeSealedCodexLabHostPlan(
       host
     )
   } catch (error) {
-    const rollback = await removeCreatedDispatchRoot({
-      host,
-      dispatchRoot: preparation.prepared.dispatchRoot,
-      createdRoot: true
-    })
+    const rollback = await removePreparedLayout(host, preparation.prepared)
     return hostFailure({
       stage,
       reason: 'host_operation_failed',
