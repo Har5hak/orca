@@ -24,6 +24,7 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
 const DISPATCH_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const LOCAL_WORKTREE_IDENTITY_PATTERN = /^wt2:local:[A-Za-z0-9][A-Za-z0-9._-]*$/
+const LAB_GATEWAY_CREDENTIAL_PATTERN = /^lgw1_[A-Za-z0-9_-]{43}$/
 const FORBIDDEN_ENV_PREFIXES = [
   'ANTHROPIC_',
   'AWS_',
@@ -78,7 +79,9 @@ export function buildSealedCodexLabLaunchPlan(
       inherited: Object.freeze({}),
       injected: Object.freeze({
         CODEX_HOME: runtimePaths.codexHome,
-        HOME: runtimePaths.fakeHome
+        HOME: runtimePaths.fakeHome,
+        ORCA_LAB_GATEWAY_SOCKET: facts.gateway.socketPath,
+        ORCA_LAB_GATEWAY_CREDENTIAL: facts.gateway.credential
       })
     }),
     runtimePaths,
@@ -106,9 +109,13 @@ export function assertSealedCodexLabLaunchPlan(plan: SealedCodexLabLaunchPlan): 
   if (
     plan.environment.ambientAllowlist.length !== 0 ||
     Object.keys(plan.environment.inherited).length !== 0 ||
+    typeof plan.environment.injected.ORCA_LAB_GATEWAY_CREDENTIAL !== 'string' ||
+    !LAB_GATEWAY_CREDENTIAL_PATTERN.test(plan.environment.injected.ORCA_LAB_GATEWAY_CREDENTIAL) ||
     !sameStringRecord(plan.environment.injected, {
       CODEX_HOME: plan.runtimePaths.codexHome,
-      HOME: plan.runtimePaths.fakeHome
+      HOME: plan.runtimePaths.fakeHome,
+      ORCA_LAB_GATEWAY_SOCKET: plan.gatewaySocketPath,
+      ORCA_LAB_GATEWAY_CREDENTIAL: plan.environment.injected.ORCA_LAB_GATEWAY_CREDENTIAL
     })
   ) {
     refuse('launch_plan_policy_broadened', 'environment')
@@ -139,6 +146,7 @@ export function assertSealedCodexLabLaunchPlan(plan: SealedCodexLabLaunchPlan): 
     loginMethod: 'chatgpt',
     subscriptionStatus: 'active-workspace',
     gatewaySocketPathSha256: sha256(plan.gatewaySocketPath),
+    gatewayAccessSha256: sha256(plan.environment.injected.ORCA_LAB_GATEWAY_CREDENTIAL),
     configSha256: sha256(plan.configToml),
     argvSha256: sha256(plan.argv.join('\0'))
   }
@@ -169,7 +177,8 @@ function validateGateway(facts: CodexLabLaunchFacts): void {
   const expectedDispatchRoot = join(facts.dispatch.runtimeRoot, 'dispatches', facts.dispatch.id)
   if (
     !isCanonicalAbsolutePath(facts.gateway.socketPath) ||
-    dirname(facts.gateway.socketPath) !== expectedDispatchRoot
+    dirname(facts.gateway.socketPath) !== expectedDispatchRoot ||
+    !LAB_GATEWAY_CREDENTIAL_PATTERN.test(facts.gateway.credential)
   ) {
     refuse('gateway_invalid', 'gateway.socketPath')
   }
@@ -283,6 +292,7 @@ function buildReceiptInputs(
     loginMethod: 'chatgpt',
     subscriptionStatus: 'active-workspace',
     gatewaySocketPathSha256: sha256(facts.gateway.socketPath),
+    gatewayAccessSha256: sha256(facts.gateway.credential),
     configSha256: sha256(configToml),
     argvSha256: sha256(argv.join('\0'))
   })

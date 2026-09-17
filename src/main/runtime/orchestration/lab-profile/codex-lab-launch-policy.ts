@@ -6,6 +6,7 @@ export const DISABLED_CODEX_LAB_FEATURES = [
   'computer_use',
   'enable_mcp_apps',
   'hooks',
+  'image_generation',
   'in_app_browser',
   'multi_agent',
   'multi_agent_v2',
@@ -15,6 +16,10 @@ export const DISABLED_CODEX_LAB_FEATURES = [
   'remote_plugin',
   'skill_mcp_dependency_install',
   'skill_search',
+  'tool_call_mcp_elicitation',
+  'tool_suggest',
+  'auth_elicitation',
+  'view_image',
   'workspace_dependencies'
 ] as const
 
@@ -75,7 +80,7 @@ export function renderCodexLabConfig(args: {
     'web_search = false',
     '',
     '[features]',
-    'network_proxy = false',
+    'network_proxy = true',
     ...featureLines,
     '',
     `[permissions.${CODEX_LAB_PERMISSION_PROFILE_ID}]`,
@@ -95,8 +100,9 @@ export function renderCodexLabConfig(args: {
     '"." = "read"',
     '',
     `[permissions.${CODEX_LAB_PERMISSION_PROFILE_ID}.network]`,
-    'enabled = false',
+    'enabled = true',
     'allow_local_binding = false',
+    'allow_upstream_proxy = false',
     'dangerously_allow_all_unix_sockets = false',
     '',
     `[permissions.${CODEX_LAB_PERMISSION_PROFILE_ID}.network.unix_sockets]`,
@@ -105,6 +111,12 @@ export function renderCodexLabConfig(args: {
     '[mcp_servers]',
     '',
     '[hooks]',
+    '',
+    '[skills]',
+    'include_instructions = false',
+    '',
+    '[skills.bundled]',
+    'enabled = false',
     ''
   ].join('\n')
 }

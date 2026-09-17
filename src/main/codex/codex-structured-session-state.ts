@@ -28,6 +28,7 @@ export type CodexStructuredLaunch = {
   permissionPolicy?: CodexStructuredPermissionPolicy
   env?: Record<string, string>
   environmentMode?: CodexAppServerEnvironmentMode
+  workerAccessMode?: 'orca-cli' | 'lab-gateway'
 }
 
 export type CodexStructuredSessionEvent =

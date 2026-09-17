@@ -76,25 +76,50 @@ describe('buildCodexStructuredChildEnvironment', () => {
   it('does not inherit ambient secrets for an exact laboratory launch', () => {
     vi.stubEnv('OPENAI_API_KEY', 'forbidden')
     vi.stubEnv('HTTP_PROXY', 'forbidden')
-    const env = buildCodexStructuredChildEnvironment(
-      {
-        command: '/opt/codex',
-        args: ['app-server'],
-        cwd: '/lab/worktree',
-        codexHome: '/lab/codex-home',
-        resumeThreadId: null,
-        env: { HOME: '/lab/fake-home' },
-        environmentMode: 'exact'
-      },
-      'spawn-token',
-      'session-not-a-worker'
-    )
-
-    expect(env).toEqual({
-      CODEX_HOME: '/lab/codex-home',
-      HOME: '/lab/fake-home',
-      [CODEX_SPAWN_TOKEN_ENV]: 'spawn-token',
-      [ORCA_STRUCTURED_SESSION_ENV]: '1'
+    const sessionId = 'b1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d'
+    const handle = mintStructuredWorkerHandle()
+    structuredWorkerIdentities.register({
+      handle,
+      sessionId,
+      agent: 'codex',
+      paneKey: mintStructuredWorkerPaneKey(sessionId),
+      processIncarnation: structuredWorkerProcessIncarnation(sessionId),
+      worktreeId: 'lab-worktree',
+      hostScope: { kind: 'local', hostId: 'local' }
     })
+    try {
+      const env = buildCodexStructuredChildEnvironment(
+        {
+          command: '/opt/codex',
+          args: ['app-server'],
+          cwd: '/lab/worktree',
+          codexHome: '/lab/codex-home',
+          resumeThreadId: null,
+          env: {
+            CODEX_HOME: '/lab/codex-home',
+            HOME: '/lab/fake-home',
+            ORCA_LAB_GATEWAY_SOCKET: '/lab/dispatch/gateway.sock',
+            ORCA_LAB_GATEWAY_CREDENTIAL: 'gateway-secret'
+          },
+          environmentMode: 'exact',
+          workerAccessMode: 'lab-gateway'
+        },
+        'spawn-token',
+        sessionId
+      )
+
+      expect(env).toEqual({
+        CODEX_HOME: '/lab/codex-home',
+        HOME: '/lab/fake-home',
+        ORCA_LAB_GATEWAY_SOCKET: '/lab/dispatch/gateway.sock',
+        ORCA_LAB_GATEWAY_CREDENTIAL: 'gateway-secret',
+        [CODEX_SPAWN_TOKEN_ENV]: 'spawn-token'
+      })
+      expect(env.ORCA_TERMINAL_HANDLE).toBeUndefined()
+      expect(env.ORCA_CLI_COMMAND).toBeUndefined()
+      expect(env[ORCA_STRUCTURED_SESSION_ENV]).toBeUndefined()
+    } finally {
+      structuredWorkerIdentities.forget(handle)
+    }
   })
 })

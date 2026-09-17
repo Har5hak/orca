@@ -30,7 +30,8 @@ export function testCodexLabStructuredLaunchBinding() {
       disposable: true
     },
     gateway: {
-      socketPath: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-structured/gateway.sock'
+      socketPath: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-structured/gateway.sock',
+      credential: `lgw1_${'g'.repeat(43)}`
     },
     binary: {
       path: '/Applications/ChatGPT.app/Contents/Resources/codex',

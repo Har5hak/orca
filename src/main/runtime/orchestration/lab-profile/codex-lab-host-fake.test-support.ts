@@ -41,7 +41,8 @@ export function sealedHostPlan(): SealedCodexLabLaunchPlan {
       disposable: true
     },
     gateway: {
-      socketPath: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-host-1/gateway.sock'
+      socketPath: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-host-1/gateway.sock',
+      credential: `lgw1_${'g'.repeat(43)}`
     },
     binary: {
       path: '/Applications/ChatGPT.app/Contents/Resources/codex',

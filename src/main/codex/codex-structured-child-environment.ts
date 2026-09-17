@@ -7,6 +7,13 @@ export function buildCodexStructuredChildEnvironment(
   spawnToken: string,
   sessionId: string
 ): Record<string, string> {
+  if (launch.workerAccessMode === 'lab-gateway') {
+    return {
+      ...launch.env,
+      ...(launch.codexHome ? { CODEX_HOME: launch.codexHome } : {}),
+      [CODEX_SPAWN_TOKEN_ENV]: spawnToken
+    }
+  }
   return {
     // Only a dispatched structured worker gets the orchestration identity and the Orca CLI on
     // PATH; an ordinary chat session's env passes through untouched.

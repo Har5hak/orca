@@ -55,6 +55,7 @@ export type CodexLabLaunchFacts = Readonly<{
   }>
   gateway: Readonly<{
     socketPath: string
+    credential: string
   }>
   binary: Readonly<{
     path: string
@@ -98,6 +99,7 @@ export type CodexLabReceiptInputs = Readonly<{
   loginMethod: 'chatgpt'
   subscriptionStatus: 'active-workspace'
   gatewaySocketPathSha256: string
+  gatewayAccessSha256: string
   configSha256: string
   argvSha256: string
 }>

@@ -7,6 +7,7 @@ import {
 } from './codex-sealed-launch-plan'
 
 const SHA256_A = 'a'.repeat(64)
+const GATEWAY_CREDENTIAL = `lgw1_${'g'.repeat(43)}`
 
 function facts(): CodexLabLaunchFacts {
   return {
@@ -28,7 +29,8 @@ function facts(): CodexLabLaunchFacts {
       disposable: true
     },
     gateway: {
-      socketPath: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-canary-1/gateway.sock'
+      socketPath: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-canary-1/gateway.sock',
+      credential: GATEWAY_CREDENTIAL
     },
     binary: {
       path: '/Applications/ChatGPT.app/Contents/Resources/codex',
@@ -67,7 +69,10 @@ describe('sealed Codex laboratory launch plan', () => {
       inherited: {},
       injected: {
         CODEX_HOME: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-canary-1/codex-home',
-        HOME: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-canary-1/fake-home'
+        HOME: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-canary-1/fake-home',
+        ORCA_LAB_GATEWAY_SOCKET:
+          '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-canary-1/gateway.sock',
+        ORCA_LAB_GATEWAY_CREDENTIAL: GATEWAY_CREDENTIAL
       }
     })
     expect(plan.configToml).toContain('approval_policy = "never"')
@@ -83,7 +88,9 @@ describe('sealed Codex laboratory launch plan', () => {
     )
     expect(plan.configToml).toContain('"." = "read"')
     expect(plan.configToml).toContain('[permissions.orca-lab-readonly-v1.network]')
-    expect(plan.configToml).toContain('enabled = false')
+    expect(plan.configToml).toContain('network_proxy = true')
+    expect(plan.configToml).toContain('enabled = true')
+    expect(plan.configToml).toContain('allow_upstream_proxy = false')
     expect(plan.configToml).toContain('[permissions.orca-lab-readonly-v1.network.unix_sockets]')
     expect(plan.configToml).toContain(
       '"/private/tmp/orca-lab/runtime/dispatches/dispatch-757-canary-1/gateway.sock" = "allow"'
@@ -101,6 +108,13 @@ describe('sealed Codex laboratory launch plan', () => {
     expect(plan.configToml).toContain('multi_agent = false')
     expect(plan.configToml).toContain('plugins = false')
     expect(plan.configToml).toContain('computer_use = false')
+    expect(plan.configToml).toContain('image_generation = false')
+    expect(plan.configToml).toContain('view_image = false')
+    expect(plan.configToml).toContain('tool_suggest = false')
+    expect(plan.configToml).toContain('auth_elicitation = false')
+    expect(plan.configToml).toContain('tool_call_mcp_elicitation = false')
+    expect(plan.configToml).toContain('[skills]\ninclude_instructions = false')
+    expect(plan.configToml).toContain('[skills.bundled]\nenabled = false')
     expect(plan.configToml).toContain('[mcp_servers]')
     expect(plan.configToml).toContain('[hooks]')
     expect(plan.unverifiedBoundaries).toEqual([
@@ -130,11 +144,13 @@ describe('sealed Codex laboratory launch plan', () => {
       subscriptionStatus: 'active-workspace'
     })
     expect(first.receiptInputs.gatewaySocketPathSha256).toMatch(/^[a-f0-9]{64}$/)
+    expect(first.receiptInputs.gatewayAccessSha256).toMatch(/^[a-f0-9]{64}$/)
     expect(first.receiptInputs.configSha256).toMatch(/^[a-f0-9]{64}$/)
     expect(first.receiptInputs.argvSha256).toMatch(/^[a-f0-9]{64}$/)
     expect(JSON.stringify(first.receiptInputs)).not.toContain(
       '018f47a2-9d72-7cc1-b046-7a2868411f42'
     )
+    expect(JSON.stringify(first.receiptInputs)).not.toContain(GATEWAY_CREDENTIAL)
     expect(JSON.stringify(first.receiptInputs)).not.toMatch(/token|secret|credential/i)
   })
 
@@ -190,6 +206,7 @@ describe('sealed Codex laboratory launch plan', () => {
     ['linux', { platform: 'linux' }],
     ['relative binary', { binary: { ...facts().binary, path: 'bin/codex' } }],
     ['unpinned binary', { binary: { ...facts().binary, observedSha256: 'b'.repeat(64) } }],
+    ['invalid gateway credential', { gateway: { ...facts().gateway, credential: 'guessable' } }],
     [
       'unavailable keyring',
       { authentication: { ...facts().authentication, keyringAvailable: false } }
@@ -263,6 +280,23 @@ describe('sealed Codex laboratory launch plan', () => {
         environment: {
           ...plan.environment,
           injected: { ...plan.environment.injected, OPENAI_API_KEY: 'sk-not-real' }
+        }
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        data: expect.objectContaining({ reason: 'launch_plan_policy_broadened' })
+      })
+    )
+
+    expect(() =>
+      assertSealedCodexLabLaunchPlan({
+        ...plan,
+        environment: {
+          ...plan.environment,
+          injected: {
+            ...plan.environment.injected,
+            ORCA_LAB_GATEWAY_CREDENTIAL: `lgw1_${'h'.repeat(43)}`
+          }
         }
       })
     ).toThrowError(

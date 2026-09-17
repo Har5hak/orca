@@ -88,9 +88,12 @@ describe('structured Codex lab launch resolution', () => {
         resumeThreadId: null,
         env: {
           CODEX_HOME: binding.plan.runtimePaths.codexHome,
-          HOME: binding.plan.runtimePaths.fakeHome
+          HOME: binding.plan.runtimePaths.fakeHome,
+          ORCA_LAB_GATEWAY_SOCKET: binding.plan.gatewaySocketPath,
+          ORCA_LAB_GATEWAY_CREDENTIAL: binding.plan.environment.injected.ORCA_LAB_GATEWAY_CREDENTIAL
         },
         environmentMode: 'exact',
+        workerAccessMode: 'lab-gateway',
         permissionPolicy: {
           approvalPolicy: 'never',
           permissions: 'orca-lab-readonly-v1',

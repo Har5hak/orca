@@ -139,6 +139,7 @@ function resolveCodexLabStructuredLaunch(
     resumeThreadId: null,
     env: { ...plan.environment.injected },
     environmentMode: 'exact',
+    workerAccessMode: 'lab-gateway',
     permissionPolicy: {
       approvalPolicy: 'never',
       permissions: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID,
