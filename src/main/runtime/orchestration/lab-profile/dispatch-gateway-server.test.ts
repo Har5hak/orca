@@ -143,6 +143,38 @@ describe.skipIf(process.platform === 'win32')('per-Dispatch laboratory gateway s
     expect(invokeRpc).toHaveBeenCalledTimes(1)
   })
 
+  it('accepts worker.done once and refuses replay before another upstream invocation', async () => {
+    const done = request('worker.done', { outcome: 'succeeded', subject: 'done' })
+
+    await expect(sendFrame(done)).resolves.toMatchObject({ ok: true })
+    await expect(sendFrame(done)).resolves.toMatchObject(failure('worker_done_already_accepted'))
+
+    expect(resolveLifecycle).toHaveBeenCalledOnce()
+    expect(invokeRpc).toHaveBeenCalledOnce()
+  })
+
+  it('serializes concurrent worker.done requests at the in-memory policy boundary', async () => {
+    const done = request('worker.done', { outcome: 'succeeded', subject: 'done' })
+
+    const responses = await Promise.all([sendFrame(done), sendFrame(done)])
+    const refusals = responses.filter((response) => response.ok === false)
+
+    expect(responses.filter((response) => response.ok === true)).toHaveLength(1)
+    expect(refusals).toHaveLength(1)
+    expect(refusals[0]).toMatchObject(failure('worker_done_already_accepted'))
+    expect(invokeRpc).toHaveBeenCalledOnce()
+  })
+
+  it('keeps worker.done terminal when the upstream outcome is unknown', async () => {
+    const done = request('worker.done', { outcome: 'succeeded', subject: 'done' })
+    invokeRpc.mockRejectedValueOnce(new Error('injected upstream loss'))
+
+    await expect(sendFrame(done)).resolves.toMatchObject(failure('upstream_failed'))
+    await expect(sendFrame(done)).resolves.toMatchObject(failure('worker_done_already_accepted'))
+
+    expect(invokeRpc).toHaveBeenCalledOnce()
+  })
+
   it.each(canonicalRefusalCases())(
     'refuses canonical lifecycle state: %s',
     async (_label, state, reason) => {

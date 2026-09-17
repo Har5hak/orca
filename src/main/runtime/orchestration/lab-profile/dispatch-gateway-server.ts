@@ -72,7 +72,7 @@ export type LabDispatchGatewayServerOptions = Readonly<{
 export class LabDispatchGatewayServer {
   private readonly transport: UnixSocketTransport
   private readonly options: LabDispatchGatewayServerOptions
-  private readonly policy: LabGatewayPolicy
+  private policy: LabGatewayPolicy
   private receipt: LabGatewayServerReceipt | null = null
 
   constructor(options: LabDispatchGatewayServerOptions) {
@@ -123,7 +123,7 @@ export class LabDispatchGatewayServer {
       return this.failure(parsed.id, parsed.reason, parsed.field)
     }
 
-    const admission = admitLabGatewayRequest(this.policy, parsed.parsed.request)
+    let admission = admitLabGatewayRequest(this.policy, parsed.parsed.request)
     if (!admission.ok) {
       this.recordAudit(parsed.parsed.id, 'rejected', 'refused', admission.refusal.reason)
       return this.failure(parsed.parsed.id, admission.refusal.reason, admission.refusal.field)
@@ -144,6 +144,15 @@ export class LabDispatchGatewayServer {
       )
       return this.failure(parsed.parsed.id, lifecycleRefusal)
     }
+
+    // A blocking lifecycle lookup lets another request advance the one-shot policy. Re-admit
+    // against the current state, then consume worker.done before invoking upstream.
+    admission = admitLabGatewayRequest(this.policy, parsed.parsed.request)
+    if (!admission.ok) {
+      this.recordAudit(parsed.parsed.id, 'rejected', 'refused', admission.refusal.reason)
+      return this.failure(parsed.parsed.id, admission.refusal.reason, admission.refusal.field)
+    }
+    this.policy = admission.nextPolicy
 
     startKeepaliveForBlockingRpc(admission.rpc, context)
     const signal = context?.signal ?? new AbortController().signal
