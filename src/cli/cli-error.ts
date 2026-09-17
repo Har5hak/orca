@@ -151,10 +151,14 @@ function withAutomationOwnerConflictRecovery(response: RuntimeRpcFailure): Runti
 }
 
 function formatMessageWithNextSteps(message: string, nextSteps: readonly string[]): string {
-  if (nextSteps.length === 0) {
+  const existingLines = new Set(message.split(/\r?\n/))
+  const missingSteps = nextSteps.filter(
+    (step) => !existingLines.has(step) && !existingLines.has(`Next step: ${step}`)
+  )
+  if (missingSteps.length === 0) {
     return message
   }
-  return `${message}\n${nextSteps.map((step) => `Next step: ${step}`).join('\n')}`
+  return `${message}\n${missingSteps.map((step) => `Next step: ${step}`).join('\n')}`
 }
 
 /** Why merge: a mutation error already carries its request id, and `??` dropped the selector grammar. */
