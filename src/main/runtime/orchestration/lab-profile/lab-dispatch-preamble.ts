@@ -1,29 +1,30 @@
-import { isAbsolute, normalize } from 'node:path/posix'
 import {
   LAB_GATEWAY_ALLOWED_OPERATIONS,
   type LabGatewayOperation
 } from './dispatch-gateway-policy-contract'
 
-export const LAB_GATEWAY_CLIENT_COMMAND_CONTRACT = Object.freeze({
-  schema: 'orca.lab-dispatch-gateway-client.v1',
-  transport: 'sealed-unix-socket-environment',
-  action: 'call',
-  operationFlag: '--operation',
-  paramsFlag: '--params-json'
-} as const)
+export const LAB_DYNAMIC_TOOL_USAGE_CONTRACT = Object.freeze({
+  schema: 'orca.lab-dispatch-dynamic-tools.v1',
+  transport: 'codex-app-server-host-executed',
+  tools: Object.freeze([
+    'orca_worker_status',
+    'orca_worker_check',
+    'orca_worker_heartbeat',
+    'orca_worker_ask',
+    'orca_worker_reply_consume',
+    'orca_worker_done'
+  ] as const)
+})
 
 export type LabDispatchPreambleParams = Readonly<{
   taskSpec: string
-  // The launch host must attest this pinned binary before building the preamble.
-  gatewayClientExecutable: string
 }>
 
 type LabGatewayRecipe = Readonly<{
+  tool: (typeof LAB_DYNAMIC_TOOL_USAGE_CONTRACT.tools)[number]
   params: Readonly<Record<string, unknown>>
   comment: readonly string[]
 }>
-
-const SAFE_EXECUTABLE_PATTERN = /^\/(?:[A-Za-z0-9._@+-]+\/)*[A-Za-z0-9._@+-]+$/u
 
 const RESTRICTED_TASK_PATTERNS = [
   /\bdcap_[A-Za-z0-9_-]+\b/u,
@@ -37,23 +38,28 @@ const RESTRICTED_TASK_PATTERNS = [
   /\bescalation\b/iu,
   /--operation\b/iu,
   /--worktree(?:=|\s+)(?:current|active)\b/iu,
-  /\b(?:run-create|task-create|worker-start|worker-stop|handoff)\b/iu
+  /\b(?:run-create|task-create|worker-start|worker-stop|handoff)\b/iu,
+  /\borca_worker_[a-z_]+\b/iu
 ] as const
 
 const RECIPE_BY_OPERATION: Readonly<Record<LabGatewayOperation, LabGatewayRecipe>> = Object.freeze({
   'worker.status': {
+    tool: 'orca_worker_status',
     params: {},
     comment: ['Read the status of this bound Dispatch.']
   },
   'worker.check': {
+    tool: 'orca_worker_check',
     params: { wait: false },
     comment: ['Read coordinator follow-ups at each natural checkpoint and before completion.']
   },
   'worker.heartbeat': {
+    tool: 'orca_worker_heartbeat',
     params: { subject: 'alive', body: '<short phase>' },
     comment: ['Report liveness every five minutes while actively working.']
   },
   'worker.ask': {
+    tool: 'orca_worker_ask',
     params: {
       question: '<question>',
       options: ['<option-a>', '<option-b>'],
@@ -62,10 +68,12 @@ const RECIPE_BY_OPERATION: Readonly<Record<LabGatewayOperation, LabGatewayRecipe
     comment: ['Ask the coordinator and wait for its reply.']
   },
   'worker.reply.consume': {
+    tool: 'orca_worker_reply_consume',
     params: { questionId: '<question-id>', timeoutMs: 600_000 },
     comment: ['Resume the same question after a timeout or disconnect; never create a duplicate.']
   },
   'worker.done': {
+    tool: 'orca_worker_done',
     params: {
       outcome: 'succeeded',
       subject: '<short status>',
@@ -79,54 +87,34 @@ const RECIPE_BY_OPERATION: Readonly<Record<LabGatewayOperation, LabGatewayRecipe
 })
 
 export function buildLabDispatchPreamble(params: LabDispatchPreambleParams): string {
-  assertGatewayClientExecutable(params.gatewayClientExecutable)
   assertRestrictedTaskSpec(params.taskSpec)
 
-  const commands = LAB_GATEWAY_ALLOWED_OPERATIONS.map((operation) =>
-    renderRecipe(params.gatewayClientExecutable, operation, RECIPE_BY_OPERATION[operation])
+  const tools = LAB_GATEWAY_ALLOWED_OPERATIONS.map((operation) =>
+    renderRecipe(RECIPE_BY_OPERATION[operation])
   ).join('\n\n')
 
   return `You are a supervised Codex laboratory worker. Complete only the task below.
 
-All Orca communication goes through the sealed per-Dispatch gateway client. The client resolves
-its locked Unix-socket channel from the launch environment and supplies the bound lifecycle
-identity itself. Replace angle-bracket placeholders with real values. Do not add identity or
-authentication fields, and do not invoke operations that are not listed here.
+All Orca communication goes through the six native tools below. Orca executes them on the host;
+the shell receives no gateway endpoint, credential or lifecycle identity. Replace angle-bracket
+placeholders with real values. Do not add identity or authentication fields, do not call Orca
+from the shell, and do not invoke tools that are not listed here.
 
-=== LAB GATEWAY COMMANDS ===
+=== LAB DISPATCH TOOLS ===
 
-\`\`\`sh
-${commands}
-\`\`\`
+${tools}
 
-After a successful worker.done response, return to an idle prompt and take no further action for
+After a successful orca_worker_done response, return to an idle prompt and take no further action for
 this task. A failed or refused response is not completion; report the exact refusal through the
-same allowed gateway when possible.
+same allowed host tool when possible.
 
 === TASK ===
 ${params.taskSpec}`
 }
 
-function renderRecipe(
-  executable: string,
-  operation: LabGatewayOperation,
-  recipe: LabGatewayRecipe
-): string {
-  const comments = recipe.comment.map((line) => `  # ${line}`).join('\n')
-  const contract = LAB_GATEWAY_CLIENT_COMMAND_CONTRACT
-  return `${comments}
-  ${executable} ${contract.action} ${contract.operationFlag} ${operation} ${contract.paramsFlag} '${JSON.stringify(recipe.params)}'`
-}
-
-function assertGatewayClientExecutable(executable: string): void {
-  if (
-    !SAFE_EXECUTABLE_PATTERN.test(executable) ||
-    !isAbsolute(executable) ||
-    normalize(executable) !== executable ||
-    /\b(?:dcap|lgw1|term)_[A-Za-z0-9_-]+\b/u.test(executable)
-  ) {
-    throw new Error('Laboratory gateway client must be one normalized absolute executable token')
-  }
+function renderRecipe(recipe: LabGatewayRecipe): string {
+  const comments = recipe.comment.map((line) => `  ${line}`).join('\n')
+  return `- \`${recipe.tool}(${JSON.stringify(recipe.params)})\`\n${comments}`
 }
 
 function assertRestrictedTaskSpec(taskSpec: string): void {

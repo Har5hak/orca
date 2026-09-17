@@ -1,41 +1,49 @@
 import { describe, expect, it } from 'vitest'
+import { CODEX_LAB_DYNAMIC_TOOL_BINDINGS } from '../../../codex/codex-lab-dynamic-tool-contract'
 import { LAB_GATEWAY_ALLOWED_OPERATIONS } from './dispatch-gateway-policy-contract'
-import {
-  LAB_GATEWAY_CLIENT_COMMAND_CONTRACT,
-  buildLabDispatchPreamble
-} from './lab-dispatch-preamble'
+import { LAB_DYNAMIC_TOOL_USAGE_CONTRACT, buildLabDispatchPreamble } from './lab-dispatch-preamble'
 
-const CLIENT = '/private/tmp/orca-lab/runtime/bin/orca-lab-gateway'
 const TASK = 'Inspect the supplied fixture and report whether its title is present.'
 
-function build(taskSpec: string = TASK, gatewayClientExecutable: string = CLIENT): string {
-  return buildLabDispatchPreamble({ taskSpec, gatewayClientExecutable })
+function build(taskSpec: string = TASK): string {
+  return buildLabDispatchPreamble({ taskSpec })
 }
 
-function renderedOperations(preamble: string): string[] {
-  return Array.from(preamble.matchAll(/--operation ([a-z.]+)/gu), (match) => match[1])
+function renderedTools(preamble: string): string[] {
+  return Array.from(preamble.matchAll(/`(orca_worker_[a-z_]+)\(/gu), (match) => match[1])
 }
 
 describe('TASK-757 restricted laboratory Dispatch preamble', () => {
-  it('renders only the six policy operations through one deterministic client contract', () => {
+  it('renders only the six host-executed dynamic tools', () => {
     const preamble = build()
 
-    expect(renderedOperations(preamble)).toEqual([...LAB_GATEWAY_ALLOWED_OPERATIONS])
-    expect(preamble.match(/\/orca-lab-gateway call --operation /gu)).toHaveLength(6)
-    expect(LAB_GATEWAY_CLIENT_COMMAND_CONTRACT).toEqual({
-      schema: 'orca.lab-dispatch-gateway-client.v1',
-      transport: 'sealed-unix-socket-environment',
-      action: 'call',
-      operationFlag: '--operation',
-      paramsFlag: '--params-json'
+    expect(renderedTools(preamble)).toEqual([...LAB_DYNAMIC_TOOL_USAGE_CONTRACT.tools])
+    expect(CODEX_LAB_DYNAMIC_TOOL_BINDINGS.map(({ name }) => name)).toEqual([
+      ...LAB_DYNAMIC_TOOL_USAGE_CONTRACT.tools
+    ])
+    expect(CODEX_LAB_DYNAMIC_TOOL_BINDINGS.map(({ operation }) => operation)).toEqual([
+      ...LAB_GATEWAY_ALLOWED_OPERATIONS
+    ])
+    expect(LAB_DYNAMIC_TOOL_USAGE_CONTRACT).toEqual({
+      schema: 'orca.lab-dispatch-dynamic-tools.v1',
+      transport: 'codex-app-server-host-executed',
+      tools: [
+        'orca_worker_status',
+        'orca_worker_check',
+        'orca_worker_heartbeat',
+        'orca_worker_ask',
+        'orca_worker_reply_consume',
+        'orca_worker_done'
+      ]
     })
-    expect(Object.isFrozen(LAB_GATEWAY_CLIENT_COMMAND_CONTRACT)).toBe(true)
+    expect(Object.isFrozen(LAB_DYNAMIC_TOOL_USAGE_CONTRACT)).toBe(true)
+    expect(Object.isFrozen(LAB_DYNAMIC_TOOL_USAGE_CONTRACT.tools)).toBe(true)
   })
 
-  it('leaves lifecycle identity and all credentials to the sealed Unix-socket client', () => {
+  it('keeps lifecycle identity, gateway endpoint and credentials out of the worker text', () => {
     const preamble = build()
 
-    expect(preamble).toContain('locked Unix-socket channel')
+    expect(preamble).toContain('Orca executes them on the host')
     expect(preamble).not.toMatch(/\bdcap_[A-Za-z0-9_-]+\b/u)
     expect(preamble).not.toMatch(/\blgw1_[A-Za-z0-9_-]+\b/u)
     expect(preamble).not.toMatch(/\bterm_[A-Za-z0-9_-]+\b/u)
@@ -44,6 +52,7 @@ describe('TASK-757 restricted laboratory Dispatch preamble', () => {
       /authToken|runtimeToken|sharedToken|dispatchCapability|orchestrationCapability/u
     )
     expect(preamble).not.toMatch(/ORCA_(?:TERMINAL_HANDLE|CLI_COMMAND|LAB_GATEWAY_)/u)
+    expect(preamble).not.toMatch(/Unix-socket|gateway\.sock|\/orca-lab-gateway/iu)
   })
 
   it('does not advertise any generic or elevated Orca control surface', () => {
@@ -62,12 +71,12 @@ describe('TASK-757 restricted laboratory Dispatch preamble', () => {
   it('renders typed parameters without caller-selected lifecycle fields', () => {
     const preamble = build()
 
-    expect(preamble).toContain(`--operation worker.check --params-json '{"wait":false}'`)
+    expect(preamble).toContain('`orca_worker_check({"wait":false})`')
     expect(preamble).toContain(
-      `--operation worker.ask --params-json '{"question":"<question>","options":["<option-a>","<option-b>"],"timeoutMs":600000}'`
+      '`orca_worker_ask({"question":"<question>","options":["<option-a>","<option-b>"],"timeoutMs":600000})`'
     )
     expect(preamble).toContain(
-      `--operation worker.done --params-json '{"outcome":"succeeded","subject":"<short status>","body":"<three-sentence summary>"}'`
+      '`orca_worker_done({"outcome":"succeeded","subject":"<short status>","body":"<three-sentence summary>"})`'
     )
     expect(preamble).toContain(`=== TASK ===\n${TASK}`)
   })
@@ -88,21 +97,9 @@ describe('TASK-757 restricted laboratory Dispatch preamble', () => {
     'Invoke --operation orchestration.run.',
     'Use --worktree current.',
     'Run worker-start.',
+    'Call orca_worker_done directly.',
     'Contains\u0000NUL.'
   ])('refuses task text that would advertise a bypass: %j', (taskSpec) => {
     expect(() => build(taskSpec)).toThrow(/task specification/u)
-  })
-
-  it.each([
-    '',
-    'orca-lab-gateway',
-    '/private/tmp/orca-lab/../escape/orca-lab-gateway',
-    '/private/tmp/orca lab/orca-lab-gateway',
-    '/private/tmp/orca-lab/orca-lab-gateway --unsafe',
-    '/private/tmp/orca-lab/orca-lab-gateway;echo',
-    '/private/tmp/orca-lab/dcap_not_allowed/orca-lab-gateway',
-    '/private/tmp/orca-lab/orca-lab-gateway\nnext'
-  ])('refuses a non-atomic gateway client executable token: %j', (executable) => {
-    expect(() => build(TASK, executable)).toThrow(/one normalized absolute executable token/u)
   })
 })
