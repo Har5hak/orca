@@ -137,10 +137,20 @@ export async function startLocalLabWorker(args: {
     startOptions,
     profileLease: { profileId: admission.profile }
   })
+  const labRuntimeResource = Object.freeze({
+    kind: 'created_lab_runtime',
+    id: started.dispatch.id
+  })
+  const worker = db.recordWorkerStage({
+    dispatchId: started.dispatch.id,
+    stage: 'lab_runtime_planned',
+    effects: [labRuntimeResource],
+    residualResources: [labRuntimeResource]
+  })
 
   return deps.continuePreparedStart(
     Object.freeze({
-      started,
+      started: Object.freeze({ ...started, worker }),
       worktree: observed.worktree,
       observation: observed.observation,
       admission

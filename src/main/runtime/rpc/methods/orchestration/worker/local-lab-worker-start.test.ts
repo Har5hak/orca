@@ -152,6 +152,12 @@ describe('local lab worker start', () => {
     const harness = createHarness()
     const events: string[] = []
     const baseDeps = createDeps(async (prepared) => {
+      expect(JSON.parse(prepared.started.worker.effects)).toEqual([
+        { kind: 'created_lab_runtime', id: prepared.started.dispatch.id }
+      ])
+      expect(JSON.parse(prepared.started.worker.residual_resources)).toEqual([
+        { kind: 'created_lab_runtime', id: prepared.started.dispatch.id }
+      ])
       events.push('continue')
       return { dispatchId: prepared.started.dispatch.id }
     })
@@ -196,7 +202,7 @@ describe('local lab worker start', () => {
     const worker = harness.db.db
       .prepare('SELECT state, stage, start_options FROM worker_dispatches')
       .get()
-    expect(worker).toMatchObject({ state: 'starting', stage: 'accepted' })
+    expect(worker).toMatchObject({ state: 'starting', stage: 'lab_runtime_planned' })
     expect(JSON.parse(String(worker?.start_options))).toMatchObject({
       profile: { id: PROFILE_ID, adapter: ADMISSION.adapter, maxConcurrency: 1 },
       worktree: {
@@ -214,6 +220,39 @@ describe('local lab worker start', () => {
       mode: { requested: 'structured', effective: 'structured' },
       agent: 'codex'
     })
+  })
+
+  it('persists deterministic runtime cleanup intent before continuation side effects', async () => {
+    const harness = createHarness()
+    const deps = createDeps(async (prepared) => {
+      const worker = harness.db.getWorkerDispatch(prepared.started.dispatch.id)
+      if (!worker) {
+        throw new Error('lab worker row was not persisted before continuation')
+      }
+      expect(worker).toMatchObject({ state: 'starting', stage: 'lab_runtime_planned' })
+      expect(JSON.parse(worker.effects)).toEqual([
+        { kind: 'created_lab_runtime', id: prepared.started.dispatch.id }
+      ])
+      expect(JSON.parse(worker.residual_resources)).toEqual([
+        { kind: 'created_lab_runtime', id: prepared.started.dispatch.id }
+      ])
+      throw new Error('host preparation failed before root creation')
+    })
+
+    await expect(start({ harness, spec: 'durable cleanup intent', deps })).rejects.toThrow(
+      'host preparation failed before root creation'
+    )
+
+    const worker = harness.db.db
+      .prepare('SELECT state, stage, effects, residual_resources FROM worker_dispatches')
+      .get()
+    expect(worker).toMatchObject({ state: 'starting', stage: 'lab_runtime_planned' })
+    expect(JSON.parse(String(worker?.effects))).toEqual([
+      { kind: 'created_lab_runtime', id: expect.stringMatching(/^ctx_/) }
+    ])
+    expect(JSON.parse(String(worker?.residual_resources))).toEqual([
+      { kind: 'created_lab_runtime', id: expect.stringMatching(/^ctx_/) }
+    ])
   })
 
   it('refuses a nested creator before observation or database mutation', async () => {
