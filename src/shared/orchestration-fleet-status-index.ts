@@ -112,6 +112,9 @@ function statusIdentityMatchesWorker(
   if (binding.kind === 'unresolved' || identity.kind === 'unidentifiable') {
     return false
   }
+  if (worker.resource && worker.resource.ownerDispatchId !== worker.dispatchId) {
+    return false
+  }
   if (binding.kind === 'worker' && binding.dispatchId !== worker.dispatchId) {
     return false
   }

@@ -7,6 +7,7 @@ import type {
 } from '../../worker-terminal-ownership'
 import type { OrchestrationDb } from '../orchestration-db'
 import type { WorkerTerminalListingSnapshot } from './worker-terminal-listing'
+import { WORKER_TERMINAL_RESOURCE_RELATION_CTES } from './worker-terminal-resource-relations'
 
 export type WorkerTerminalStateRow = {
   dispatchId: string
@@ -50,18 +51,31 @@ export function scanWorkerTerminalStates(
   where: string[],
   values: (string | number)[]
 ): WorkerTerminalStateRow[] {
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: The type mirrors the SELECT aliases below.
   const rows = this.db
     .prepare(
-      `SELECT d.id AS dispatch_id,
-              d.rowid AS database_id,
-              COALESCE(w.state, 'unsupervised') AS worker_state,
-              COALESCE(w.agent_terminal_handle, d.assignee_handle) AS agent_terminal_handle,
-              r.id AS resource_id, r.ownership_state, r.release_state
-         FROM dispatch_contexts d
-         LEFT JOIN worker_dispatches w ON w.dispatch_id = d.id
-         LEFT JOIN worker_terminal_resources r ON r.owner_dispatch_id = d.id
-        ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
-        ORDER BY d.rowid ASC`
+      `WITH scoped_dispatches AS MATERIALIZED (
+         SELECT d.id AS dispatch_id,
+                d.rowid AS database_id,
+                COALESCE(w.state, 'unsupervised') AS worker_state,
+                COALESCE(w.agent_terminal_handle, d.assignee_handle) AS agent_terminal_handle
+           FROM dispatch_contexts d
+           LEFT JOIN worker_dispatches w ON w.dispatch_id = d.id
+          ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
+       ),
+       wanted_dispatches(dispatch_id) AS MATERIALIZED (
+         SELECT dispatch_id FROM scoped_dispatches
+       ),
+       ${WORKER_TERMINAL_RESOURCE_RELATION_CTES}
+       SELECT scoped.dispatch_id, scoped.database_id, scoped.worker_state,
+              scoped.agent_terminal_handle, resource.id AS resource_id,
+              resource.owner_dispatch_id AS resource_owner_dispatch_id,
+              resource.ownership_state, resource.release_state
+         FROM scoped_dispatches scoped
+         LEFT JOIN ranked_resource_relations relation
+           ON relation.dispatch_id = scoped.dispatch_id AND relation.relation_rank = 1
+         LEFT JOIN worker_terminal_resources resource ON resource.id = relation.resource_id
+        ORDER BY scoped.database_id ASC`
     )
     .all(...values) as {
     dispatch_id: string
@@ -69,24 +83,28 @@ export function scanWorkerTerminalStates(
     worker_state: WorkerDispatchListState
     agent_terminal_handle: string | null
     resource_id: string | null
+    resource_owner_dispatch_id: string | null
     ownership_state: WorkerTerminalOwnershipState | null
     release_state: WorkerTerminalReleaseState | null
   }[]
-  return rows.map((row) => ({
-    dispatchId: row.dispatch_id,
-    databaseId: row.database_id,
-    terminalState: deriveWorkerTerminalListState({
-      workerState: row.worker_state,
-      agentTerminalHandle: row.agent_terminal_handle,
-      resource:
-        row.resource_id === null
-          ? null
-          : {
-              ownership_state: row.ownership_state as WorkerTerminalOwnershipState,
-              release_state: row.release_state as WorkerTerminalReleaseState
-            }
-    })
-  }))
+  return rows.map((row) => {
+    return {
+      dispatchId: row.dispatch_id,
+      databaseId: row.database_id,
+      terminalState: deriveWorkerTerminalListState({
+        workerState: row.worker_state,
+        agentTerminalHandle: row.agent_terminal_handle,
+        resource:
+          row.resource_id === null
+            ? null
+            : {
+                ownership_state: row.ownership_state as WorkerTerminalOwnershipState,
+                release_state: row.release_state as WorkerTerminalReleaseState
+              },
+        isCurrentResourceOwner: row.resource_owner_dispatch_id === row.dispatch_id
+      })
+    }
+  })
 }
 
 export function countWorkerTerminalInventory(
