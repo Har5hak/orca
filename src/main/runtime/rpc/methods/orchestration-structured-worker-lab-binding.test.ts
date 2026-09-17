@@ -47,8 +47,10 @@ describe('structured worker lab binding lifecycle', () => {
     installHost()
     const binding = testCodexLabStructuredLaunchBinding()
     let sessionId = ''
+    let reservedSessionId = ''
     createSpy.mockImplementation(async (args: { envelope: { sessionId: string } }) => {
       sessionId = args.envelope.sessionId
+      expect(sessionId).toBe(reservedSessionId)
       expect(getCodexLabStructuredLaunchBinding(sessionId)).toEqual(binding)
       return { ok: true, value: { sessionId } }
     })
@@ -58,7 +60,11 @@ describe('structured worker lab binding lifecycle', () => {
       worktreeId: 'worktree-id',
       agent: 'codex',
       dispatchId: binding.dispatchId,
-      labLaunchBinding: binding,
+      beforeAttach: async (identity) => {
+        reservedSessionId = identity.sessionId
+        expect(getCodexLabStructuredLaunchBinding(identity.sessionId)).toBeUndefined()
+        return { labLaunchBinding: binding }
+      },
       onJournalActivity: () => {}
     })
     expect(createSpy).toHaveBeenCalledWith(

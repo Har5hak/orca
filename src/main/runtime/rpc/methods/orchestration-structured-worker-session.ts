@@ -48,6 +48,19 @@ type StructuredWorkerBinding = {
   disposeSubscription: () => void
 }
 
+export type StructuredWorkerBeforeAttachResult = Readonly<{
+  labLaunchBinding: CodexLabStructuredLaunchBinding
+}>
+
+/**
+ * Runs after the worker identity is registered but before any provider attach is attempted.
+ * A laboratory caller uses this boundary to persist Dispatch authority and build its host-only
+ * gateway, then returns the sealed launch binding that the sole attach must consume.
+ */
+export type StructuredWorkerBeforeAttach = (
+  identity: Readonly<StructuredWorkerIdentity>
+) => Promise<StructuredWorkerBeforeAttachResult | void>
+
 const bindingsByDispatchId = new Map<string, StructuredWorkerBinding>()
 
 export function structuredWorkerHoldId(dispatchId: string): string {
@@ -92,6 +105,8 @@ export async function createStructuredWorkerSession(args: {
   options?: Readonly<Record<string, string>>
   /** Validated, sealed launch authority for a disposable Codex laboratory dispatch. */
   labLaunchBinding?: CodexLabStructuredLaunchBinding
+  /** Optional two-phase seam; ordinary workers omit it and keep the existing single call path. */
+  beforeAttach?: StructuredWorkerBeforeAttach
   /** Retried whenever the session's journal moves, which is the structured idle edge. */
   onJournalActivity: (sessionId: string) => void
 }): Promise<{ identity: StructuredWorkerIdentity; host: StructuredAgentSessionHost }> {
@@ -119,10 +134,24 @@ export async function createStructuredWorkerSession(args: {
     hostScope: { kind: 'local', hostId: 'local' }
   })
   let created: Awaited<ReturnType<typeof createStructuredAgentSessionForWorktree>> | undefined
+  let attachAttempted = false
   try {
-    if (args.labLaunchBinding) {
-      registerCodexLabStructuredLaunchBinding(sessionId, args.labLaunchBinding)
+    const beforeAttachResult = args.beforeAttach ? await args.beforeAttach(identity) : undefined
+    const preparedLabBinding = beforeAttachResult ? beforeAttachResult.labLaunchBinding : undefined
+    if (preparedLabBinding && args.labLaunchBinding) {
+      throw new CodexLabStructuredBindingRefusal('binding_conflict')
     }
+    const labLaunchBinding = preparedLabBinding ?? args.labLaunchBinding
+    if (
+      labLaunchBinding &&
+      (args.agent !== 'codex' || labLaunchBinding.dispatchId !== args.dispatchId)
+    ) {
+      throw new CodexLabStructuredBindingRefusal('binding_invalid')
+    }
+    if (labLaunchBinding) {
+      registerCodexLabStructuredLaunchBinding(sessionId, labLaunchBinding)
+    }
+    attachAttempted = true
     created = await createStructuredAgentSessionForWorktree({
       runtime: args.runtime,
       ensureHost: async () => {
@@ -143,8 +172,8 @@ export async function createStructuredWorkerSession(args: {
       agent: args.agent,
       // Absent, the host seeds the user's saved selection — the same fallback a chat gets.
       ...(args.options ? { options: args.options } : {}),
-      ...(args.labLaunchBinding
-        ? { accountHomePathOverride: args.labLaunchBinding.plan.runtimePaths.codexHome }
+      ...(labLaunchBinding
+        ? { accountHomePathOverride: labLaunchBinding.plan.runtimePaths.codexHome }
         : {}),
       // Dispatching a worker is background work; it must not pull the surface away from the user.
       activate: false
@@ -178,7 +207,7 @@ export async function createStructuredWorkerSession(args: {
     // that no dispatch owns and that nothing else in the runtime will ever retire.
     structuredWorkerIdentities.forget(identity.handle)
     releaseCodexLabStructuredLaunchBinding(sessionId, args.dispatchId)
-    if (structuredCreateMayHaveCommitted(created)) {
+    if (attachAttempted && structuredCreateMayHaveCommitted(created)) {
       await discardStructuredWorkerSession(sessionId, args.runtime)
     }
     throw error

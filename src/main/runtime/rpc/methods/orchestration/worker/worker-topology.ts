@@ -5,7 +5,10 @@ import type { OrcaRuntimeService } from '../../../../orca-runtime'
 import type { OrchestrationDb } from '../../../../orchestration/db'
 import { OrchestrationError } from '../../../../orchestration/orchestration-error'
 import type { CodexLabStructuredLaunchBinding } from '../../../../orchestration/lab-profile/codex-lab-structured-launch-binding-registry'
-import { createStructuredWorkerSession } from '../../orchestration-structured-worker-session'
+import {
+  createStructuredWorkerSession,
+  type StructuredWorkerBeforeAttach
+} from '../../orchestration-structured-worker-session'
 
 export type WorkerEffect = {
   kind: 'worktree' | 'terminal' | 'setup' | 'dispatch_input'
@@ -101,6 +104,7 @@ export async function createStructuredWorkerSessionForWorktree(args: {
   /** `--model`/`--effort`; the session seeds them exactly as a saved selection is seeded. */
   launchPreferences?: AgentLaunchPreferences
   labLaunchBinding?: CodexLabStructuredLaunchBinding
+  beforeAttach?: StructuredWorkerBeforeAttach
   effects: WorkerEffect[]
 }): Promise<Awaited<ReturnType<typeof createStructuredWorkerSession>>> {
   if (args.agent !== 'claude' && args.agent !== 'codex') {
@@ -116,6 +120,7 @@ export async function createStructuredWorkerSessionForWorktree(args: {
     agent: args.agent,
     dispatchId: args.dispatchId,
     ...(args.labLaunchBinding ? { labLaunchBinding: args.labLaunchBinding } : {}),
+    ...(args.beforeAttach ? { beforeAttach: args.beforeAttach } : {}),
     ...(options ? { options } : {}),
     onJournalActivity: (sessionId) =>
       args.runtime.notifyStructuredSessionJournalActivity?.(sessionId)

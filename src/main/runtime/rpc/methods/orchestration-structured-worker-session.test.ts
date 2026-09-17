@@ -26,9 +26,10 @@ function installHost() {
   const hold = vi.fn(async () => {})
   const release = vi.fn()
   const dispose = vi.fn()
+  const close = vi.fn(async () => {})
   hostRef.current = {
     setSessionTabVisibility: async () => {},
-    close: async () => {},
+    close,
     deps: {
       store: {
         getRecord: () => ({
@@ -41,7 +42,7 @@ function installHost() {
     release,
     subscribe: () => dispose
   }
-  return { hold, release, dispose }
+  return { hold, release, dispose, close }
 }
 
 describe('structured worker session hold', () => {
@@ -97,6 +98,70 @@ describe('structured worker session hold', () => {
     expect(envAtSpawn?.ORCA_CLI_COMMAND).toBe('orca')
     expect(envAtSpawn?.ORCA_PANE_KEY).toBeUndefined()
     releaseStructuredWorkerSession('d_spawn')
+  })
+
+  it('exposes the registered identity before one attach and preserves that ordering', async () => {
+    installHost()
+    const timeline: string[] = []
+    const persistAuthority = vi.fn()
+    createSpy.mockImplementation(async (args: { envelope: { sessionId: string } }) => {
+      timeline.push('attach')
+      expect(persistAuthority).toHaveBeenCalledOnce()
+      return { ok: true, value: { sessionId: args.envelope.sessionId } }
+    })
+
+    const created = await createStructuredWorkerSession({
+      runtime: { ensureStructuredAgentSessionHost: async () => {} } as never,
+      worktreeId: 'wt_1',
+      agent: 'codex',
+      dispatchId: 'd_two_phase',
+      beforeAttach: async (identity) => {
+        timeline.push('authority')
+        expect(structuredWorkerIdentities.getBySessionId(identity.sessionId)).toBe(identity)
+        persistAuthority({
+          handle: identity.handle,
+          paneKey: identity.paneKey,
+          processIncarnation: identity.processIncarnation,
+          worktreeId: identity.worktreeId,
+          hostScope: identity.hostScope
+        })
+      },
+      onJournalActivity: () => {}
+    })
+
+    expect(timeline).toEqual(['authority', 'attach'])
+    expect(createSpy).toHaveBeenCalledOnce()
+    expect(persistAuthority).toHaveBeenCalledWith({
+      handle: created.identity.handle,
+      paneKey: created.identity.paneKey,
+      processIncarnation: created.identity.processIncarnation,
+      worktreeId: 'wt_1',
+      hostScope: { kind: 'local', hostId: 'local' }
+    })
+    releaseStructuredWorkerSession('d_two_phase')
+  })
+
+  it('rolls back the reservation without attach or close when pre-attach preparation fails', async () => {
+    const { close } = installHost()
+    let reservedSessionId = ''
+
+    await expect(
+      createStructuredWorkerSession({
+        runtime: { ensureStructuredAgentSessionHost: async () => {} } as never,
+        worktreeId: 'wt_1',
+        agent: 'codex',
+        dispatchId: 'd_pre_attach_fail',
+        beforeAttach: async (identity) => {
+          reservedSessionId = identity.sessionId
+          throw new Error('authority preparation failed')
+        },
+        onJournalActivity: () => {}
+      })
+    ).rejects.toThrow('authority preparation failed')
+
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(close).not.toHaveBeenCalled()
+    expect(structuredWorkerIdentities.getBySessionId(reservedSessionId)).toBeNull()
   })
 
   it('forgets the identity and discards the session when the start fails', async () => {

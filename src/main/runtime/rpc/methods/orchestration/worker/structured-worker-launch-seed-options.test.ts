@@ -52,6 +52,23 @@ describe('a structured worker seeds the dispatch launch preferences', () => {
     // seeds the user's own saved selection instead, which is what a chat would get.
     expect(await createWith(preferences)).not.toHaveProperty('options')
   })
+
+  it('forwards the pre-attach identity stage without invoking it in topology', async () => {
+    createStructuredWorkerSession.mockClear()
+    const beforeAttach = vi.fn(async () => {})
+
+    await createStructuredWorkerSessionForWorktree({
+      runtime: {} as never,
+      worktreeId: 'repo::wt',
+      agent: 'codex',
+      dispatchId: 'ctx_two_phase',
+      beforeAttach,
+      effects: []
+    })
+
+    expect(createStructuredWorkerSession.mock.calls[0]?.[0]?.beforeAttach).toBe(beforeAttach)
+    expect(beforeAttach).not.toHaveBeenCalled()
+  })
 })
 
 describe('the create the seed options land in', () => {
