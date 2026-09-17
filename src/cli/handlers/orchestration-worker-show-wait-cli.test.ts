@@ -71,4 +71,51 @@ describe('orchestration worker-show interactive wait output', () => {
 
     expect(line).toContain('Interactive wait: unknown (not evaluated)')
   })
+
+  it('sanitizes every plaintext field without changing the structured result', async () => {
+    const result = {
+      dispatch: {
+        id: 'ctx\nforged',
+        taskId: 'task\u001b[31m',
+        status: 'dispatched'
+      },
+      worker: {
+        state: 'ready\u0085hidden',
+        stage: 'dispatch\u202einput',
+        agentTerminalHandle: 'term_1'
+      },
+      projection: {
+        liveness: { verdict: 'live\u200bhidden' },
+        nextAction: { argv: ['orca\nforged', 'inspect\u001b[0m'] }
+      },
+      observation: {
+        agentWait: { reason: 'approval\u0085prompt', source: 'prompt\u202etext' }
+      }
+    }
+    callMock.mockResolvedValue(result)
+
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This test supplies the same intentionally narrow mock CommandHandler context used by the surrounding CLI contract tests.
+    await ORCHESTRATION_HANDLERS['orchestration worker-show']({
+      flags: new Map<string, string | boolean>([['dispatch', 'ctx_1']]),
+      client: { call: callMock },
+      cwd: '/tmp/repo',
+      json: true
+    } as never)
+
+    const lines = renderedLine(result).split('\n')
+    const renderedText = lines.join('')
+
+    expect(vi.mocked(printResult).mock.calls[0]?.[1]).toBe(true)
+    expect(lines).toHaveLength(4)
+    expect(renderedText).not.toContain('\u001b')
+    expect(renderedText).not.toContain('\u0085')
+    expect(renderedText).not.toContain('\u202e')
+    expect(renderedText).not.toContain('\u200b')
+    expect(lines).toEqual([
+      'ctxforged task=task[31m [readyhidden] stage=dispatchinput',
+      'Agent liveness: livehidden',
+      'Next action: orcaforged inspect[0m',
+      'Waiting on a human: approvalprompt (via prompttext)'
+    ])
+  })
 })

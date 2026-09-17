@@ -10,6 +10,7 @@ import type {
   OrchestrationWorkerReadResult,
   OrchestrationWorkerReadSource
 } from '../../../shared/orchestration-worker-output'
+import { orchestrationTerminalSafeLine } from './orchestration-terminal-line'
 import { formatWorkerRead, type LegacyWorkerReadResult } from './worker-output'
 
 export const ORCHESTRATION_WORKER_OBSERVATION_HANDLERS: Record<string, CommandHandler> = {
@@ -45,7 +46,7 @@ export const ORCHESTRATION_WORKER_OBSERVATION_HANDLERS: Record<string, CommandHa
       } else {
         lines.push('Interactive wait: none')
       }
-      return lines.join('\n')
+      return lines.map(orchestrationTerminalSafeLine).join('\n')
     })
   },
 

@@ -321,6 +321,32 @@ describe('orchestration worker-start CLI contract', () => {
     ).toMatch(/Structured Chat.*Switch it to Terminal.*orca orchestration worker-start/s)
   })
 
+  it('preserves remote failure fields in JSON while the plain formatter strips controls', async () => {
+    const receipt = {
+      taskId: 'task_1',
+      dispatchId: 'ctx_1',
+      state: 'failed',
+      failedStage: 'remote\nattach\u001b[31m',
+      lastError: 'peer\nforged\u202e error',
+      effects: [],
+      residualResources: []
+    }
+    callMock.mockResolvedValue({ result: receipt })
+
+    await invokeWorkerStart(
+      new Map<string, string | boolean>([
+        ['task', 'task_1'],
+        ['from', 'term_coord']
+      ])
+    )
+
+    expect(vi.mocked(printResult).mock.calls[0]?.[0]).toEqual({ result: receipt })
+    const formatter = vi.mocked(printResult).mock.calls[0]?.[2]
+    expect(formatter?.(receipt)).toBe(
+      'Worker ctx_1 [failed] for task_1\nremoteattach[31m: peerforged error'
+    )
+  })
+
   it('prints a reveal warning for a live background worker', async () => {
     callMock.mockResolvedValue({
       result: {
@@ -480,13 +506,12 @@ describe('orchestration worker-start CLI contract', () => {
   })
 
   it('passes opaque source-pinned cursors and explicit source selection', async () => {
-    callMock.mockResolvedValue({
-      result: {
-        dispatchId: 'ctx_1',
-        source: 'transcript',
-        transcript: { messages: [], nextCursor: 'owr1_next' }
-      }
-    })
+    const result = {
+      dispatchId: 'ctx_1',
+      source: 'transcript',
+      transcript: { messages: [], nextCursor: 'owr1_next' }
+    }
+    callMock.mockResolvedValue(result)
 
     await ORCHESTRATION_HANDLERS['orchestration worker-read']({
       flags: new Map<string, string | boolean>([
@@ -505,6 +530,7 @@ describe('orchestration worker-start CLI contract', () => {
       limit: undefined,
       source: 'transcript'
     })
+    expect(printResult).toHaveBeenCalledWith(result, true, expect.any(Function))
   })
 
   it('formats a legacy worker-list response without projection or page fields', async () => {

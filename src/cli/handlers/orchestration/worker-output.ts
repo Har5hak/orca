@@ -1,6 +1,7 @@
 import type { RuntimeTerminalRead } from '../../../shared/runtime-types'
 import type { OrchestrationWorkerReadResult } from '../../../shared/orchestration-worker-output'
 import { formatWorkerTranscriptMessage } from '../../../shared/worker-transcript-text'
+import { orchestrationTerminalSafeLine } from './orchestration-terminal-line'
 
 export type LegacyWorkerReadResult = {
   dispatchId: string
@@ -44,7 +45,7 @@ export function formatWorkerStart(value: WorkerStartReceipt): string {
   if (value.state !== 'ready') {
     lines.push(...(value.nextCommands ?? []).map((command) => `Next command: ${command}`))
   }
-  return lines.join('\n')
+  return lines.map(orchestrationTerminalSafeLine).join('\n')
 }
 
 export function formatWorkerRead(
@@ -104,7 +105,7 @@ function formatWorkerReadDetails(value: OrchestrationWorkerReadResult): string {
       : 'Continuation cursor: unavailable'
   )
   lines.push(...(value.warnings ?? []).map((warning) => `Warning: ${warning}`))
-  return lines.join('\n')
+  return lines.map(orchestrationTerminalSafeLine).join('\n')
 }
 
 export type WorkerReleaseReceipt = {
@@ -131,5 +132,5 @@ export function formatWorkerRelease(value: WorkerReleaseReceipt): string {
   if (value.recovery) {
     lines.push(value.recovery)
   }
-  return lines.join('\n')
+  return lines.map(orchestrationTerminalSafeLine).join('\n')
 }
