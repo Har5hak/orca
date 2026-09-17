@@ -6,14 +6,21 @@ import {
   buildExpectedCodexLabEffectivePolicy,
   buildExpectedCodexLabRuntimeObservations,
   digestCodexLabEvidence,
+  type AcquiredCodexLabProvider,
   type CodexLabEffectivePolicyObservation,
   type CodexLabHost,
   type CodexLabHostExecutionReason,
+  type CodexLabHostExecutionFailure,
   type CodexLabHostExecutionResult,
+  type CodexLabHostPreparationResult,
   type CodexLabHostExecutionStage,
+  type CodexLabPreparationHost,
+  type CodexLabProviderAttestationHost,
   type CodexLabRollbackEvidence,
   type CodexLabRuntimeObservations,
-  type CodexLabSpawnRequest
+  type CodexLabSpawnRequest,
+  type PreparedCodexLabHostPlan,
+  type VerifiedCodexLabEffectivePolicyObservation
 } from './codex-lab-host-executor-contract'
 
 export {
@@ -23,11 +30,16 @@ export {
   buildExpectedCodexLabRuntimeObservations
 } from './codex-lab-host-executor-contract'
 export type {
+  AcquiredCodexLabProvider,
   CodexLabEffectivePolicyObservation,
   CodexLabHost,
   CodexLabHostExecutionResult,
+  CodexLabHostPreparationResult,
+  CodexLabPreparationHost,
+  CodexLabProviderAttestationHost,
   CodexLabRuntimeObservations,
-  CodexLabSpawnRequest
+  CodexLabSpawnRequest,
+  PreparedCodexLabHostPlan
 } from './codex-lab-host-executor-contract'
 
 class HostExecutionRefusal extends Error {
@@ -49,7 +61,7 @@ function sameEvidence(left: unknown, right: unknown): boolean {
 }
 
 async function assertSecureLayout(
-  host: CodexLabHost,
+  host: CodexLabPreparationHost,
   paths: Readonly<{
     dispatchRoot: string
     codexHome: string
@@ -71,62 +83,73 @@ async function assertSecureLayout(
   }
 }
 
-async function rollbackHostExecution(args: {
-  host: CodexLabHost
+async function removeCreatedDispatchRoot(args: {
+  host: Pick<CodexLabPreparationHost, 'removeTree'>
   dispatchRoot: string
   createdRoot: boolean
-  processId?: string
 }): Promise<readonly CodexLabRollbackEvidence[]> {
-  const evidence: CodexLabRollbackEvidence[] = []
-  let terminationConfirmed = true
-  if (args.processId) {
-    try {
-      const terminated = await args.host.terminateProcess(args.processId)
-      evidence.push({
-        order: evidence.length + 1,
-        action: 'terminate_process',
-        status: 'succeeded',
-        evidence: terminated.evidence
-      })
-    } catch (error) {
-      terminationConfirmed = false
-      evidence.push({
-        order: evidence.length + 1,
-        action: 'terminate_process',
-        status: 'failed',
-        evidence: errorMessage(error)
-      })
-    }
-  }
   if (!args.createdRoot) {
-    return evidence
-  }
-  if (!terminationConfirmed) {
-    evidence.push({
-      order: evidence.length + 1,
-      action: 'remove_dispatch_root',
-      status: 'skipped',
-      evidence: 'process termination unconfirmed; root retained for containment evidence'
-    })
-    return evidence
+    return []
   }
   try {
     const removed = await args.host.removeTree(args.dispatchRoot)
-    evidence.push({
-      order: evidence.length + 1,
-      action: 'remove_dispatch_root',
-      status: 'succeeded',
-      evidence: removed.evidence
-    })
+    return [
+      {
+        order: 1,
+        action: 'remove_dispatch_root',
+        status: 'succeeded',
+        evidence: removed.evidence
+      }
+    ]
   } catch (error) {
-    evidence.push({
-      order: evidence.length + 1,
-      action: 'remove_dispatch_root',
-      status: 'failed',
-      evidence: errorMessage(error)
-    })
+    return [
+      {
+        order: 1,
+        action: 'remove_dispatch_root',
+        status: 'failed',
+        evidence: errorMessage(error)
+      }
+    ]
   }
-  return evidence
+}
+
+async function rollbackAcquiredProvider(args: {
+  host: CodexLabProviderAttestationHost
+  dispatchRoot: string
+  processId: string
+}): Promise<readonly CodexLabRollbackEvidence[]> {
+  try {
+    const terminated = await args.host.terminateProcess(args.processId)
+    const rootRollback = await removeCreatedDispatchRoot({
+      host: args.host,
+      dispatchRoot: args.dispatchRoot,
+      createdRoot: true
+    })
+    return [
+      {
+        order: 1,
+        action: 'terminate_process',
+        status: 'succeeded',
+        evidence: terminated.evidence
+      },
+      ...rootRollback.map((step) => ({ ...step, order: step.order + 1 }))
+    ]
+  } catch (error) {
+    return [
+      {
+        order: 1,
+        action: 'terminate_process',
+        status: 'failed',
+        evidence: errorMessage(error)
+      },
+      {
+        order: 2,
+        action: 'remove_dispatch_root',
+        status: 'skipped',
+        evidence: 'process termination unconfirmed; root retained for containment evidence'
+      }
+    ]
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -143,18 +166,52 @@ function spawnRequest(plan: SealedCodexLabLaunchPlan): CodexLabSpawnRequest {
   }
 }
 
-export async function executeSealedCodexLabHostPlan(
+function hostFailure(args: {
+  stage: CodexLabHostExecutionStage
+  reason: CodexLabHostExecutionReason
+  error: unknown
+  effectivePolicy: CodexLabEffectivePolicyObservation
+  observations: CodexLabRuntimeObservations
+  rollback: readonly CodexLabRollbackEvidence[]
+}): CodexLabHostExecutionFailure {
+  return {
+    ok: false,
+    stage: args.stage,
+    reason: args.reason,
+    message: errorMessage(args.error),
+    effectivePolicy: args.effectivePolicy,
+    observations: args.observations,
+    rollback: args.rollback,
+    actualHostGaps: CODEX_LAB_ACTUAL_HOST_GAPS
+  }
+}
+
+function preparationMatchesPlan(
   plan: SealedCodexLabLaunchPlan,
-  host: CodexLabHost
-): Promise<CodexLabHostExecutionResult> {
+  prepared: PreparedCodexLabHostPlan
+): boolean {
+  const dispatchRoot = dirname(plan.runtimePaths.codexHome)
+  return (
+    prepared.schemaVersion === 1 &&
+    prepared.dispatchId === plan.dispatchId &&
+    prepared.dispatchRoot === dispatchRoot &&
+    prepared.configPath === join(plan.runtimePaths.codexHome, 'config.toml') &&
+    prepared.configSha256 === plan.receiptInputs.configSha256 &&
+    sameEvidence(prepared.effectivePolicy, buildExpectedCodexLabEffectivePolicy(plan))
+  )
+}
+
+export async function prepareSealedCodexLabHostPlan(
+  plan: SealedCodexLabLaunchPlan,
+  host: CodexLabPreparationHost
+): Promise<CodexLabHostPreparationResult> {
   let stage: CodexLabHostExecutionStage = 'validate_plan'
   let createdRoot = false
-  let processId: string | undefined
   let effectivePolicy: CodexLabEffectivePolicyObservation = {
     state: 'unverified',
     reason: 'effective policy not observed'
   }
-  let observations = unverifiedRuntime('runtime boundaries not observed')
+  const observations = unverifiedRuntime('runtime boundaries not observed')
   const dispatchRoot = dirname(plan.runtimePaths.codexHome)
   const configPath = join(plan.runtimePaths.codexHome, 'config.toml')
   try {
@@ -198,17 +255,65 @@ export async function executeSealedCodexLabHostPlan(
     if (!sameEvidence(effectivePolicy, buildExpectedCodexLabEffectivePolicy(plan))) {
       throw new HostExecutionRefusal('effective_policy_mismatch')
     }
-    stage = 'spawn'
-    const spawned = await host.spawnNoShell(spawnRequest(plan))
-    if (!spawned.processId.trim()) {
-      throw new Error('host returned an empty process identity')
+    const verifiedPolicy: VerifiedCodexLabEffectivePolicyObservation = effectivePolicy
+    return {
+      ok: true,
+      prepared: {
+        schemaVersion: 1,
+        dispatchId: plan.dispatchId,
+        dispatchRoot,
+        configPath,
+        configSha256: plan.receiptInputs.configSha256,
+        effectivePolicy: verifiedPolicy
+      },
+      effectivePolicy: verifiedPolicy,
+      rollback: []
     }
-    processId = spawned.processId
+  } catch (error) {
+    const rollback = await removeCreatedDispatchRoot({ host, dispatchRoot, createdRoot })
+    return hostFailure({
+      stage,
+      reason:
+        error instanceof HostExecutionRefusal
+          ? error.reason
+          : stage === 'validate_plan'
+            ? 'plan_invalid'
+            : 'host_operation_failed',
+      error,
+      effectivePolicy,
+      observations,
+      rollback
+    })
+  }
+}
+
+export async function attestSealedCodexLabProviderAcquisition(
+  plan: SealedCodexLabLaunchPlan,
+  prepared: PreparedCodexLabHostPlan,
+  acquired: AcquiredCodexLabProvider,
+  host: CodexLabProviderAttestationHost
+): Promise<CodexLabHostExecutionResult> {
+  let stage: CodexLabHostExecutionStage = 'validate_plan'
+  let observations = unverifiedRuntime('runtime boundaries not observed')
+  const processId = acquired.processId
+  let preparationValidated = false
+  let providerIdentityValid = false
+  try {
+    assertSealedCodexLabLaunchPlan(plan)
+    stage = 'validate_acquisition'
+    if (!preparationMatchesPlan(plan, prepared)) {
+      throw new HostExecutionRefusal('preparation_mismatch')
+    }
+    preparationValidated = true
+    if (!processId.trim()) {
+      throw new HostExecutionRefusal('provider_identity_invalid')
+    }
+    providerIdentityValid = true
     stage = 'probe_runtime_boundaries'
     observations = await host.probeRuntimeBoundaries({
       processId,
-      dispatchRoot,
-      configPath,
+      dispatchRoot: prepared.dispatchRoot,
+      configPath: prepared.configPath,
       worktreePath: plan.cwd
     })
     if (Object.values(observations).some((observation) => observation.state !== 'verified')) {
@@ -216,7 +321,7 @@ export async function executeSealedCodexLabHostPlan(
     }
     const expectedObservations = buildExpectedCodexLabRuntimeObservations(
       plan,
-      dispatchRoot,
+      prepared.dispatchRoot,
       processId
     )
     if (!sameEvidence(observations, expectedObservations)) {
@@ -228,24 +333,26 @@ export async function executeSealedCodexLabHostPlan(
         schemaVersion: 1,
         dispatchId: plan.dispatchId,
         processId,
-        configPath,
-        configSha256: plan.receiptInputs.configSha256,
-        effectivePolicySha256: digestCodexLabEvidence(effectivePolicy),
+        configPath: prepared.configPath,
+        configSha256: prepared.configSha256,
+        effectivePolicySha256: digestCodexLabEvidence(prepared.effectivePolicy),
         observations,
         actualHostGaps: CODEX_LAB_ACTUAL_HOST_GAPS
       },
-      effectivePolicy,
+      effectivePolicy: prepared.effectivePolicy,
       rollback: []
     }
   } catch (error) {
-    const rollback = await rollbackHostExecution({
-      host,
-      dispatchRoot,
-      createdRoot,
-      ...(processId ? { processId } : {})
-    })
-    return {
-      ok: false,
+    const rollback = providerIdentityValid
+      ? await rollbackAcquiredProvider({ host, dispatchRoot: prepared.dispatchRoot, processId })
+      : preparationValidated
+        ? await removeCreatedDispatchRoot({
+            host,
+            dispatchRoot: prepared.dispatchRoot,
+            createdRoot: true
+          })
+        : []
+    return hostFailure({
       stage,
       reason:
         error instanceof HostExecutionRefusal
@@ -253,11 +360,47 @@ export async function executeSealedCodexLabHostPlan(
           : stage === 'validate_plan'
             ? 'plan_invalid'
             : 'host_operation_failed',
-      message: errorMessage(error),
-      effectivePolicy,
+      error,
+      effectivePolicy: prepared.effectivePolicy,
       observations,
-      rollback,
-      actualHostGaps: CODEX_LAB_ACTUAL_HOST_GAPS
+      rollback
+    })
+  }
+}
+
+export async function executeSealedCodexLabHostPlan(
+  plan: SealedCodexLabLaunchPlan,
+  host: CodexLabHost
+): Promise<CodexLabHostExecutionResult> {
+  const preparation = await prepareSealedCodexLabHostPlan(plan, host)
+  if (!preparation.ok) {
+    return preparation
+  }
+  const stage: CodexLabHostExecutionStage = 'spawn'
+  try {
+    const spawned = await host.spawnNoShell(spawnRequest(plan))
+    if (!spawned.processId.trim()) {
+      throw new Error('host returned an empty process identity')
     }
+    return attestSealedCodexLabProviderAcquisition(
+      plan,
+      preparation.prepared,
+      { processId: spawned.processId },
+      host
+    )
+  } catch (error) {
+    const rollback = await removeCreatedDispatchRoot({
+      host,
+      dispatchRoot: preparation.prepared.dispatchRoot,
+      createdRoot: true
+    })
+    return hostFailure({
+      stage,
+      reason: 'host_operation_failed',
+      error,
+      effectivePolicy: preparation.effectivePolicy,
+      observations: unverifiedRuntime('runtime boundaries not observed'),
+      rollback
+    })
   }
 }

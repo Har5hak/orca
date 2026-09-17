@@ -2,12 +2,118 @@ import { dirname } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   CODEX_LAB_ACTUAL_HOST_GAPS,
+  attestSealedCodexLabProviderAcquisition,
+  type CodexLabPreparationHost,
+  type CodexLabProviderAttestationHost,
+  prepareSealedCodexLabHostPlan,
   executeSealedCodexLabHostPlan
 } from './codex-lab-host-executor'
 import { FakeCodexLabHost, sealedHostPlan } from './codex-lab-host-fake.test-support'
 
 describe('sealed Codex laboratory host executor', () => {
-  it('creates and verifies a fresh secure layout before an exact no-shell spawn', async () => {
+  it('prepares and attests the secure layout without access to a spawn seam', async () => {
+    const plan = sealedHostPlan()
+    const host = new FakeCodexLabHost(plan)
+    const preparationHost: CodexLabPreparationHost = {
+      observePath: (path) => host.observePath(path),
+      makeDirectoryExclusive: (path, mode) => host.makeDirectoryExclusive(path, mode),
+      writeFileExclusive: (path, contents, mode) => host.writeFileExclusive(path, contents, mode),
+      sha256File: (path) => host.sha256File(path),
+      probeEffectivePolicy: (request) => host.probeEffectivePolicy(request),
+      removeTree: (path) => host.removeTree(path)
+    }
+
+    const result = await prepareSealedCodexLabHostPlan(plan, preparationHost)
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) {
+      throw new Error(result.message)
+    }
+    expect(host.calls).toEqual([
+      `observe:${dirname(plan.runtimePaths.codexHome)}`,
+      `mkdir:${dirname(plan.runtimePaths.codexHome)}:700`,
+      `mkdir:${plan.runtimePaths.codexHome}:700`,
+      `mkdir:${plan.runtimePaths.fakeHome}:700`,
+      `write:${host.configPath()}:600`,
+      `observe:${dirname(plan.runtimePaths.codexHome)}`,
+      `observe:${plan.runtimePaths.codexHome}`,
+      `observe:${plan.runtimePaths.fakeHome}`,
+      `observe:${host.configPath()}`,
+      `sha256:${host.configPath()}`,
+      'probe-effective'
+    ])
+    expect(host.spawnRequests).toEqual([])
+    expect(host.runtimeProbeRequests).toEqual([])
+    expect(host.fileContents.get(host.configPath())).toBe(plan.configToml)
+    expect(result.prepared).toMatchObject({
+      dispatchId: plan.dispatchId,
+      dispatchRoot: dirname(plan.runtimePaths.codexHome),
+      configPath: host.configPath(),
+      configSha256: plan.receiptInputs.configSha256
+    })
+  })
+
+  it('attests one supplied structured provider identity without access to a spawn seam', async () => {
+    const plan = sealedHostPlan()
+    const host = new FakeCodexLabHost(plan)
+    const preparation = await prepareSealedCodexLabHostPlan(plan, host)
+    if (!preparation.ok) {
+      throw new Error(preparation.message)
+    }
+    host.calls.length = 0
+    const attestationHost: CodexLabProviderAttestationHost = {
+      probeRuntimeBoundaries: (request) => host.probeRuntimeBoundaries(request),
+      terminateProcess: (processId) => host.terminateProcess(processId),
+      removeTree: (path) => host.removeTree(path)
+    }
+
+    const result = await attestSealedCodexLabProviderAcquisition(
+      plan,
+      preparation.prepared,
+      { processId: 'fake-process-757' },
+      attestationHost
+    )
+
+    expect(result.ok).toBe(true)
+    expect(host.calls).toEqual(['probe-runtime'])
+    expect(host.spawnRequests).toEqual([])
+    expect(host.runtimeProbeRequests).toEqual([
+      {
+        processId: 'fake-process-757',
+        dispatchRoot: dirname(plan.runtimePaths.codexHome),
+        configPath: host.configPath(),
+        worktreePath: plan.cwd
+      }
+    ])
+  })
+
+  it('refuses a mismatched preparation without probing, spawning, or deleting a path', async () => {
+    const plan = sealedHostPlan()
+    const host = new FakeCodexLabHost(plan)
+    const preparation = await prepareSealedCodexLabHostPlan(plan, host)
+    if (!preparation.ok) {
+      throw new Error(preparation.message)
+    }
+    host.calls.length = 0
+
+    const result = await attestSealedCodexLabProviderAcquisition(
+      plan,
+      { ...preparation.prepared, dispatchId: 'different-dispatch' },
+      { processId: 'fake-process-757' },
+      host
+    )
+
+    expect(result).toMatchObject({
+      ok: false,
+      stage: 'validate_acquisition',
+      reason: 'preparation_mismatch',
+      rollback: []
+    })
+    expect(host.calls).toEqual([])
+    expect(host.spawnRequests).toEqual([])
+  })
+
+  it('composes exactly one injected no-shell spawn between preparation and attestation', async () => {
     const plan = sealedHostPlan()
     const host = new FakeCodexLabHost(plan)
     const result = await executeSealedCodexLabHostPlan(plan, host)
@@ -32,6 +138,9 @@ describe('sealed Codex laboratory host executor', () => {
       'spawn',
       'probe-runtime'
     ])
+    expect(host.calls.filter((call) => call === 'spawn')).toEqual(['spawn'])
+    expect(host.calls.indexOf('probe-effective')).toBeLessThan(host.calls.indexOf('spawn'))
+    expect(host.calls.indexOf('spawn')).toBeLessThan(host.calls.indexOf('probe-runtime'))
     expect(host.fileContents.get(host.configPath())).toBe(plan.configToml)
     expect(host.effectiveProbeRequests).toEqual([
       {

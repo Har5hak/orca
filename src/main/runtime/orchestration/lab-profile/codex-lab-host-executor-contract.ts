@@ -37,8 +37,13 @@ export type CodexLabEffectivePolicyEvidence = Readonly<{
   toolEgress: 'denied'
 }>
 
+export type VerifiedCodexLabEffectivePolicyObservation = Readonly<{
+  state: 'verified'
+  evidence: CodexLabEffectivePolicyEvidence
+}>
+
 export type CodexLabEffectivePolicyObservation =
-  | Readonly<{ state: 'verified'; evidence: CodexLabEffectivePolicyEvidence }>
+  | VerifiedCodexLabEffectivePolicyObservation
   | Readonly<{ state: 'unverified'; reason: string }>
 
 export type CodexLabFilesystemEvidence = Readonly<{
@@ -100,7 +105,7 @@ export type CodexLabRuntimeProbeRequest = Readonly<{
   worktreePath: string
 }>
 
-export type CodexLabHost = {
+export type CodexLabPreparationHost = {
   observePath(path: string): Promise<CodexLabPathObservation>
   makeDirectoryExclusive(path: string, mode: number): Promise<void>
   writeFileExclusive(path: string, contents: string, mode: number): Promise<void>
@@ -108,11 +113,35 @@ export type CodexLabHost = {
   probeEffectivePolicy(
     request: CodexLabEffectivePolicyProbeRequest
   ): Promise<CodexLabEffectivePolicyObservation>
+  removeTree(path: string): Promise<Readonly<{ evidence: string }>>
+}
+
+export type CodexLabProviderSpawnHost = {
   spawnNoShell(request: CodexLabSpawnRequest): Promise<Readonly<{ processId: string }>>
+}
+
+export type CodexLabProviderAttestationHost = {
   probeRuntimeBoundaries(request: CodexLabRuntimeProbeRequest): Promise<CodexLabRuntimeObservations>
   terminateProcess(processId: string): Promise<Readonly<{ evidence: string }>>
   removeTree(path: string): Promise<Readonly<{ evidence: string }>>
 }
+
+export type CodexLabHost = CodexLabPreparationHost &
+  CodexLabProviderSpawnHost &
+  CodexLabProviderAttestationHost
+
+export type PreparedCodexLabHostPlan = Readonly<{
+  schemaVersion: 1
+  dispatchId: string
+  dispatchRoot: string
+  configPath: string
+  configSha256: string
+  effectivePolicy: VerifiedCodexLabEffectivePolicyObservation
+}>
+
+export type AcquiredCodexLabProvider = Readonly<{
+  processId: string
+}>
 
 export type CodexLabHostExecutionStage =
   | 'validate_plan'
@@ -123,6 +152,7 @@ export type CodexLabHostExecutionStage =
   | 'verify_config_digest'
   | 'probe_effective_policy'
   | 'spawn'
+  | 'validate_acquisition'
   | 'probe_runtime_boundaries'
 
 export type CodexLabHostExecutionReason =
@@ -132,6 +162,8 @@ export type CodexLabHostExecutionReason =
   | 'config_digest_mismatch'
   | 'effective_policy_unverified'
   | 'effective_policy_mismatch'
+  | 'preparation_mismatch'
+  | 'provider_identity_invalid'
   | 'runtime_observation_unverified'
   | 'runtime_observation_mismatch'
   | 'host_operation_failed'
@@ -142,6 +174,26 @@ export type CodexLabRollbackEvidence = Readonly<{
   status: 'succeeded' | 'failed' | 'skipped'
   evidence: string
 }>
+
+export type CodexLabHostExecutionFailure = Readonly<{
+  ok: false
+  stage: CodexLabHostExecutionStage
+  reason: CodexLabHostExecutionReason
+  message: string
+  effectivePolicy: CodexLabEffectivePolicyObservation
+  observations: CodexLabRuntimeObservations
+  rollback: readonly CodexLabRollbackEvidence[]
+  actualHostGaps: typeof CODEX_LAB_ACTUAL_HOST_GAPS
+}>
+
+export type CodexLabHostPreparationResult =
+  | Readonly<{
+      ok: true
+      prepared: PreparedCodexLabHostPlan
+      effectivePolicy: VerifiedCodexLabEffectivePolicyObservation
+      rollback: readonly CodexLabRollbackEvidence[]
+    }>
+  | CodexLabHostExecutionFailure
 
 export type CodexLabHostExecutionResult =
   | Readonly<{
@@ -159,20 +211,11 @@ export type CodexLabHostExecutionResult =
       effectivePolicy: CodexLabEffectivePolicyObservation
       rollback: readonly CodexLabRollbackEvidence[]
     }>
-  | Readonly<{
-      ok: false
-      stage: CodexLabHostExecutionStage
-      reason: CodexLabHostExecutionReason
-      message: string
-      effectivePolicy: CodexLabEffectivePolicyObservation
-      observations: CodexLabRuntimeObservations
-      rollback: readonly CodexLabRollbackEvidence[]
-      actualHostGaps: typeof CODEX_LAB_ACTUAL_HOST_GAPS
-    }>
+  | CodexLabHostExecutionFailure
 
 export function buildExpectedCodexLabEffectivePolicy(
   plan: SealedCodexLabLaunchPlan
-): CodexLabEffectivePolicyObservation {
+): VerifiedCodexLabEffectivePolicyObservation {
   return {
     state: 'verified',
     evidence: {
