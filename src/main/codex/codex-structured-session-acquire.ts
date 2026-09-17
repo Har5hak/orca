@@ -13,6 +13,7 @@ import { CodexSubagentExecutions } from './codex-subagent-executions'
 import { createCodexDispatchEchoes } from './codex-structured-dispatch-echo'
 import { createCodexJournalTranslator } from './codex-structured-journal-translation'
 import { openCodexAppServerConnection } from './codex-app-server-connection'
+import { guardCodexAppServerConnectionForWorkerAccess } from './codex-lab-app-server-connection-guard'
 import { codexProcessIdentity, codexProviderHandleLink } from './codex-structured-owner-identity'
 import { buildCodexStructuredChildEnvironment } from './codex-structured-child-environment'
 import { openCodexThread } from './codex-structured-thread-open'
@@ -131,7 +132,7 @@ export async function acquireCodexStructuredSession(input: {
     }
     labDynamicToolHost = launch.labDynamicToolHost
     acquisitions.assertCurrent(sessionId, attempt)
-    const connection = await open(
+    const upstreamConnection = await open(
       {
         command: launch.command,
         args: launch.args,
@@ -189,6 +190,10 @@ export async function acquireCodexStructuredSession(input: {
           }
         }
       }
+    )
+    const connection = guardCodexAppServerConnectionForWorkerAccess(
+      upstreamConnection,
+      launch.workerAccessMode
     )
     acquisition.connection = connection
     if (connection.pauseReading && connection.resumeReading) {
