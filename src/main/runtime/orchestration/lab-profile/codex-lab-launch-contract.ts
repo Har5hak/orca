@@ -124,6 +124,7 @@ export type SealedCodexLabLaunchPlan = Readonly<{
     fakeHome: string
   }>
   gatewaySocketPath: string
+  gatewayAccessSha256: string
   enforcedWorkspaceId: string
   configToml: string
   receiptInputs: CodexLabReceiptInputs

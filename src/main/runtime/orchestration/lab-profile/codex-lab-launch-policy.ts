@@ -46,7 +46,6 @@ export function renderCodexLabConfig(args: {
   codexHome: string
   fakeHome: string
   worktreePath: string
-  gatewaySocketPath: string
 }): string {
   const featureLines = [
     ...DISABLED_CODEX_LAB_FEATURES.map((feature) => `${feature} = false`),
@@ -67,7 +66,7 @@ export function renderCodexLabConfig(args: {
     '',
     '[shell_environment_policy]',
     'inherit = "none"',
-    'include_only = ["ORCA_LAB_GATEWAY_SOCKET", "ORCA_LAB_GATEWAY_CREDENTIAL"]',
+    'include_only = []',
     'ignore_default_excludes = false',
     'experimental_use_profile = false',
     '',
@@ -80,7 +79,7 @@ export function renderCodexLabConfig(args: {
     'web_search = false',
     '',
     '[features]',
-    'network_proxy = true',
+    'network_proxy = false',
     ...featureLines,
     '',
     `[permissions.${CODEX_LAB_PERMISSION_PROFILE_ID}]`,
@@ -100,13 +99,12 @@ export function renderCodexLabConfig(args: {
     '"." = "read"',
     '',
     `[permissions.${CODEX_LAB_PERMISSION_PROFILE_ID}.network]`,
-    'enabled = true',
+    'enabled = false',
     'allow_local_binding = false',
     'allow_upstream_proxy = false',
     'dangerously_allow_all_unix_sockets = false',
     '',
     `[permissions.${CODEX_LAB_PERMISSION_PROFILE_ID}.network.unix_sockets]`,
-    `${tomlString(args.gatewaySocketPath)} = "allow"`,
     '',
     '[mcp_servers]',
     '',

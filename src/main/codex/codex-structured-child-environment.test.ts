@@ -111,10 +111,11 @@ describe('buildCodexStructuredChildEnvironment', () => {
       expect(env).toEqual({
         CODEX_HOME: '/lab/codex-home',
         HOME: '/lab/fake-home',
-        ORCA_LAB_GATEWAY_SOCKET: '/lab/dispatch/gateway.sock',
-        ORCA_LAB_GATEWAY_CREDENTIAL: 'gateway-secret',
         [CODEX_SPAWN_TOKEN_ENV]: 'spawn-token'
       })
+      expect(JSON.stringify(env)).not.toContain('gateway-secret')
+      expect(env.ORCA_LAB_GATEWAY_SOCKET).toBeUndefined()
+      expect(env.ORCA_LAB_GATEWAY_CREDENTIAL).toBeUndefined()
       expect(env.ORCA_TERMINAL_HANDLE).toBeUndefined()
       expect(env.ORCA_CLI_COMMAND).toBeUndefined()
       expect(env[ORCA_STRUCTURED_SESSION_ENV]).toBeUndefined()

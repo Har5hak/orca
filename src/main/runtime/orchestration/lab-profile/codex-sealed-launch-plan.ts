@@ -62,7 +62,6 @@ export function buildSealedCodexLabLaunchPlan(
   const configToml = renderCodexLabConfig({
     workspaceId: facts.authentication.expectedWorkspaceId,
     worktreePath: facts.worktree.expectedPath,
-    gatewaySocketPath: facts.gateway.socketPath,
     ...runtimePaths
   })
   const receiptInputs = buildReceiptInputs(facts, argv, configToml)
@@ -80,13 +79,12 @@ export function buildSealedCodexLabLaunchPlan(
       inherited: Object.freeze({}),
       injected: Object.freeze({
         CODEX_HOME: runtimePaths.codexHome,
-        HOME: runtimePaths.fakeHome,
-        ORCA_LAB_GATEWAY_SOCKET: facts.gateway.socketPath,
-        ORCA_LAB_GATEWAY_CREDENTIAL: facts.gateway.credential
+        HOME: runtimePaths.fakeHome
       })
     }),
     runtimePaths,
     gatewaySocketPath: facts.gateway.socketPath,
+    gatewayAccessSha256: sha256(facts.gateway.credential),
     enforcedWorkspaceId: facts.authentication.expectedWorkspaceId,
     configToml,
     receiptInputs,
@@ -110,21 +108,17 @@ export function assertSealedCodexLabLaunchPlan(plan: SealedCodexLabLaunchPlan): 
   if (
     plan.environment.ambientAllowlist.length !== 0 ||
     Object.keys(plan.environment.inherited).length !== 0 ||
-    typeof plan.environment.injected.ORCA_LAB_GATEWAY_CREDENTIAL !== 'string' ||
-    !LAB_GATEWAY_CREDENTIAL_PATTERN.test(plan.environment.injected.ORCA_LAB_GATEWAY_CREDENTIAL) ||
     !sameStringRecord(plan.environment.injected, {
       CODEX_HOME: plan.runtimePaths.codexHome,
-      HOME: plan.runtimePaths.fakeHome,
-      ORCA_LAB_GATEWAY_SOCKET: plan.gatewaySocketPath,
-      ORCA_LAB_GATEWAY_CREDENTIAL: plan.environment.injected.ORCA_LAB_GATEWAY_CREDENTIAL
-    })
+      HOME: plan.runtimePaths.fakeHome
+    }) ||
+    !SHA256_PATTERN.test(plan.gatewayAccessSha256)
   ) {
     refuse('launch_plan_policy_broadened', 'environment')
   }
   const expectedConfig = renderCodexLabConfig({
     workspaceId: plan.enforcedWorkspaceId,
     worktreePath: plan.cwd,
-    gatewaySocketPath: plan.gatewaySocketPath,
     ...plan.runtimePaths
   })
   if (plan.configToml !== expectedConfig) {
@@ -147,7 +141,7 @@ export function assertSealedCodexLabLaunchPlan(plan: SealedCodexLabLaunchPlan): 
     loginMethod: 'chatgpt',
     subscriptionStatus: 'active-workspace',
     gatewaySocketPathSha256: sha256(plan.gatewaySocketPath),
-    gatewayAccessSha256: sha256(plan.environment.injected.ORCA_LAB_GATEWAY_CREDENTIAL),
+    gatewayAccessSha256: plan.gatewayAccessSha256,
     configSha256: sha256(plan.configToml),
     argvSha256: sha256(plan.argv.join('\0'))
   }

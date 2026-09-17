@@ -9,7 +9,7 @@ export function buildCodexStructuredChildEnvironment(
 ): Record<string, string> {
   if (launch.workerAccessMode === 'lab-gateway') {
     return {
-      ...launch.env,
+      ...(launch.env?.HOME ? { HOME: launch.env.HOME } : {}),
       ...(launch.codexHome ? { CODEX_HOME: launch.codexHome } : {}),
       [CODEX_SPAWN_TOKEN_ENV]: spawnToken
     }

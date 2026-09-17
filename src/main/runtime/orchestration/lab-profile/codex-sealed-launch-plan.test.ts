@@ -69,10 +69,7 @@ describe('sealed Codex laboratory launch plan', () => {
       inherited: {},
       injected: {
         CODEX_HOME: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-canary-1/codex-home',
-        HOME: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-canary-1/fake-home',
-        ORCA_LAB_GATEWAY_SOCKET:
-          '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-canary-1/gateway.sock',
-        ORCA_LAB_GATEWAY_CREDENTIAL: GATEWAY_CREDENTIAL
+        HOME: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-canary-1/fake-home'
       }
     })
     expect(plan.configToml).toContain('approval_policy = "never"')
@@ -88,13 +85,13 @@ describe('sealed Codex laboratory launch plan', () => {
     )
     expect(plan.configToml).toContain('"." = "read"')
     expect(plan.configToml).toContain('[permissions.orca-lab-readonly-v1.network]')
-    expect(plan.configToml).toContain('network_proxy = true')
-    expect(plan.configToml).toContain('enabled = true')
+    expect(plan.configToml).toContain('network_proxy = false')
+    expect(plan.configToml).toContain('enabled = false')
     expect(plan.configToml).toContain('allow_upstream_proxy = false')
     expect(plan.configToml).toContain('[permissions.orca-lab-readonly-v1.network.unix_sockets]')
-    expect(plan.configToml).toContain(
-      '"/private/tmp/orca-lab/runtime/dispatches/dispatch-757-canary-1/gateway.sock" = "allow"'
-    )
+    expect(plan.configToml).toContain('include_only = []')
+    expect(plan.configToml).not.toContain('ORCA_LAB_GATEWAY_')
+    expect(plan.configToml).not.toContain('/gateway.sock')
     expect(plan.configToml).not.toContain('sandbox_mode')
     expect(plan.configToml).not.toContain('[sandbox_workspace_write]')
     expect(plan.configToml).toContain('cli_auth_credentials_store = "keyring"')
@@ -152,6 +149,7 @@ describe('sealed Codex laboratory launch plan', () => {
     )
     expect(JSON.stringify(first.receiptInputs)).not.toContain(GATEWAY_CREDENTIAL)
     expect(JSON.stringify(first.receiptInputs)).not.toMatch(/token|secret|credential/i)
+    expect(JSON.stringify(first)).not.toContain(GATEWAY_CREDENTIAL)
   })
 
   it.each([
