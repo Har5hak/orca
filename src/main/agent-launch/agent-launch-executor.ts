@@ -32,6 +32,10 @@ import type {
 } from '../../shared/agent-launch-intent'
 import { withoutReservedAgentCreateFields } from '../../shared/agent-launch-intent'
 import type { TuiAgent } from '../../shared/tui-agent'
+import {
+  workspaceKindForWorktreeId,
+  type WorkspaceLaunchKind
+} from '../../shared/workspace-launch-kind'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import { isDefinitiveAgentSessionCreateRefusal } from '../../shared/agent-session-definitive-refusal'
 import {
@@ -107,6 +111,7 @@ export async function executeAgentLaunch(
   const preflight = decideAgentLaunchMode({
     placement: {
       agent: intent.agent,
+      workspaceKind: launchWorkspaceKind(intent.target),
       ...(intent.reuseTerminal ? { terminal: intent.reuseTerminal.handle } : {})
     },
     settings,
@@ -279,12 +284,21 @@ function existingWorktreeId(target: AgentLaunchTarget): string {
   return target.kind === 'existing' ? target.worktree : ''
 }
 
+/**
+ * Read from the id rather than carried alongside it, so the kind cannot disagree with the workspace
+ * it describes. `worktree` here is never a caller's selector — the method resolved it to an id
+ * before building the intent — and a create always produces a git worktree.
+ */
+function launchWorkspaceKind(target: AgentLaunchTarget): WorkspaceLaunchKind {
+  return target.kind === 'existing' ? workspaceKindForWorktreeId(target.worktree) : 'git-worktree'
+}
+
 /** Prompt delivery is the caller's, not the executor's: a PTY paste is observed by whoever owns
  *  the pane, and a structured first turn is sent through the session. The executor reports the
- *  requested delivery back undelivered so a caller cannot mistake silence for delivery. */
+ *  requested delivery back as not delivered so a caller cannot mistake silence for delivery. */
 function promptReceipt(intent: AgentLaunchIntent): Pick<AgentLaunchResult, 'prompt'> {
   if (!intent.prompt) {
     return {}
   }
-  return { prompt: { delivery: intent.prompt.delivery, delivered: false } }
+  return { prompt: { delivery: intent.prompt.delivery, outcome: 'not-delivered' } }
 }

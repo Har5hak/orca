@@ -3,9 +3,9 @@
   "family": "session.markdown-save",
   "namedDeltas": [],
   "runnerVersion": 1,
-  "baseline": "97aa5ff19b19231670ab7d06d070115640bb8f41",
-  "lockfileSha256": "788c1234b38a61fc882fca292341fce6690deee9cc6695673b0575cf2c4cf571",
-  "recorderSha256": "d4fa125899cd863c03dbf96657d46b8c7d6c0ccf522b342bc4f164ed1e3becfe",
+  "baseline": "5052501588f2878224b6dfef58ac3d9eb8c8a285",
+  "lockfileSha256": "4568633356187895ccda8e2ff83245c37d5621832c69e268733733b6947971e3",
+  "recorderSha256": "1d8cf6624653d15b5b32bd2871d4d93739d4092a06f10dab24a795702422bb31",
   "adapterSha256": "42334358b5e5966001639653b553f15033f6e201d785107871fe056536f0a5e2",
   "scenarioSha256": "389c6118f3137b78e88af6b901554b0331c652063a00d8ba3119e0883ce82f25",
   "platform": "darwin",
@@ -58,38 +58,6 @@
         "value": {
           "id": "frame-1",
           "ok": true
-        }
-      }
-    },
-    "20d209219e76": {
-      "markdown": {
-        "tab-md": {
-          "baseVersion": {
-            "$rpc": "undefined"
-          },
-          "content": {
-            "$rpc": "undefined"
-          },
-          "editable": true,
-          "isDirty": false,
-          "localContent": {
-            "$rpc": "undefined"
-          },
-          "status": "ready"
-        }
-      }
-    },
-    "2853dae4d5f0": {
-      "markdown": {
-        "tab-md": {
-          "baseVersion": "v1",
-          "content": "# a",
-          "editable": true,
-          "isDirty": true,
-          "localContent": "# b",
-          "saveError": "Cannot read properties of undefined (reading 'content')",
-          "saving": false,
-          "status": "ready"
         }
       }
     },
@@ -181,20 +149,6 @@
       "name": "markdown.saveTab#1",
       "ordinal": 2,
       "json": "{\"id\":\"frame-1\",\"deviceToken\":\"recording-device\",\"method\":\"markdown.saveTab\",\"params\":{\"worktree\":\"id:workspace-1\",\"tabId\":\"tab-md\",\"baseVersion\":\"v1\",\"content\":\"# b\"}}"
-    },
-    "6808229bc6b9": {
-      "markdown": {
-        "tab-md": {
-          "baseVersion": "v1",
-          "content": "# a",
-          "editable": true,
-          "isDirty": true,
-          "localContent": "# b",
-          "saveError": "Cannot read properties of null (reading 'content')",
-          "saving": false,
-          "status": "ready"
-        }
-      }
     },
     "7194a574e16b": {
       "name": "markdown.saveTab#1",
@@ -513,6 +467,20 @@
         }
       }
     },
+    "dd571f3b0f9c": {
+      "markdown": {
+        "tab-md": {
+          "baseVersion": "v1",
+          "content": "# a",
+          "editable": true,
+          "isDirty": true,
+          "localContent": "# b",
+          "saveError": "The host sent a reply this app could not read (markdown.saveTab)",
+          "saving": false,
+          "status": "ready"
+        }
+      }
+    },
     "ea9ccdf9e7e4": {
       "name": "markdown.saveTab#1",
       "ordinal": 1,
@@ -580,7 +548,7 @@
           "settlements": {
             "save": "eb79a9b3682a"
           },
-          "state": "2853dae4d5f0",
+          "state": "dd571f3b0f9c",
           "effects": []
         }
       },
@@ -592,7 +560,7 @@
           "settlements": {
             "save": "eb79a9b3682a"
           },
-          "state": "6808229bc6b9",
+          "state": "dd571f3b0f9c",
           "effects": []
         }
       },
@@ -604,8 +572,8 @@
           "settlements": {
             "save": "eb79a9b3682a"
           },
-          "state": "20d209219e76",
-          "effects": ["807e68f28cfd"]
+          "state": "dd571f3b0f9c",
+          "effects": []
         }
       },
       {
@@ -616,8 +584,8 @@
           "settlements": {
             "save": "eb79a9b3682a"
           },
-          "state": "20d209219e76",
-          "effects": ["807e68f28cfd"]
+          "state": "dd571f3b0f9c",
+          "effects": []
         }
       },
       {
@@ -628,8 +596,8 @@
           "settlements": {
             "save": "eb79a9b3682a"
           },
-          "state": "20d209219e76",
-          "effects": ["807e68f28cfd"]
+          "state": "dd571f3b0f9c",
+          "effects": []
         }
       },
       {

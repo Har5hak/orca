@@ -3,9 +3,9 @@
   "family": "session.diff-review",
   "namedDeltas": [],
   "runnerVersion": 1,
-  "baseline": "97aa5ff19b19231670ab7d06d070115640bb8f41",
-  "lockfileSha256": "788c1234b38a61fc882fca292341fce6690deee9cc6695673b0575cf2c4cf571",
-  "recorderSha256": "d4fa125899cd863c03dbf96657d46b8c7d6c0ccf522b342bc4f164ed1e3becfe",
+  "baseline": "5052501588f2878224b6dfef58ac3d9eb8c8a285",
+  "lockfileSha256": "4568633356187895ccda8e2ff83245c37d5621832c69e268733733b6947971e3",
+  "recorderSha256": "1d8cf6624653d15b5b32bd2871d4d93739d4092a06f10dab24a795702422bb31",
   "adapterSha256": "a8016eb61915cf80a3bdeb622ee67d35be8b4b9862a75e4ef2e8f4ff8e93e7f2",
   "scenarioSha256": "538b68485a2268d311fcc7e13ff1a3e446ba4aa010bc18633af8e938a6688257",
   "platform": "darwin",
@@ -132,16 +132,6 @@
         }
       }
     },
-    "55227363ca22": {
-      "status": "rejected",
-      "startedAt": 0,
-      "settledAt": 0,
-      "error": {
-        "category": "Error",
-        "message": "Diff response was invalid",
-        "isRpcDeliveryUnknown": false
-      }
-    },
     "717bd1fbc163": {
       "branchCompare": "unloaded",
       "diff": {
@@ -150,6 +140,16 @@
         "kind": "too-large"
       },
       "snapshot": "unloaded"
+    },
+    "7753343578da": {
+      "status": "rejected",
+      "startedAt": 0,
+      "settledAt": 0,
+      "error": {
+        "category": "Error",
+        "message": "The host sent a reply this app could not read (git.diff)",
+        "isRpcDeliveryUnknown": false
+      }
     },
     "84090dfad90d": {
       "status": "fulfilled",
@@ -220,7 +220,7 @@
           "settlements": {
             "binary": "84090dfad90d",
             "too-large": "8675e0f40158",
-            "invalid": "55227363ca22"
+            "invalid": "7753343578da"
           },
           "state": "717bd1fbc163",
           "effects": []

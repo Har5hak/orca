@@ -6,6 +6,7 @@ import pg from 'pg'
 import { RELAY_REGIONS } from '@orca-cloud/relay-contract'
 import {
   emptyPostgresPoolPressureCounts,
+  isPostgresPoolConnectFailure,
   PostgresPoolPressure,
   type PostgresPoolPressureCounts
 } from './postgres-pool-pressure.js'
@@ -68,6 +69,17 @@ export interface RelayDatabase {
   close(): Promise<void>
 }
 
+// RULE - no new index and no new column on `relay_control_connection_reservations`,
+// `relay_confirm_results`, `relay_audit_events`, `relay_connection_bases`, or any other large
+// table may be added to SCHEMA or to POSTGRES_SCHEMA_MIGRATIONS. The catalog pre-check skips a
+// lock-taking statement only once the object exists, so a brand-new one reports missing on every
+// director at once and each runs a non-concurrent build over the whole table. POSTGRES_LOCK_TIMEOUT_MS
+// bounds how long that build waits for its lock, not how long it holds it. Build the index out of
+// band with CREATE INDEX CONCURRENTLY first, then add it here, where the pre-check skips it forever
+// after. relay-schema-lock-targets.test.ts pins the current list, so an addition fails CI.
+// Constraint swaps are matched by NAME in pg_constraint, never by body, because the CHECK list is
+// generated from REGION_LIST. Changing a constraint's definition under the same name therefore does
+// nothing on boot: an operator drops it, and the next boot adds the current definition back.
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS relay_invites (
   user_id TEXT NOT NULL,
@@ -636,6 +648,14 @@ export const POSTGRES_SCHEMA_MIGRATIONS = [
   `ALTER TABLE relay_region_rehome_attempts ADD COLUMN IF NOT EXISTS source_generation BIGINT NOT NULL DEFAULT 0`
 ]
 
+// The exact statement list a Postgres boot applies, in order, so the lock-target census can read
+// what production runs rather than a copy of it. The SQLite path keeps SCHEMA on its own.
+export function relayPostgresSchemaStatements(): string[] {
+  return [...SCHEMA.split(';'), ...POSTGRES_SCHEMA_MIGRATIONS]
+    .map((statement) => statement.trim())
+    .filter((statement) => statement.length > 0)
+}
+
 function postgresSql(sql: string): string {
   let index = 0
   return sql.replace(/\?/g, () => `$${++index}`)
@@ -905,13 +925,15 @@ function retryablePostgresTransactionError(error: unknown): boolean {
 }
 
 export function isRelayDatabaseTransientError(error: unknown): boolean {
-  const code = String((error as { code?: unknown }).code)
+  // Runs inside the query catch, where a thrown null or undefined would turn a
+  // database failure into a TypeError that buries it.
+  const code = String((error as { code?: unknown } | null)?.code)
   if (['40P01', '40001', '55P03', '57014', '53300', '57P03', '08001', '08006'].includes(code)) {
     return true
   }
-  return String((error as { message?: unknown }).message).includes(
-    'timeout exceeded when trying to connect'
-  )
+  // A pool that cannot hand out a client reports no SQLSTATE at all, so the
+  // acquire boundary owns that vocabulary.
+  return isPostgresPoolConnectFailure(error)
 }
 
 async function waitForPostgresRetry(random: () => number = Math.random): Promise<void> {
@@ -946,6 +968,9 @@ class PostgresDatabase implements RelayDatabase {
         error,
         phase,
         sql,
+        // Passed in rather than re-derived: the log has to say what the routes
+        // actually did, and one classifier cannot drift from itself.
+        transient: isRelayDatabaseTransientError(error),
         elapsedMs: performance.now() - startedAt,
         pool: this.pool
       })
@@ -1114,11 +1139,14 @@ async function applySchemaOnUntimedPool(
   const database = new PostgresDatabase(pool)
   try {
     await applyPostgresSchema(
-      [
-        ...SCHEMA.split(';').filter((statement) => statement.trim()),
-        ...POSTGRES_SCHEMA_MIGRATIONS
-      ],
-      async (statement) => await database.query(statement)
+      relayPostgresSchemaStatements(),
+      async (statement) => await database.query(statement),
+      // Asks the catalog whether each index or column is already there. CREATE INDEX IF NOT EXISTS
+      // and ALTER TABLE ADD COLUMN IF NOT EXISTS take their relation lock before the server
+      // evaluates the existence test, so on an already-migrated database the boot still joins the
+      // lock queue - and relation locks are granted in queue order, so every writer queues behind
+      // it. The catalog read takes no lock on the table.
+      { catalogQuery: async (sql, params) => await database.query(sql, params) }
     )
   } finally {
     await database.close().catch(() => undefined)

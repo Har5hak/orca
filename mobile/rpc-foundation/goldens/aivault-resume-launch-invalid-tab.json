@@ -3,9 +3,9 @@
   "family": "aiVault.resume-launch",
   "namedDeltas": [],
   "runnerVersion": 1,
-  "baseline": "97aa5ff19b19231670ab7d06d070115640bb8f41",
-  "lockfileSha256": "788c1234b38a61fc882fca292341fce6690deee9cc6695673b0575cf2c4cf571",
-  "recorderSha256": "d4fa125899cd863c03dbf96657d46b8c7d6c0ccf522b342bc4f164ed1e3becfe",
+  "baseline": "5052501588f2878224b6dfef58ac3d9eb8c8a285",
+  "lockfileSha256": "4568633356187895ccda8e2ff83245c37d5621832c69e268733733b6947971e3",
+  "recorderSha256": "1d8cf6624653d15b5b32bd2871d4d93739d4092a06f10dab24a795702422bb31",
   "adapterSha256": "2f43211e4084c0493bd02ec98868acf53a4c748f89a70cd9657c9c3ee87b12fb",
   "scenarioSha256": "281ccf5a082f3788ae8bf19f742ea4baf35c20c78bc91d7d91873845583e1a91",
   "platform": "darwin",
@@ -18,19 +18,19 @@
       "ordinal": 2,
       "json": "{\"id\":\"frame-1\",\"deviceToken\":\"recording-device\",\"method\":\"session.tabs.createTerminal\",\"params\":{\"worktree\":\"id:workspace-1\",\"env\":{\"ORCA_RESUME\":\"1\"},\"envToDelete\":[\"CODEX_HOME\"],\"launchAgent\":\"codex\",\"clientMutationId\":\"resume-mutation-1\",\"activate\":false,\"select\":true,\"navigation\":\"caller\"}}"
     },
-    "432332c9740e": {
-      "failure": "Created terminal response was invalid",
-      "launched": "unlaunched"
-    },
-    "681fc4d59b92": {
+    "478ad4afe83e": {
       "status": "rejected",
       "startedAt": 0,
       "settledAt": 0,
       "error": {
         "category": "Error",
-        "message": "Created terminal response was invalid",
+        "message": "The host sent a reply this app could not read (session.tabs.createTerminal)",
         "isRpcDeliveryUnknown": false
       }
+    },
+    "84a5c9365ee8": {
+      "failure": "The host sent a reply this app could not read (session.tabs.createTerminal)",
+      "launched": "unlaunched"
     },
     "8de69c55b96f": {
       "name": "session.tabs.createTerminal#1",
@@ -87,9 +87,9 @@
           "sender": ["8de69c55b96f"],
           "payloads": ["0bce25f5646d"],
           "settlements": {
-            "full": "681fc4d59b92"
+            "full": "478ad4afe83e"
           },
-          "state": "432332c9740e",
+          "state": "84a5c9365ee8",
           "effects": []
         }
       }
