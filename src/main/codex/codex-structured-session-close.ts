@@ -24,6 +24,9 @@ export function handleCodexSessionExit(input: {
     input.prompts?.clear()
     return false
   }
+  const labDynamicToolHost = session.labDynamicToolHost
+  session.labDynamicToolHost = undefined
+  labDynamicToolHost?.dispose()
   session.exitObservedAt ??= Date.now()
   const event: StructuredAgentSessionLifecycleEvent = {
     type: 'ended',

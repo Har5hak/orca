@@ -53,6 +53,11 @@ export type CodexLabDynamicToolGatewayBinding = Readonly<{
   expectedReceipt: LabGatewayServerReceipt
 }>
 
+export type CodexLabDynamicToolHostPort = Readonly<{
+  invoke: (invocation: CodexLabDynamicToolInvocation) => Promise<CodexLabDynamicToolResponse>
+  dispose: () => void
+}>
+
 type CallGateway = typeof callLabDispatchGateway
 
 /** Host-only bridge. The Codex child receives neither the gateway endpoint nor its bearer. */
@@ -79,7 +84,7 @@ export class CodexLabDynamicToolHost {
     if (this.#disposed) {
       return response(false, { ok: false, reason: 'host_disposed' })
     }
-    if (typeof invocation.callId !== 'string' || !CALL_ID_PATTERN.test(invocation.callId)) {
+    if (!isCodexLabDynamicToolCallId(invocation.callId)) {
       return response(false, { ok: false, reason: 'call_id_invalid' })
     }
     if (this.#seenCallIds.has(invocation.callId)) {
@@ -133,6 +138,10 @@ export class CodexLabDynamicToolHost {
     this.#abort.abort()
     this.#seenCallIds.clear()
   }
+}
+
+export function isCodexLabDynamicToolCallId(value: unknown): value is string {
+  return typeof value === 'string' && CALL_ID_PATTERN.test(value)
 }
 
 function response(

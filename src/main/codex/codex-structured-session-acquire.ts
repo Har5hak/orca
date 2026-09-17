@@ -77,6 +77,8 @@ export async function acquireCodexStructuredSession(input: {
   const { previousAttempt, attempt } = acquisitions.start(sessionId)
   const acquisition = attempt.window
   let unbindReadingControl: (() => void) | undefined
+  let labDynamicToolHost: CodexSession['labDynamicToolHost']
+  let labDynamicToolHostPublished = false
   let primaryThreadId =
     acquireInput.identity.providerHandle.kind === 'codex'
       ? acquireInput.identity.providerHandle.threadId
@@ -121,6 +123,13 @@ export async function acquireCodexStructuredSession(input: {
       .catch((error: unknown) => {
         throw new AgentSessionPreSpawnError(error)
       })
+    if (launch.labDynamicToolHost && launch.workerAccessMode !== 'lab-gateway') {
+      launch.labDynamicToolHost.dispose()
+      throw new AgentSessionPreSpawnError(
+        new Error('Codex laboratory dynamic tools require lab-gateway worker access')
+      )
+    }
+    labDynamicToolHost = launch.labDynamicToolHost
     acquisitions.assertCurrent(sessionId, attempt)
     const connection = await open(
       {
@@ -246,6 +255,8 @@ export async function acquireCodexStructuredSession(input: {
       historyPath: opened.historyPath,
       historyMode: opened.historyMode,
       activeTurnIds: new Set(),
+      ...(launch.workerAccessMode ? { workerAccessMode: launch.workerAccessMode } : {}),
+      ...(labDynamicToolHost ? { labDynamicToolHost } : {}),
       prompts: acquisition.prompts,
       options,
       reportedOptions: reportedCodexThreadOptions(opened),
@@ -274,6 +285,7 @@ export async function acquireCodexStructuredSession(input: {
     }
     turnCancellation.register(session)
     sessions.set(sessionId, session)
+    labDynamicToolHostPublished = true
     for (const event of acquisition.drain()) {
       event()
     }
@@ -286,6 +298,10 @@ export async function acquireCodexStructuredSession(input: {
         attempt,
         cause: error,
         dispose: () => {
+          if (!labDynamicToolHostPublished) {
+            labDynamicToolHost?.dispose()
+            labDynamicToolHost = undefined
+          }
           unbindReadingControl?.()
           translator?.dispose()
         }

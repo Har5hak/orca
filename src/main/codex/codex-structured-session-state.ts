@@ -17,6 +17,7 @@ import type { CodexTurnProcessSnapshot } from './codex-structured-turn-processes
 import type { StructuredAgentSessionLifecycleEvent } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type { CodexStructuredPermissionPolicy } from './codex-structured-permission-policy'
 import type { CodexAppServerEnvironmentMode } from './codex-app-server-environment'
+import type { CodexLabDynamicToolHostPort } from './codex-lab-dynamic-tool-host'
 
 export type CodexStructuredLaunch = {
   command: string
@@ -29,6 +30,8 @@ export type CodexStructuredLaunch = {
   env?: Record<string, string>
   environmentMode?: CodexAppServerEnvironmentMode
   workerAccessMode?: 'orca-cli' | 'lab-gateway'
+  /** Host-only Dispatch bridge. Never serialized into the provider launch environment. */
+  labDynamicToolHost?: CodexLabDynamicToolHostPort
 }
 
 export type CodexStructuredSessionEvent =
@@ -100,6 +103,9 @@ export type CodexSession = {
   historyPath: string | null
   historyMode?: 'legacy' | 'paginated'
   activeTurnIds?: Set<string>
+  workerAccessMode?: 'orca-cli' | 'lab-gateway'
+  /** Present only for a supervised laboratory session with host-held gateway authority. */
+  labDynamicToolHost?: CodexLabDynamicToolHostPort
   dispatchPending?: boolean
   prompts: CodexAcquisitionWindow['prompts']
   options: Map<string, string>
