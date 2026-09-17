@@ -4,6 +4,7 @@ import {
   type FleetDurableWorker
 } from '../../../../../../shared/orchestration-fleet-projection'
 import { resolveFleetWorkerOutcome } from '../../../../../../shared/orchestration-fleet-outcome-resolution'
+import { createFleetStatusIndex } from '../../../../../../shared/orchestration-fleet-status-index'
 import type { WorkerTerminalListState } from '../../../../orchestration/worker-terminal-ownership'
 import type { OrchestrationDb } from '../../../../orchestration/db'
 
@@ -18,34 +19,63 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function providerFromLaunchSelection(value: unknown): FleetDurableWorker['durableProvider'] {
-  if (!isRecord(value) || typeof value.agent !== 'string' || value.agent.trim() === '') {
+type DurableProviderSelection = NonNullable<FleetDurableWorker['durableProviderTruth']>['requested']
+
+function providerFromLaunchSelection(value: unknown): DurableProviderSelection {
+  if (!isRecord(value)) {
+    return null
+  }
+  const agent =
+    value.agent === null
+      ? null
+      : typeof value.agent === 'string' && value.agent.trim() !== ''
+        ? value.agent.trim()
+        : undefined
+  if (agent === undefined) {
     return null
   }
   return {
-    id: value.agent.trim(),
-    model: typeof value.model === 'string' && value.model.trim() !== '' ? value.model.trim() : null
+    id: agent,
+    model: typeof value.model === 'string' && value.model.trim() !== '' ? value.model.trim() : null,
+    effort:
+      typeof value.effort === 'string' && value.effort.trim() !== '' ? value.effort.trim() : null
   }
 }
 
-function readDurableProvider(startOptions: string | null): FleetDurableWorker['durableProvider'] {
+function readDurableProviderTruth(
+  startOptions: string | null
+): FleetDurableWorker['durableProviderTruth'] {
   if (!startOptions) {
-    return null
+    return { requested: null, effective: null, effectiveSource: null }
   }
   try {
     const parsed: unknown = JSON.parse(startOptions)
     if (!isRecord(parsed)) {
-      return null
+      return { requested: null, effective: null, effectiveSource: null }
     }
-    const launch = isRecord(parsed.launch) ? parsed.launch : null
-    const effective = providerFromLaunchSelection(launch?.effective)
-    if (effective) {
-      return effective
+    if (Object.hasOwn(parsed, 'launch')) {
+      if (!isRecord(parsed.launch)) {
+        return { requested: null, effective: null, effectiveSource: null }
+      }
+      const launch = parsed.launch
+      const requested = providerFromLaunchSelection(launch.requested)
+      const effective = providerFromLaunchSelection(launch.effective)
+      return {
+        requested,
+        effective,
+        effectiveSource: effective ? 'launch_receipt' : null
+      }
     }
     const legacy = providerFromLaunchSelection(parsed)
-    return legacy ? { id: legacy.id, model: null } : null
+    const legacyEffective =
+      typeof legacy?.id === 'string' ? { ...legacy, model: null, effort: null } : null
+    return {
+      requested: null,
+      effective: legacyEffective,
+      effectiveSource: legacyEffective ? 'legacy_start_options' : null
+    }
   } catch {
-    return null
+    return { requested: null, effective: null, effectiveSource: null }
   }
 }
 
@@ -56,6 +86,7 @@ export function projectWorkerFleet(args: {
   limit: number
   now: number
   completeProjection?: boolean
+  identityScopeComplete?: boolean
 }) {
   const workers: FleetDurableWorker[] = args.rows.map((row) => {
     return {
@@ -65,7 +96,9 @@ export function projectWorkerFleet(args: {
         workerState: row.workerState,
         dispatchStatus: row.dispatchStatus
       }),
-      durableProvider: readDurableProvider(row.startOptions),
+      durableProviderTruth: readDurableProviderTruth(row.startOptions),
+      dispatchHostScope: row.dispatchHostScope,
+      federatedEnvironmentId: row.federatedEnvironmentId,
       resource: row.resource
         ? {
             id: row.resource.id,
@@ -90,20 +123,27 @@ export function projectWorkerFleet(args: {
         workers,
         statuses: args.statuses,
         limit: args.limit,
-        now: args.now
+        now: args.now,
+        identityScopeComplete: args.identityScopeComplete
       }),
       durable
     }
   }
 
   const projections: ReturnType<typeof projectOrchestrationFleet>['workers'] = []
+  const statusIndex = createFleetStatusIndex(
+    args.statuses,
+    workers,
+    args.identityScopeComplete === true
+  )
   for (let offset = 0; offset < workers.length; offset += ORCHESTRATION_FLEET_PAGE_MAX) {
     projections.push(
       ...projectOrchestrationFleet({
         workers: workers.slice(offset, offset + ORCHESTRATION_FLEET_PAGE_MAX),
         statuses: args.statuses,
         limit: ORCHESTRATION_FLEET_PAGE_MAX,
-        now: args.now
+        now: args.now,
+        statusIndex
       }).workers
     )
   }

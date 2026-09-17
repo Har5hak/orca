@@ -120,18 +120,161 @@ describe('orchestration fleet projection', () => {
     expect(JSON.stringify(result)).not.toContain('secret transcript body')
   })
 
-  it('keeps the durable provider selection when observed status differs', () => {
+  it('prefers an identity-matched observed provider over the durable launch receipt', () => {
     const result = projectOrchestrationFleet({
       workers: [
         worker('provider', {
-          durableProvider: { id: 'claude', model: 'opus' }
+          durableProviderTruth: {
+            requested: { id: 'claude', model: 'opus', effort: 'high' },
+            effective: { id: 'claude', model: 'opus', effort: 'high' },
+            effectiveSource: 'launch_receipt'
+          }
         })
       ],
-      statuses: [status('provider', 100, { agentType: 'claude', model: 'sonnet' })],
+      statuses: [status('provider', 100, { agentType: 'codex', model: 'gpt-observed' })],
       now: 100
     })
 
+    expect(result.workers[0]?.provider).toEqual({ id: 'codex', model: 'gpt-observed' })
+    expect(result.workers[0]?.providerTruth).toEqual({
+      requested: {
+        id: 'claude',
+        model: 'opus',
+        effort: 'high',
+        source: 'launch_request'
+      },
+      effective: {
+        id: 'claude',
+        model: 'opus',
+        effort: 'high',
+        source: 'launch_receipt'
+      },
+      observed: {
+        id: 'codex',
+        model: 'gpt-observed',
+        effort: null,
+        source: 'agent_status',
+        observedAt: 100,
+        freshness: 'fresh'
+      }
+    })
+  })
+
+  it('keeps stale observed provider truth without replacing the effective provider alias', () => {
+    const observedAt = 100
+    const result = projectOrchestrationFleet({
+      workers: [
+        worker('stale-provider', {
+          durableProviderTruth: {
+            requested: { id: 'claude', model: 'opus', effort: 'high' },
+            effective: { id: 'claude', model: 'opus', effort: 'high' },
+            effectiveSource: 'launch_receipt'
+          }
+        })
+      ],
+      statuses: [
+        status('stale-provider', observedAt, {
+          agentType: 'codex',
+          model: 'gpt-observed'
+        })
+      ],
+      now: observedAt + AGENT_STATUS_STALE_AFTER_MS + 1
+    })
+
     expect(result.workers[0]?.provider).toEqual({ id: 'claude', model: 'opus' })
+    expect(result.workers[0]?.providerTruth.observed).toEqual({
+      id: 'codex',
+      model: 'gpt-observed',
+      effort: null,
+      source: 'agent_status',
+      observedAt,
+      freshness: 'stale'
+    })
+  })
+
+  it('never lets a foreign status connection relabel durable local authority', () => {
+    const result = projectOrchestrationFleet({
+      workers: [
+        worker('local-foreign', {
+          dispatchHostScope: JSON.stringify({ kind: 'local', hostId: 'local' })
+        })
+      ],
+      statuses: [
+        status('local-foreign', 100, {
+          connectionId: 'environment-foreign',
+          orchestration: {
+            taskId: 'task-local-foreign',
+            dispatchId: 'local-foreign'
+          }
+        })
+      ],
+      now: 100
+    })
+
+    expect(result.workers[0]).toMatchObject({
+      host: { kind: 'local', id: 'local' },
+      liveness: { verdict: 'unverifiable', reason: 'missing_status' }
+    })
+  })
+
+  it('projects a context-only SSH dispatch from durable Dispatch authority', () => {
+    const result = projectOrchestrationFleet({
+      workers: [
+        worker('context-ssh', {
+          dispatchHostScope: JSON.stringify({ kind: 'ssh', targetId: 'ssh-target' }),
+          resource: null
+        })
+      ],
+      statuses: [],
+      now: 100
+    })
+
+    expect(result.workers[0]).toMatchObject({
+      host: { kind: 'remote', id: 'ssh-target' },
+      liveness: { verdict: 'unverifiable', reason: 'missing_status' }
+    })
+  })
+
+  it('rejects status when durable host scope is unreadable', () => {
+    const result = projectOrchestrationFleet({
+      workers: [worker('malformed-host', { dispatchHostScope: '{not-json' })],
+      statuses: [
+        status('malformed-host', 100, {
+          orchestration: { taskId: 'task-malformed-host', dispatchId: 'malformed-host' }
+        })
+      ],
+      now: 100
+    })
+
+    expect(result.workers[0]).toMatchObject({
+      host: { kind: 'remote', id: 'unknown' },
+      liveness: { verdict: 'unverifiable', reason: 'missing_status' }
+    })
+  })
+
+  it('fences status from a different server without losing the durable federated host', () => {
+    const result = projectOrchestrationFleet({
+      workers: [
+        worker('remote-provider', {
+          federatedEnvironmentId: 'environment-windows',
+          durableProvider: { id: 'claude', model: 'opus' }
+        })
+      ],
+      statuses: [
+        status('remote-provider', 100, {
+          connectionId: 'environment-linux',
+          agentType: 'codex',
+          model: 'gpt-observed'
+        })
+      ],
+      now: 100
+    })
+
+    expect(result.workers[0]).toMatchObject({
+      host: { kind: 'remote', id: 'environment-windows' },
+      provider: { id: 'claude', model: 'opus' },
+      liveness: { verdict: 'unverifiable', reason: 'missing_status' }
+    })
   })
 
   it('keeps local folder and unsupervised rows instead of assuming git resources', () => {
@@ -200,7 +343,7 @@ describe('orchestration fleet projection', () => {
       reason: 'stale_status',
       observedAt: 1
     })
-    expect(stale.provider).toEqual({ id: 'codex', model: 'gpt-test' })
+    expect(stale.provider).toEqual({ id: 'codex', model: null })
     expect(restored.liveness).toMatchObject({
       verdict: 'unverifiable',
       reason: 'restored_unconfirmed'
@@ -278,6 +421,37 @@ describe('orchestration fleet projection', () => {
       reason: 'missing_status'
     })
     expect(result.workers[0]?.provider).toEqual({ id: 'unknown', model: null })
+  })
+
+  it('rejects exact status after terminal custody transfers to another Dispatch', () => {
+    const result = projectOrchestrationFleet({
+      workers: [
+        worker('old-owner', {
+          resource: {
+            id: 'resource-transferred',
+            ownerDispatchId: 'new-owner',
+            worktreeId: 'workspace-old-owner',
+            paneKey: 'tab-old-owner:leaf-old-owner',
+            processIncarnation: 'pty-old-owner:inc-1',
+            hostScope: JSON.stringify({ kind: 'local', hostId: 'local' }),
+            ownershipState: 'transferred',
+            releaseState: 'active',
+            updatedAt: '2026-09-17T00:00:00Z'
+          }
+        })
+      ],
+      statuses: [
+        status('old-owner', 100, {
+          orchestration: { taskId: 'task-old-owner', dispatchId: 'old-owner' }
+        })
+      ],
+      now: 100
+    })
+
+    expect(result.workers[0]).toMatchObject({
+      resource: { state: 'transferred', ownerDispatchId: 'new-owner' },
+      liveness: { verdict: 'unverifiable', reason: 'missing_status' }
+    })
   })
 
   it('accepts a reminted pane when the Dispatch and terminal handle both match', () => {
@@ -374,7 +548,8 @@ describe('orchestration fleet projection', () => {
       now: 100
     })
 
-    expect(result.workers[0]?.provider).toEqual({ id: 'codex', model: 'gpt-test' })
+    expect(result.workers[0]?.provider).toEqual({ id: 'codex', model: null })
+    expect(result.workers[0]?.providerTruth.observed?.freshness).toBe('unverifiable')
     expect(result.workers[0]?.liveness).toMatchObject({ verdict: 'unverifiable' })
   })
 

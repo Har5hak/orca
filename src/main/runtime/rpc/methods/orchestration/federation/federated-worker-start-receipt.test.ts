@@ -19,33 +19,177 @@ describe('federated worker start receipt validation', () => {
     }
   })
 
-  it('accepts additive receipt fields', () => {
-    expect(
+  it('accepts a bounded future provider while preserving additive launch fields', () => {
+    const parsed = parseRemoteFederatedWorkerStartReceipt({
+      dispatchId: 'ctx_remote',
+      state: 'outcome_unknown',
+      futureReceiptField: true,
+      launch: {
+        futureLaunchField: true,
+        requested: {
+          agent: 'future-provider-v2',
+          model: 'future-model',
+          effort: null,
+          futureSelectionField: true
+        },
+        effective: {
+          agent: 'future-provider-v2',
+          model: 'future-model',
+          effort: null,
+          futureSelectionField: true
+        }
+      }
+    })
+    expect(parsed).toMatchObject({ futureReceiptField: true })
+    expect(parsed.launch).toEqual({
+      futureLaunchField: true,
+      requested: {
+        agent: 'future-provider-v2',
+        model: 'future-model',
+        effort: null,
+        futureSelectionField: true
+      },
+      effective: {
+        agent: 'future-provider-v2',
+        model: 'future-model',
+        effort: null,
+        futureSelectionField: true
+      }
+    })
+  })
+
+  it.each([
+    ['over limit', 'x'.repeat(513)],
+    ['escape', 'codex\u001b[31m'],
+    ['OSC', 'codex\u001b]0;spoof\u0007'],
+    ['CSI', 'codex\u009b31m'],
+    ['newline', 'codex\nspoof'],
+    ['C1 control', 'codex\u0085spoof'],
+    ['bidi override', 'codex\u202espoof'],
+    ['lone high surrogate', 'codex\ud800'],
+    ['lone low surrogate', 'codex\udfff']
+  ])('rejects a terminal-unsafe %s launch field', (_name, agent) => {
+    expect(() =>
       parseRemoteFederatedWorkerStartReceipt({
         dispatchId: 'ctx_remote',
         state: 'outcome_unknown',
-        futureReceiptField: true,
         launch: {
-          futureLaunchField: true,
-          requested: {
-            agent: 'codex',
-            model: 'future-model',
-            effort: null,
-            futureSelectionField: true
-          },
-          effective: {
-            agent: 'codex',
-            model: 'future-model',
-            effort: null
-          }
+          requested: { agent, model: null, effort: null },
+          effective: null
         }
       })
-    ).toMatchObject({
-      launch: {
-        requested: { agent: 'codex', model: 'future-model', effort: null },
-        effective: { agent: 'codex', model: 'future-model', effort: null }
+    ).toThrow('invalid launch receipt')
+  })
+
+  it('rejects launch fields with surrounding whitespace instead of rewriting peer truth', () => {
+    expect(() =>
+      parseRemoteFederatedWorkerStartReceipt({
+        dispatchId: 'ctx_remote',
+        state: 'outcome_unknown',
+        launch: {
+          requested: { agent: ' codex ', model: ' gpt-test ', effort: null },
+          effective: null
+        }
+      })
+    ).toThrow('invalid launch receipt')
+  })
+
+  it('persists immutable home requested truth and additive peer effective truth', async () => {
+    const db = new OrchestrationDb(':memory:')
+    const runtime = new OrcaRuntimeService()
+    runtime.setOrchestrationDb(db)
+    databases.push(db)
+    const run = db.createRun({
+      objective: 'future provider receipt',
+      coordinatorHandle: 'term_coord',
+      coordinatorPaneKey: 'tab_coord:leaf_coord'
+    })
+    const task = db.createTask({ spec: 'remote work', runId: run.id })
+    vi.spyOn(runtime, 'resolveOrchestrationWorkerServer').mockReturnValue({
+      environmentId: 'environment_remote',
+      name: 'remote',
+      peerFingerprint: 'remote_peer',
+      pairingRevision: 73
+    })
+    vi.spyOn(runtime, 'ensureOrchestrationFederationRelay').mockImplementation(() => {})
+    vi.spyOn(runtime, 'callOrchestrationWorkerServer').mockImplementation(
+      async (_environmentId, method, params) => {
+        if (method === 'status.get') {
+          return {
+            capabilities: [
+              ORCHESTRATION_CONTRACT_RUNTIME_CAPABILITY,
+              ORCHESTRATION_FEDERATION_RUNTIME_CAPABILITY
+            ]
+          }
+        }
+        // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: The attach-start call supplies the parsed RPC input containing dispatchId.
+        const input = params as { dispatchId: string }
+        return {
+          dispatchId: input.dispatchId,
+          state: 'ready',
+          runtimeEpoch: 'remote_runtime_epoch',
+          worktreeId: 'worktree_remote',
+          terminalHandle: 'term_remote',
+          launch: {
+            futureLaunchField: true,
+            requested: {
+              agent: 'future-provider-v2',
+              model: 'future-model',
+              effort: null,
+              futureSelectionField: true
+            },
+            effective: {
+              agent: 'future-provider-v2',
+              model: 'future-model',
+              effort: null,
+              futureSelectionField: true
+            }
+          }
+        }
+      }
+    )
+
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This narrows the worker-start receipt shape under test.
+    const result = (await startFederatedWorker({
+      params: {
+        task: task.id,
+        from: 'term_coord',
+        on: 'remote',
+        worktree: 'id:worktree_remote',
+        agent: 'codex'
+      },
+      runtime,
+      db,
+      runId: run.id,
+      task,
+      orchestrationMutation: {
+        callerFingerprint: 'caller',
+        requestId: 'future_provider_launch',
+        method: 'orchestration.workerStart',
+        payloadHash: 'future_provider_payload'
+      }
+    })) as { dispatchId: string; state: string; launch: unknown }
+
+    expect(result.state).toBe('ready')
+    const persistedLaunch = JSON.parse(
+      db.getWorkerDispatch(result.dispatchId)!.start_options
+    ).launch
+    expect(persistedLaunch).toEqual({
+      futureLaunchField: true,
+      requested: {
+        agent: 'codex',
+        model: null,
+        effort: null,
+        futureSelectionField: true
+      },
+      effective: {
+        agent: 'future-provider-v2',
+        model: 'future-model',
+        effort: null,
+        futureSelectionField: true
       }
     })
+    expect(result.launch).toEqual(persistedLaunch)
   })
 
   it('marks a malformed ready receipt outcome unknown without persisting resources', async () => {
@@ -133,9 +277,9 @@ describe('federated worker start receipt validation', () => {
       }
     ],
     [
-      'unknown-agent',
+      'control-character',
       {
-        requested: { agent: 'future-provider', model: null, effort: null },
+        requested: { agent: 'codex\nspoof', model: null, effort: null },
         effective: null
       }
     ]
@@ -213,6 +357,7 @@ describe('federated worker start receipt validation', () => {
       remote_worktree_id: null,
       remote_terminal_handle: null
     })
+    expect(db.getWorkerTerminalResourceByOwner(result.dispatchId)).toBeUndefined()
   })
 
   it('does not persist a requested model when an older ready peer omits launch confirmation', async () => {
@@ -275,7 +420,7 @@ describe('federated worker start receipt validation', () => {
         payloadHash: 'legacy_payload'
       }
     })) as { dispatchId: string; launch: { effective: { model: string } | null } }
-    expect(started.launch.effective?.model).toBe('gpt-5.3-codex')
+    expect(started.launch.effective).toBeNull()
     expect(JSON.parse(db.getWorkerDispatch(started.dispatchId)!.start_options)).toMatchObject({
       launch: { effective: null }
     })
@@ -284,6 +429,16 @@ describe('federated worker start receipt validation', () => {
       ORCHESTRATION_WORKER_LIST_METHOD.params!.parse({ run: run.id }),
       { runtime }
     )
-    expect(listed.workers[0]?.projection.provider).toEqual({ id: 'cursor', model: null })
+    expect(listed.workers[0]?.projection.provider).toEqual({ id: 'unknown', model: null })
+    expect(listed.workers[0]?.projection.providerTruth).toMatchObject({
+      requested: {
+        id: 'cursor',
+        model: 'gpt-5.3-codex',
+        effort: null,
+        source: 'launch_request'
+      },
+      effective: null,
+      observed: null
+    })
   })
 })

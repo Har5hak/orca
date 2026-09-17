@@ -7,7 +7,7 @@ import {
 } from './orchestration-fleet-projection'
 import {
   parseWorkerTerminalHostScope,
-  readWorkerTerminalHostScope
+  resolveWorkerTerminalHostAuthority
 } from './worker-terminal-host-scope'
 
 /**
@@ -26,7 +26,7 @@ type HostScopeCase = {
   /** The host label with no connection id on the status row. */
   host: { kind: 'local' | 'remote'; id: string }
   /** A connection id the fence must accept as this worker's evidence. */
-  accepts: string | null
+  accepts: string | null | false
   /** A connection id the fence must reject, when the scope names a target at all. */
   rejects?: string
 }
@@ -47,8 +47,8 @@ const CASES: readonly HostScopeCase[] = [
   {
     label: 'wsl on local',
     hostScope: '{"kind":"wsl","hostId":"local"}',
-    host: { kind: 'local', id: 'local' },
-    accepts: null
+    host: { kind: 'remote', id: 'unknown' },
+    accepts: false
   },
   {
     label: 'wsl on local with a distro',
@@ -72,26 +72,26 @@ const CASES: readonly HostScopeCase[] = [
   {
     label: 'unknown remote kind',
     hostScope: '{"kind":"podman","hostId":"box"}',
-    host: { kind: 'remote', id: 'box' },
-    accepts: 'any-connection'
+    host: { kind: 'remote', id: 'unknown' },
+    accepts: false
   },
   {
     label: 'malformed scope is not local',
     hostScope: '{not json',
     host: { kind: 'remote', id: 'unknown' },
-    accepts: 'any-connection'
+    accepts: false
   },
   {
     label: 'ssh scope with an empty target id names no host',
     hostScope: '{"kind":"ssh","targetId":""}',
-    host: { kind: 'remote', id: 'ssh' },
-    accepts: 'any-connection'
+    host: { kind: 'remote', id: 'unknown' },
+    accepts: false
   },
   {
     label: 'local scope naming another host id',
     hostScope: '{"kind":"local","hostId":"other"}',
-    host: { kind: 'local', id: 'other' },
-    accepts: null
+    host: { kind: 'remote', id: 'unknown' },
+    accepts: false
   },
   {
     label: 'legacy local prefix',
@@ -160,11 +160,9 @@ function acceptsConnection(hostScope: string | null, connectionId: string | null
 describe('worker terminal host scope', () => {
   for (const testCase of CASES) {
     it(`classifies ${testCase.label} the same way in every consumer`, () => {
-      const read = readWorkerTerminalHostScope(testCase.hostScope)
+      const authority = resolveWorkerTerminalHostAuthority(null, null, testCase.hostScope)
 
-      expect(read.kind === 'local' || read.kind === 'absent' ? 'local' : 'remote').toBe(
-        testCase.host.kind
-      )
+      expect(authority.kind === 'local' ? 'local' : 'remote').toBe(testCase.host.kind)
 
       const page = projectOrchestrationFleet({
         workers: [worker(testCase.hostScope)],
@@ -175,7 +173,12 @@ describe('worker terminal host scope', () => {
 
       // The fence and the host label come from one read: a row the projection calls local
       // must not demand a remote connection id, and vice versa.
-      expect(acceptsConnection(testCase.hostScope, testCase.accepts)).toBe(true)
+      if (testCase.accepts === false) {
+        expect(acceptsConnection(testCase.hostScope, null)).toBe(false)
+        expect(acceptsConnection(testCase.hostScope, 'any-connection')).toBe(false)
+      } else {
+        expect(acceptsConnection(testCase.hostScope, testCase.accepts)).toBe(true)
+      }
       if (testCase.rejects) {
         expect(acceptsConnection(testCase.hostScope, testCase.rejects)).toBe(false)
       }
@@ -199,5 +202,38 @@ describe('worker terminal host scope', () => {
     expect(parseWorkerTerminalHostScope('{"kind":"ssh"}')).toBeNull()
     expect(parseWorkerTerminalHostScope('local:workspace-1')).toBeNull()
     expect(parseWorkerTerminalHostScope(null)).toBeNull()
+  })
+
+  it('orders federated, Dispatch, and legacy resource authority without accepting conflicts', () => {
+    expect(
+      resolveWorkerTerminalHostAuthority(
+        '{"kind":"local","hostId":"local"}',
+        null,
+        '{"kind":"ssh","targetId":"legacy-resource"}'
+      )
+    ).toEqual({ kind: 'local', id: 'local' })
+    expect(resolveWorkerTerminalHostAuthority(null, 'environment-windows', '{not-json')).toEqual({
+      kind: 'remote',
+      id: 'environment-windows',
+      targetId: 'environment-windows'
+    })
+    expect(resolveWorkerTerminalHostAuthority('', 'environment-windows', null)).toEqual({
+      kind: 'indeterminate',
+      id: 'unknown'
+    })
+    expect(resolveWorkerTerminalHostAuthority(null, '', null)).toEqual({
+      kind: 'indeterminate',
+      id: 'unknown'
+    })
+    expect(
+      resolveWorkerTerminalHostAuthority('', null, '{"kind":"ssh","targetId":"legacy-resource"}')
+    ).toEqual({ kind: 'indeterminate', id: 'unknown' })
+    expect(
+      resolveWorkerTerminalHostAuthority(
+        '{"kind":"federated","targetId":"environment-linux"}',
+        'environment-windows',
+        null
+      )
+    ).toEqual({ kind: 'indeterminate', id: 'unknown' })
   })
 })

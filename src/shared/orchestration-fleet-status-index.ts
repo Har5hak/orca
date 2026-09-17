@@ -5,7 +5,7 @@ import {
   type FleetWorkerIdentity
 } from './orchestration-fleet-agent-status-evidence'
 import type { FleetDurableWorker } from './orchestration-fleet-projection'
-import { readWorkerTerminalHostScope } from './worker-terminal-host-scope'
+import { resolveWorkerTerminalHostAuthority } from './worker-terminal-host-scope'
 
 export type FleetStatusIndex = {
   byDispatchId: Map<string, FleetAgentStatusEvidence>
@@ -13,18 +13,21 @@ export type FleetStatusIndex = {
   byTerminalHandle: Map<string, FleetAgentStatusEvidence>
   paneOwners: Map<string, Set<string>>
   handleOwners: Map<string, Set<string>>
+  identityScopeComplete: boolean
 }
 
 export function createFleetStatusIndex(
   statuses: readonly FleetAgentStatusEvidence[],
-  workers: readonly FleetDurableWorker[]
+  workers: readonly FleetDurableWorker[],
+  identityScopeComplete = true
 ): FleetStatusIndex {
   const index: FleetStatusIndex = {
     byDispatchId: new Map(),
     byPaneKey: new Map(),
     byTerminalHandle: new Map(),
     paneOwners: new Map(),
-    handleOwners: new Map()
+    handleOwners: new Map(),
+    identityScopeComplete
   }
   const paneKeys = new Set<string>()
   const dispatchIds = new Set<string>()
@@ -112,14 +115,16 @@ function statusIdentityMatchesWorker(
   if (binding.kind === 'unresolved' || identity.kind === 'unidentifiable') {
     return false
   }
+  if (worker.resource && worker.resource.ownerDispatchId !== worker.dispatchId) {
+    return false
+  }
   if (binding.kind === 'worker' && binding.dispatchId !== worker.dispatchId) {
     return false
   }
   if (binding.terminalHandle !== identity.terminalHandle) {
     return false
   }
-  const remoteTargetId = remoteTargetForWorker(worker)
-  if (remoteTargetId && evidence.activity.connectionId !== remoteTargetId) {
+  if (!statusHostMatchesWorker(worker, evidence.activity.connectionId)) {
     return false
   }
   if (!incarnationMatchesWorker(worker, binding)) {
@@ -132,6 +137,7 @@ function statusIdentityMatchesWorker(
     return paneMatches || Boolean(worker.resource?.processIncarnation)
   }
   return (
+    index.identityScopeComplete &&
     paneMatches &&
     uniqueOwner(
       index.paneOwners,
@@ -158,8 +164,17 @@ function uniqueOwner(ownersByKey: Map<string, Set<string>>, key: string | null):
   return key ? ownersByKey.get(key)?.size === 1 : true
 }
 
-/** Only a remote scope that names a target fences the connection the evidence must ride. */
-function remoteTargetForWorker(worker: FleetDurableWorker): string | null {
-  const read = readWorkerTerminalHostScope(worker.resource?.hostScope)
-  return read.kind === 'remote' ? read.targetId : null
+function statusHostMatchesWorker(worker: FleetDurableWorker, connectionId: string | null): boolean {
+  const authority = resolveWorkerTerminalHostAuthority(
+    worker.dispatchHostScope,
+    worker.federatedEnvironmentId,
+    worker.resource?.hostScope
+  )
+  if (authority.kind === 'local') {
+    return connectionId === null
+  }
+  if (authority.kind === 'remote') {
+    return connectionId === authority.targetId
+  }
+  return false
 }

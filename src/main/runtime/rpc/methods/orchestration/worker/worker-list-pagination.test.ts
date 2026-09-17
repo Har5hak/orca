@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type Database from '../../../../../sqlite/sync-database'
+import type { FleetAgentStatusEvidence } from '../../../../../../shared/orchestration-fleet-agent-status-evidence'
 import { OrchestrationDb } from '../../../../orchestration/db'
 import type { FederatedDispatchRow } from '../../../../orchestration/types'
 import { OrcaRuntimeService } from '../../../../orca-runtime'
@@ -10,7 +11,10 @@ type WorkerListResult = {
   workers: {
     dispatchId: string
     terminalState: string | null
-    projection: { attention: { categories: string[] } }
+    projection: {
+      attention: { categories: string[] }
+      liveness: { verdict: string; reason?: string }
+    }
   }[]
   counts: Record<string, number>
   page: { total: number; hasMore: boolean; nextCursor: string | null }
@@ -59,6 +63,125 @@ describe('orchestration worker-list pagination', () => {
     })
     expect(second.workers).toHaveLength(25)
     expect(second.page).toEqual({ total: 125, limit: 100, hasMore: false, nextCursor: null })
+  })
+
+  it('uses the full 101-row identity scope for an unpaginated projection', async () => {
+    db = new OrchestrationDb(':memory:')
+    const runtime = new OrcaRuntimeService()
+    runtime.setOrchestrationDb(db)
+    const run = db.createRun({
+      objective: 'Complete identity scope',
+      coordinatorHandle: 'term-coordinator',
+      coordinatorPaneKey: 'tab-coordinator:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    })
+    for (let index = 0; index < 101; index += 1) {
+      insertDispatch(db, run.id, `dispatch-${String(index).padStart(3, '0')}`)
+    }
+    setDispatchIdentity(db, 'dispatch-000', 'shared:pane', 'term-shared')
+    setDispatchIdentity(db, 'dispatch-100', 'shared:pane', 'term-shared')
+    vi.spyOn(runtime, 'getOrchestrationFleetAgentStatusSnapshot').mockReturnValue([
+      fleetStatus('shared:pane', 'term-shared')
+    ])
+
+    const result = await callWorkerList(runtime, {})
+    const collisions = result.workers.filter((worker) =>
+      ['dispatch-000', 'dispatch-100'].includes(worker.dispatchId)
+    )
+
+    expect(collisions).toHaveLength(2)
+    expect(collisions.map((worker) => worker.projection.liveness)).toEqual([
+      { verdict: 'unverifiable', reason: 'missing_status' },
+      { verdict: 'unverifiable', reason: 'missing_status' }
+    ])
+  })
+
+  it('fails pane-only identity closed across cursor pages but keeps exact worker binding', async () => {
+    db = new OrchestrationDb(':memory:')
+    const runtime = new OrcaRuntimeService()
+    runtime.setOrchestrationDb(db)
+    const run = db.createRun({
+      objective: 'Partial identity scope',
+      coordinatorHandle: 'term-coordinator',
+      coordinatorPaneKey: 'tab-coordinator:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    })
+    for (let index = 0; index < 101; index += 1) {
+      insertDispatch(db, run.id, `dispatch-${String(index).padStart(3, '0')}`)
+    }
+    setDispatchIdentity(db, 'dispatch-000', 'shared:pane', 'term-shared')
+    setDispatchIdentity(db, 'dispatch-100', 'shared:pane', 'term-shared')
+    const statusSpy = vi.spyOn(runtime, 'getOrchestrationFleetAgentStatusSnapshot')
+    statusSpy.mockReturnValue([fleetStatus('shared:pane', 'term-shared')])
+
+    const first = await callWorkerList(runtime, { run: run.id, paginate: true, limit: 100 })
+    const second = await callWorkerList(runtime, {
+      run: run.id,
+      paginate: true,
+      limit: 100,
+      cursor: first.page.nextCursor
+    })
+    expect(first.workers[0]?.projection.liveness).toMatchObject({
+      verdict: 'unverifiable',
+      reason: 'missing_status'
+    })
+    expect(second.workers[0]?.projection.liveness).toMatchObject({
+      verdict: 'unverifiable',
+      reason: 'missing_status'
+    })
+
+    statusSpy.mockReturnValue([fleetStatus('shared:pane', 'term-shared', 'dispatch-000')])
+    const exact = await callWorkerList(runtime, { run: run.id, paginate: true, limit: 100 })
+    expect(exact.workers[0]?.projection.liveness).toMatchObject({ verdict: 'live' })
+  })
+
+  it('binds a unique pane identity when the inventory scope is complete', async () => {
+    db = new OrchestrationDb(':memory:')
+    const runtime = new OrcaRuntimeService()
+    runtime.setOrchestrationDb(db)
+    const run = db.createRun({
+      objective: 'Unique complete identity',
+      coordinatorHandle: 'term-coordinator',
+      coordinatorPaneKey: 'tab-coordinator:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    })
+    insertDispatch(db, run.id, 'dispatch-unique')
+    setDispatchIdentity(db, 'dispatch-unique', 'unique:pane', 'term-unique')
+    vi.spyOn(runtime, 'getOrchestrationFleetAgentStatusSnapshot').mockReturnValue([
+      fleetStatus('unique:pane', 'term-unique')
+    ])
+
+    const result = await callWorkerList(runtime, {})
+    expect(result.workers[0]?.projection.liveness).toMatchObject({ verdict: 'live' })
+  })
+
+  it('requires exact Dispatch evidence when a Run filter hides a cross-Run pane collision', async () => {
+    db = new OrchestrationDb(':memory:')
+    const runtime = new OrcaRuntimeService()
+    runtime.setOrchestrationDb(db)
+    const runA = db.createRun({
+      objective: 'Filtered Run A',
+      coordinatorHandle: 'term-coordinator-a',
+      coordinatorPaneKey: 'tab-coordinator:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    })
+    const runB = db.createRun({
+      objective: 'Filtered Run B',
+      coordinatorHandle: 'term-coordinator-b',
+      coordinatorPaneKey: 'tab-coordinator:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+    })
+    insertDispatch(db, runA.id, 'dispatch-run-a')
+    insertDispatch(db, runB.id, 'dispatch-run-b')
+    setDispatchIdentity(db, 'dispatch-run-a', 'shared:pane', 'term-shared')
+    setDispatchIdentity(db, 'dispatch-run-b', 'shared:pane', 'term-shared')
+    const statusSpy = vi.spyOn(runtime, 'getOrchestrationFleetAgentStatusSnapshot')
+    statusSpy.mockReturnValue([fleetStatus('shared:pane', 'term-shared')])
+
+    const paneOnly = await callWorkerList(runtime, { run: runA.id })
+    expect(paneOnly.workers[0]?.projection.liveness).toEqual({
+      verdict: 'unverifiable',
+      reason: 'missing_status'
+    })
+
+    statusSpy.mockReturnValue([fleetStatus('shared:pane', 'term-shared', 'dispatch-run-a')])
+    const exact = await callWorkerList(runtime, { run: runA.id })
+    expect(exact.workers[0]?.projection.liveness).toMatchObject({ verdict: 'live' })
   })
 
   it('fails an omitted-pagination legacy result above the explicit safety ceiling', async () => {
@@ -628,6 +751,48 @@ function insertDispatch(db: OrchestrationDb, runId: string, dispatchId: string):
        ) VALUES (?, ?, ?, ?, 'dispatched', '2026-08-27 00:00:00')`
     )
     .run(dispatchId, runId, task.id, `term-${dispatchId}`)
+}
+
+function setDispatchIdentity(
+  db: OrchestrationDb,
+  dispatchId: string,
+  paneKey: string,
+  terminalHandle: string
+): void {
+  sqliteFor(db)
+    .prepare('UPDATE dispatch_contexts SET assignee_handle = ?, assignee_pane_key = ? WHERE id = ?')
+    .run(terminalHandle, paneKey, dispatchId)
+}
+
+function fleetStatus(
+  paneKey: string,
+  terminalHandle: string,
+  dispatchId?: string
+): FleetAgentStatusEvidence {
+  const observedAt = Date.now()
+  return {
+    binding: dispatchId
+      ? {
+          kind: 'worker',
+          dispatchId,
+          paneKey,
+          terminalHandle,
+          processIncarnation: 'pty:test:1'
+        }
+      : { kind: 'pane', paneKey, terminalHandle, processIncarnation: 'pty:test:1' },
+    clock: { kind: 'observed', at: observedAt },
+    deliveredAt: observedAt,
+    activity: {
+      paneKey,
+      connectionId: null,
+      state: 'working',
+      agentType: 'codex',
+      model: 'gpt-test',
+      worktreeId: null,
+      restoredUnconfirmed: false,
+      providerSessionOnly: false
+    }
+  }
 }
 
 function insertWorkerInventory(

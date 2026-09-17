@@ -5,7 +5,7 @@ import {
   isUnsupervisedSettledDispatch,
   resolveFleetWorkerOutcome
 } from './orchestration-fleet-outcome-resolution'
-import { readWorkerTerminalHostScope } from './worker-terminal-host-scope'
+import { resolveWorkerTerminalHostAuthority } from './worker-terminal-host-scope'
 import type {
   FleetDurableWorker,
   FleetLiveness,
@@ -22,6 +22,8 @@ type FleetLivenessSubject = {
   workerState?: string | null
   dispatchStatus?: string | null
   terminationReason?: FleetDurableWorker['terminationReason']
+  dispatchHostScope?: string | null
+  federatedEnvironmentId?: string | null
   resource: { releaseState?: string | null; hostScope: string | null } | null
 }
 
@@ -84,8 +86,7 @@ export function projectLiveness(
   if (observedAt - now > FLEET_STATUS_FUTURE_TOLERANCE_MS) {
     return { verdict: 'unverifiable', reason: 'future_status', observedAt }
   }
-  const remoteHost =
-    projectHost(activity.connectionId, worker.resource?.hostScope).kind === 'remote'
+  const remoteHost = projectHost(worker).kind === 'remote'
   if (remoteHost && !activity.connectionId) {
     return { verdict: 'unverifiable', reason: 'missing_status', observedAt }
   }
@@ -191,42 +192,62 @@ export function projectFleetNextAction(
   }
 }
 
-function projectProvider(
+function projectProviderTruth(
   worker: FleetDurableWorker,
-  activity: FleetAgentStatusEvidence['activity'] | undefined
-): OrchestrationFleetWorker['provider'] {
-  const observed = activity?.agentType ? { id: activity.agentType, model: activity.model } : null
-  const durable = worker.durableProvider
-  if (!durable) {
-    return { id: 'unknown', model: null }
-  }
+  evidence: FleetAgentStatusEvidence | undefined,
+  liveness: FleetLiveness
+): OrchestrationFleetWorker['providerTruth'] {
+  const durable =
+    worker.durableProviderTruth ??
+    (worker.durableProvider
+      ? {
+          requested: null,
+          effective: { ...worker.durableProvider, effort: null },
+          effectiveSource: 'launch_receipt' as const
+        }
+      : null)
+  const activity = evidence?.activity
+  const observed =
+    evidence && activity?.agentType
+      ? {
+          id: activity.agentType,
+          model: activity.model,
+          effort: null,
+          source: 'agent_status' as const,
+          observedAt: evidence.clock.at,
+          freshness:
+            liveness.verdict === 'live'
+              ? ('fresh' as const)
+              : liveness.verdict === 'unverifiable' && liveness.reason === 'stale_status'
+                ? ('stale' as const)
+                : ('unverifiable' as const)
+        }
+      : null
   return {
-    id: durable.id,
-    model: durable.model ?? (observed?.id === durable.id ? observed.model : null)
+    requested: durable?.requested
+      ? { ...durable.requested, source: 'launch_request' as const }
+      : null,
+    effective:
+      durable?.effective && durable.effectiveSource
+        ? { ...durable.effective, source: durable.effectiveSource }
+        : null,
+    observed
   }
 }
 
-function projectHost(
-  connectionId: string | null,
-  hostScope: string | null | undefined
-): OrchestrationFleetWorker['host'] {
-  if (connectionId) {
-    return { kind: 'remote', id: connectionId }
-  }
-  const read = readWorkerTerminalHostScope(hostScope)
-  switch (read.kind) {
-    // A missing host scope is the legacy/default representation for local and
-    // folder-workspace authority; do not infer a remote host from resource
-    // materialization alone.
-    case 'absent':
-      return { kind: 'local', id: 'local' }
-    case 'local':
-      return { kind: 'local', id: read.id }
-    case 'remote':
-      return { kind: 'remote', id: read.id }
-    case 'unreadable':
-      return { kind: 'remote', id: 'unknown' }
-  }
+function projectHost(worker: {
+  dispatchHostScope?: string | null
+  federatedEnvironmentId?: string | null
+  resource: { hostScope: string | null } | null
+}): OrchestrationFleetWorker['host'] {
+  const authority = resolveWorkerTerminalHostAuthority(
+    worker.dispatchHostScope,
+    worker.federatedEnvironmentId,
+    worker.resource?.hostScope
+  )
+  return authority.kind === 'local'
+    ? { kind: 'local', id: authority.id }
+    : { kind: 'remote', id: authority.id }
 }
 
 export function projectOrchestrationFleetWorker(
@@ -237,6 +258,13 @@ export function projectOrchestrationFleetWorker(
   const liveness = projectLiveness(worker, evidence, now)
   const fresh = liveness.verdict === 'live'
   const activity = evidence?.activity
+  const providerTruth = projectProviderTruth(worker, evidence, liveness)
+  const observedProviderId =
+    providerTruth.observed?.freshness === 'fresh' && typeof providerTruth.observed.id === 'string'
+      ? providerTruth.observed.id
+      : null
+  const effectiveProviderId =
+    typeof providerTruth.effective?.id === 'string' ? providerTruth.effective.id : null
   const workspaceId =
     activity?.worktreeId ?? worker.worktreeId ?? worker.resource?.worktreeId ?? null
   const outcome = resolveFleetWorkerOutcome({
@@ -251,8 +279,13 @@ export function projectOrchestrationFleetWorker(
     runId: worker.runId,
     role: 'worker',
     parent: worker.parentTaskId ? { taskId: worker.parentTaskId } : null,
-    provider: projectProvider(worker, activity),
-    host: projectHost(activity?.connectionId ?? null, worker.resource?.hostScope),
+    provider: observedProviderId
+      ? { id: observedProviderId, model: providerTruth.observed?.model ?? null }
+      : effectiveProviderId
+        ? { id: effectiveProviderId, model: providerTruth.effective?.model ?? null }
+        : { id: 'unknown', model: null },
+    providerTruth,
+    host: projectHost(worker),
     workspace: workspaceId ? { id: workspaceId, kind: 'folder_or_worktree' } : null,
     stage: {
       worker: worker.workerState,

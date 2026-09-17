@@ -1,5 +1,9 @@
 import type { FleetAgentStatusEvidence } from './orchestration-fleet-agent-status-evidence'
-import { createFleetStatusIndex, statusForFleetWorker } from './orchestration-fleet-status-index'
+import {
+  createFleetStatusIndex,
+  statusForFleetWorker,
+  type FleetStatusIndex
+} from './orchestration-fleet-status-index'
 import {
   projectOrchestrationFleetAttention,
   type OrchestrationFleetAttention,
@@ -33,7 +37,16 @@ export type FleetDurableWorker = {
   pendingApproval?: boolean
   terminationReason?: 'operator_close' | 'signaled' | 'exited' | 'unknown' | null
   outcome?: 'in_progress' | 'succeeded' | 'failed' | 'outcome_unknown' | 'finished_unverified'
+  durableProviderTruth?: {
+    requested: { id: string | null; model: string | null; effort: string | null } | null
+    effective: { id: string | null; model: string | null; effort: string | null } | null
+    effectiveSource: 'launch_receipt' | 'legacy_start_options' | null
+  }
+  /** Pre-provider-truth fixture/row compatibility; new listing code supplies the full receipt. */
   durableProvider?: { id: string; model: string | null } | null
+  dispatchHostScope?: string | null
+  /** Compatibility for federated rows created before Dispatch host scope was stamped. */
+  federatedEnvironmentId?: string | null
   resource: {
     id: string
     ownerDispatchId: string
@@ -97,6 +110,28 @@ export type OrchestrationFleetWorker = {
   role: 'worker'
   parent: { taskId: string } | null
   provider: { id: string; model: string | null }
+  providerTruth: {
+    requested: {
+      id: string | null
+      model: string | null
+      effort: string | null
+      source: 'launch_request'
+    } | null
+    effective: {
+      id: string | null
+      model: string | null
+      effort: string | null
+      source: 'launch_receipt' | 'legacy_start_options'
+    } | null
+    observed: {
+      id: string | null
+      model: string | null
+      effort: null
+      source: 'agent_status'
+      observedAt: number
+      freshness: 'fresh' | 'stale' | 'unverifiable'
+    } | null
+  }
   host: { kind: 'local' | 'remote'; id: string }
   workspace: { id: string; kind: 'folder_or_worktree' } | null
   stage: {
@@ -149,6 +184,8 @@ export function projectOrchestrationFleet(args: {
   now?: number
   cursor?: string
   limit?: number
+  statusIndex?: FleetStatusIndex
+  identityScopeComplete?: boolean
 }): OrchestrationFleetPage {
   const limit = Math.min(
     ORCHESTRATION_FLEET_PAGE_MAX,
@@ -159,7 +196,14 @@ export function projectOrchestrationFleet(args: {
     : -1
   const start = cursorIndex >= 0 ? cursorIndex + 1 : 0
   const rows = args.workers.slice(start, start + limit)
-  const statusIndex = createFleetStatusIndex(args.statuses, rows)
+  const identityScopeComplete = args.identityScopeComplete !== false
+  const statusIndex =
+    args.statusIndex ??
+    createFleetStatusIndex(
+      args.statuses,
+      identityScopeComplete ? args.workers : rows,
+      identityScopeComplete
+    )
   const now = args.now ?? Date.now()
   const workers = rows.map((worker) =>
     projectOrchestrationFleetWorker(worker, statusForFleetWorker(worker, statusIndex), now)

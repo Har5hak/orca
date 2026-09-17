@@ -18,6 +18,7 @@ function fleetProjection(verdict: 'live' | 'unverifiable' | 'exited'): Orchestra
     role: 'worker',
     parent: null,
     provider: { id: 'codex', model: null },
+    providerTruth: { requested: null, effective: null, observed: null },
     host: { kind: 'local', id: 'local' },
     workspace: { id: 'ws_1', kind: 'folder_or_worktree' },
     stage: { worker: 'ready', dispatch: 'dispatched', detail: null, activity: 'working' },
@@ -99,9 +100,123 @@ describe('worker-start plain formatting', () => {
       })
     ).toBe('Worker ctx_ready [ready] for task_1')
   })
+
+  it('strips terminal controls from remote failed-stage and error text', () => {
+    const output = formatWorkerStart({
+      taskId: 'task_1',
+      dispatchId: 'ctx_failed',
+      state: 'failed',
+      failedStage: 'remote\nattach\u001b[31m',
+      lastError: 'peer\nforged\u202e error'
+    })
+
+    expect(output).toBe('Worker ctx_failed [failed] for task_1\nremoteattach[31m: peerforged error')
+    expect(output.split('\n')).toHaveLength(2)
+    expect(output).not.toContain('\u001b')
+    expect(output).not.toContain('\u202e')
+  })
 })
 
 describe('worker-read plain formatting', () => {
+  it('sanitizes metadata fields while preserving raw transcript content', () => {
+    const rawTranscript = 'raw\nbody\u001b[31m\u0085\u202e\u200b'
+    const value: OrchestrationWorkerReadResult = {
+      dispatchId: 'dispatch_1',
+      source: 'transcript',
+      sourceIdentity: 'private-source-identity',
+      provider: 'codex\nforged',
+      transcript: {
+        messages: [
+          {
+            id: 'message_1',
+            role: 'assistant',
+            blocks: [{ type: 'text', text: rawTranscript }],
+            timestamp: null,
+            source: 'transcript'
+          }
+        ],
+        nextCursor: 'next',
+        limited: true,
+        returnedMessageCount: 1
+      },
+      cursor: 'cursor\u200bhidden',
+      status: { worker: 'ready\u001b[31m', terminal: 'running' },
+      fallbackReason: null,
+      sourceExact: true,
+      contentComplete: false,
+      clipping: ['c1\u0085clip', 'bidi\u202eclip'],
+      warnings: ['warning\nforged\u001b[0m'],
+      archived: false
+    }
+
+    const output = formatWorkerRead(value)
+    const separator = output.indexOf('\n\n')
+    const metadata = output.slice(0, separator)
+    const body = output.slice(separator + 2)
+
+    const metadataLines = metadata.split('\n')
+    const metadataText = metadataLines.join('')
+    expect(metadataLines).toHaveLength(8)
+    expect(metadataText).not.toContain('\u001b')
+    expect(metadataText).not.toContain('\u0085')
+    expect(metadataText).not.toContain('\u202e')
+    expect(metadataText).not.toContain('\u200b')
+    expect(metadata).toContain('Source: transcript (provider=codexforged)')
+    expect(metadata).toContain('Worker: ready[31m')
+    expect(metadata).toContain('Clipping: c1clip, bidiclip')
+    expect(metadata).toContain('cursorhidden')
+    expect(metadata).toContain('Warning: warningforged[0m')
+    expect(body).toBe(`[assistant] ${rawTranscript}`)
+    expect(value.transcript.messages[0]?.blocks[0]).toEqual({
+      type: 'text',
+      text: rawTranscript
+    })
+  })
+
+  it('preserves raw terminal tail content while sanitizing its metadata', () => {
+    const rawTail = ['first\u001b[31m', 'second\u0085\u202e\u200b']
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: A hostile wire fixture deliberately violates string unions to prove every rendered metadata field is bounded by the terminal-safe formatter.
+    const value = {
+      dispatchId: 'dispatch_1',
+      source: 'terminal',
+      sourceIdentity: 'private-source-identity',
+      terminal: {
+        handle: 'term_worker',
+        status: 'running',
+        tail: rawTail,
+        truncated: false,
+        nextCursor: null
+      },
+      cursor: 'cursor\u200bhidden',
+      status: {
+        worker: 'ready\nforged',
+        terminal: 'running',
+        liveness: 'live\u001b[31m'
+      },
+      fallbackReason: 'session\u0085not_reported',
+      clipping: ['terminal\u202ebuffer'],
+      warnings: ['warning\nforged'],
+      archived: false
+    } as unknown as OrchestrationWorkerReadResult
+    const output = formatWorkerRead(value)
+    const separator = output.indexOf('\n\n')
+    const metadataLines = output.slice(0, separator).split('\n')
+    const metadataText = metadataLines.join('')
+
+    expect(metadataLines).toHaveLength(8)
+    expect(metadataText).not.toContain('\u001b')
+    expect(metadataText).not.toContain('\u0085')
+    expect(metadataText).not.toContain('\u202e')
+    expect(metadataText).not.toContain('\u200b')
+    expect(metadataLines).toContain('Terminal liveness: live[31m')
+    expect(metadataLines).toContain('Fallback reason: sessionnot_reported')
+    expect(metadataLines).toContain('Clipping: terminalbuffer')
+    expect(metadataLines).toContain(
+      'Continuation cursor (opaque; pass unchanged to --cursor): cursorhidden'
+    )
+    expect(output.slice(output.indexOf('\n\n') + 2)).toBe(rawTail.join('\n'))
+  })
+
   it('renders transcript provenance, incomplete coverage, warnings, and opaque cursor guidance', () => {
     expect(
       formatWorkerRead(

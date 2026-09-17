@@ -143,6 +143,9 @@ export function createStartingWorkerDispatch(
       depth: this.resolveChildDispatchDepth(params.creator, params.maxDepth),
       retryOfDispatchId: params.retryOf ?? null,
       creatorDispatchId,
+      hostScope: params.federation
+        ? JSON.stringify({ kind: 'federated', targetId: params.federation.environmentId })
+        : null,
       ...recordedCreatorIdentity(params.creator)
     })
     this.db
