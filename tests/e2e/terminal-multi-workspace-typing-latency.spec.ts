@@ -614,6 +614,14 @@ test.describe('Multi-workspace sustained typing latency bench', () => {
       if (instrumentationAvailable) {
         await stopAccumulatedBenchmarkInstrumentation(orcaPage).catch(() => undefined)
       }
+      if (graphProbeStart) {
+        await stopRuntimeGraphPublicationProbe(
+          electronApp,
+          orcaPage,
+          graphProbeStart,
+          graphProbeSelfTest
+        ).catch(() => undefined)
+      }
       if (statusTrafficStarted) {
         await stopAccumulatedStatusTraffic(electronApp, orcaPage)
       }
