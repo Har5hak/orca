@@ -376,6 +376,7 @@ import {
   InboxParams,
   ReplyParams,
   ResetParams,
+  TaskCreateByDeliveryKeyParams,
   TaskCreateParams,
   TaskListParams
 } from './orchestration-params'
@@ -989,6 +990,7 @@ export const RPC_PARAMS_BY_METHOD = {
   'orchestration.runStop': RunStopParams,
   'orchestration.runUse': RunUseParams,
   'orchestration.taskCreate': TaskCreateParams,
+  'orchestration.taskCreateByDeliveryKey': TaskCreateByDeliveryKeyParams,
   'orchestration.taskList': TaskListParams,
   'orchestration.workerAbandon': WorkerDispatchParams,
   'orchestration.workerList': WorkerListParams,
