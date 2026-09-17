@@ -1,5 +1,6 @@
 export const LAB_READONLY_SUPERVISED_PROFILE_ID = 'lab-readonly-supervised-v1'
 export const CODEX_WORKSPACE_CHATGPT_ADAPTER_ID = 'codex-workspace-chatgpt-v1'
+export const CODEX_LAB_RUNTIME_ROOT = '/private/tmp/orca-lab/runtime'
 export const CODEX_LAB_LAUNCH_REFUSAL_CODE = 'ORCA_CODEX_LAB_LAUNCH_REFUSED'
 
 export type CodexLabLaunchRefusalReason =

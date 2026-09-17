@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { dirname, isAbsolute, join, normalize } from 'node:path'
 import {
+  CODEX_LAB_RUNTIME_ROOT,
   CODEX_WORKSPACE_CHATGPT_ADAPTER_ID,
   LAB_READONLY_SUPERVISED_PROFILE_ID,
   refuse,
@@ -189,6 +190,7 @@ function validateDispatch(facts: CodexLabLaunchFacts): void {
     !DISPATCH_ID_PATTERN.test(facts.dispatch.id) ||
     facts.dispatch.id === '.' ||
     facts.dispatch.id === '..' ||
+    facts.dispatch.runtimeRoot !== CODEX_LAB_RUNTIME_ROOT ||
     !isCanonicalAbsolutePath(facts.dispatch.runtimeRoot)
   ) {
     refuse('dispatch_invalid', 'dispatch')

@@ -6,6 +6,7 @@
 // must name the thread this session actually proved — never one a caller asks
 // for, which is how a resume becomes a fork wearing a resume's name.
 
+import { posix } from 'node:path'
 import type { AgentSessionJournalIdentity } from '../../shared/agent-session-journal-types'
 import type { AgentSessionRecord } from '../../shared/agent-session-record'
 import { agentSessionProviderHandleChainHead } from '../../shared/agent-session-provider-handle'
@@ -18,9 +19,11 @@ import { CODEX_LAB_READONLY_PERMISSION_PROFILE_ID } from './codex-structured-per
 import { resolvePinnedCodexRolloutProof } from './codex-tui-rollout-proof'
 import { isWindowsProcessStartTimeAvailable } from '../windows/windows-process-table'
 import {
+  CodexLabStructuredBindingRefusal,
   getCodexLabStructuredLaunchBinding,
   type CodexLabStructuredLaunchBinding
 } from '../runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-registry'
+import { CODEX_LAB_RUNTIME_ROOT } from '../runtime/orchestration/lab-profile/codex-lab-launch-contract'
 
 export type CodexStructuredLaunchResolverDeps = {
   store: Pick<AgentSessionRecordStore, 'getRecord'>
@@ -78,6 +81,9 @@ export function createCodexStructuredLaunchResolver(
         await deps.resolveWorkspacePath(location.workspaceId)
       )
     }
+    if (isCodexLabRuntimePath(accountHome.path)) {
+      throw new CodexLabStructuredBindingRefusal('binding_missing')
+    }
     const environment = await deps.resolveEnvironment?.()
     const pathEnv = environment?.PATH ?? environment?.Path ?? null
     const homePath = environment?.HOME ?? environment?.USERPROFILE
@@ -110,6 +116,11 @@ export function createCodexStructuredLaunchResolver(
         : {})
     }
   }
+}
+
+function isCodexLabRuntimePath(candidate: string): boolean {
+  const relative = posix.relative(CODEX_LAB_RUNTIME_ROOT, candidate)
+  return relative === '' || (!relative.startsWith('../') && !posix.isAbsolute(relative))
 }
 
 function resolveCodexLabStructuredLaunch(

@@ -61,6 +61,9 @@ describe('structured worker lab binding lifecycle', () => {
       labLaunchBinding: binding,
       onJournalActivity: () => {}
     })
+    expect(createSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ accountHomePathOverride: binding.plan.runtimePaths.codexHome })
+    )
     expect(getCodexLabStructuredLaunchBinding(sessionId)).toEqual(binding)
 
     releaseStructuredWorkerSession(binding.dispatchId)

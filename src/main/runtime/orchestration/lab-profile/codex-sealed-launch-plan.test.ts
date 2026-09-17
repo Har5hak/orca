@@ -250,6 +250,18 @@ describe('sealed Codex laboratory launch plan', () => {
     )
   })
 
+  it('rejects an alternate runtime root instead of creating an unguarded durable home', () => {
+    const input = facts()
+    expect(() =>
+      buildSealedCodexLabLaunchPlan({
+        ...input,
+        dispatch: { ...input.dispatch, runtimeRoot: '/private/tmp/alternate-lab/runtime' }
+      })
+    ).toThrowError(
+      expect.objectContaining({ data: { reason: 'dispatch_invalid', field: 'dispatch' } })
+    )
+  })
+
   it.each([
     ['approval policy', 'approval_policy = "never"', 'approval_policy = "on-request"'],
     ['permission inheritance', 'extends = ":read-only"', 'extends = ":workspace"'],

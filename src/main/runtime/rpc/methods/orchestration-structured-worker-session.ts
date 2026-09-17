@@ -143,6 +143,9 @@ export async function createStructuredWorkerSession(args: {
       agent: args.agent,
       // Absent, the host seeds the user's saved selection — the same fallback a chat gets.
       ...(args.options ? { options: args.options } : {}),
+      ...(args.labLaunchBinding
+        ? { accountHomePathOverride: args.labLaunchBinding.plan.runtimePaths.codexHome }
+        : {}),
       // Dispatching a worker is background work; it must not pull the surface away from the user.
       activate: false
     })

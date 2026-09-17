@@ -122,6 +122,33 @@ describe('structured Codex lab launch resolution', () => {
     }
   })
 
+  it('refuses an orphaned durable lab home before resolving ordinary launch inputs', async () => {
+    const binding = testCodexLabStructuredLaunchBinding()
+    const resolveWorkspacePath = vi.fn(async () => TEST_LAB_WORKTREE_PATH)
+    const resolveEnvironment = vi.fn(async () => ({ PATH: '/ambient/bin' }))
+    const resolveCommand = vi.fn(() => '/ambient/codex')
+    const resolvePermissionPolicy = vi.fn(() => ({
+      approvalPolicy: 'on-request' as const,
+      sandbox: 'workspace-write' as const
+    }))
+    const resolve = createCodexStructuredLaunchResolver({
+      store: { getRecord: () => record(binding.plan.runtimePaths.codexHome) },
+      resolveWorkspacePath,
+      resolveEnvironment,
+      resolveCommand,
+      resolvePermissionPolicy
+    })
+
+    await expect(resolve({ identity: IDENTITY })).rejects.toMatchObject({
+      code: 'ORCA_CODEX_LAB_STRUCTURED_BINDING_REFUSED',
+      reason: 'binding_missing'
+    })
+    expect(resolveWorkspacePath).not.toHaveBeenCalled()
+    expect(resolveEnvironment).not.toHaveBeenCalled()
+    expect(resolveCommand).not.toHaveBeenCalled()
+    expect(resolvePermissionPolicy).not.toHaveBeenCalled()
+  })
+
   it('refuses a bound session that could resume an existing provider thread', async () => {
     const binding = testCodexLabStructuredLaunchBinding()
     const durableRecord = record(binding.plan.runtimePaths.codexHome)

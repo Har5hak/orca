@@ -53,6 +53,8 @@ export async function prepareStructuredAgentSessionCreateForWorktree(args: {
    *  `--model`/`--effort` the dispatch asked for; a chat the user opened passes nothing and keeps
    *  the saved selection. Narrowed by the caller, so `{}` never reaches the reservation. */
   options?: Readonly<Record<string, string>>
+  /** Host-only account selection for a sealed launch. It is not accepted by the RPC schema. */
+  accountHomePathOverride?: string
 }): Promise<PreparedStructuredAgentSessionCreate> {
   // Adoption replay may need the record loaded from disk before source discovery can be skipped.
   let host = args.resumeFrom ? await args.ensureHost() : null
@@ -63,13 +65,22 @@ export async function prepareStructuredAgentSessionCreateForWorktree(args: {
     callerKey: args.caller.callerKey,
     ...(args.resumeFrom ? { resumeFrom: args.resumeFrom } : {})
   })
+  const accountHome =
+    args.accountHomePathOverride !== undefined
+      ? { ...resolved.accountHome, path: args.accountHomePathOverride }
+      : resolved.accountHome
+  const resolvedWithAccountHome = { ...resolved, accountHome }
   const hostFingerprint = computeAgentSessionPayloadFingerprint({
     method: 'agentSession.attach',
     sessionId: args.envelope.sessionId,
-    fields: attachFingerprintFields({ ...resolved, envelope: args.envelope })
+    fields: attachFingerprintFields({ ...resolvedWithAccountHome, envelope: args.envelope })
   })
   host ??= await args.ensureHost()
-  const { agent: _resolvedAgent, provider: _resolvedProvider, ...resolvedAttach } = resolved
+  const {
+    agent: _resolvedAgent,
+    provider: _resolvedProvider,
+    ...resolvedAttach
+  } = resolvedWithAccountHome
   return {
     host,
     attachParams: {
@@ -130,6 +141,7 @@ export async function createStructuredAgentSessionForWorktree(args: {
   agent: 'claude' | 'codex'
   activate: boolean
   options?: Readonly<Record<string, string>>
+  accountHomePathOverride?: string
 }): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> {
   const prepared: PreparedStructuredAgentSessionCreate | StructuredCreateRefused =
     await resolveUncommittedStructuredCreate(() =>

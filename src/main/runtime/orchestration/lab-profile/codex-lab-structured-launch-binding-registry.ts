@@ -15,7 +15,7 @@ export type CodexLabStructuredLaunchBinding = Readonly<{
 export class CodexLabStructuredBindingRefusal extends Error {
   readonly code = CODEX_LAB_STRUCTURED_BINDING_REFUSAL_CODE
 
-  constructor(readonly reason: 'binding_invalid' | 'binding_conflict') {
+  constructor(readonly reason: 'binding_invalid' | 'binding_conflict' | 'binding_missing') {
     super(`Codex laboratory structured launch binding refused: ${reason}`)
     this.name = 'CodexLabStructuredBindingRefusal'
   }
