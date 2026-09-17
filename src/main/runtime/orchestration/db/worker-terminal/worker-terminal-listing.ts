@@ -102,6 +102,9 @@ export function listWorkerTerminalResources(
   pendingInput: boolean
   pendingApproval: boolean
   terminationReason: TerminalExitCause['kind'] | null
+  dispatchHostScope: string | null
+  /** Compatibility for federated rows created before Dispatch host scope was stamped. */
+  federatedEnvironmentId: string | null
   resource: WorkerTerminalResourceRow | null
   createdAt: string
   databaseId: number
@@ -156,6 +159,7 @@ export function listWorkerTerminalResources(
   if (detailLimit !== undefined) {
     detailValues.push(detailLimit)
   }
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: The type mirrors the SELECT aliases below.
   const rows = this.db
     .prepare(
       `SELECT d.id AS dispatch_id,
@@ -166,6 +170,8 @@ export function listWorkerTerminalResources(
               COALESCE(r.pane_key, d.assignee_pane_key) AS pane_key,
               COALESCE(w.worktree_id, r.worktree_id) AS worktree_id,
               w.stage AS worker_stage,
+              d.host_scope AS dispatch_host_scope,
+              fd.environment_id AS federated_environment_id,
               t.parent_id AS parent_task_id,
               d.task_id, d.run_id, d.status AS dispatch_status,
               d.termination_reason,
@@ -181,6 +187,7 @@ export function listWorkerTerminalResources(
          LEFT JOIN worker_dispatches w ON w.dispatch_id = d.id
          LEFT JOIN tasks t ON t.id = d.task_id AND t.run_id = d.run_id
          LEFT JOIN worker_terminal_resources r ON r.owner_dispatch_id = d.id
+         LEFT JOIN federated_dispatches fd ON fd.dispatch_id = d.id
         ${detailWhere.length > 0 ? `WHERE ${detailWhere.join(' AND ')}` : ''}
         ORDER BY d.rowid ASC${limitClause}`
     )
@@ -191,6 +198,8 @@ export function listWorkerTerminalResources(
     pane_key: string | null
     worktree_id: string | null
     worker_stage: string | null
+    dispatch_host_scope: string | null
+    federated_environment_id: string | null
     parent_task_id: string | null
     task_id: string
     run_id: string
@@ -228,6 +237,8 @@ export function listWorkerTerminalResources(
       pendingInput: row.pending_input === 1,
       pendingApproval: row.pending_approval === 1,
       terminationReason: row.termination_reason,
+      dispatchHostScope: row.dispatch_host_scope,
+      federatedEnvironmentId: row.federated_environment_id,
       resource,
       createdAt: row.created_at,
       databaseId: row.database_id

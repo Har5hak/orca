@@ -1,5 +1,9 @@
 import type { FleetAgentStatusEvidence } from './orchestration-fleet-agent-status-evidence'
-import { createFleetStatusIndex, statusForFleetWorker } from './orchestration-fleet-status-index'
+import {
+  createFleetStatusIndex,
+  statusForFleetWorker,
+  type FleetStatusIndex
+} from './orchestration-fleet-status-index'
 import {
   projectOrchestrationFleetAttention,
   type OrchestrationFleetAttention,
@@ -33,6 +37,9 @@ export type FleetDurableWorker = {
   pendingApproval?: boolean
   terminationReason?: 'operator_close' | 'signaled' | 'exited' | 'unknown' | null
   outcome?: 'in_progress' | 'succeeded' | 'failed' | 'outcome_unknown' | 'finished_unverified'
+  dispatchHostScope?: string | null
+  /** Compatibility for federated rows created before Dispatch host scope was stamped. */
+  federatedEnvironmentId?: string | null
   resource: {
     id: string
     ownerDispatchId: string
@@ -148,6 +155,8 @@ export function projectOrchestrationFleet(args: {
   now?: number
   cursor?: string
   limit?: number
+  statusIndex?: FleetStatusIndex
+  identityScopeComplete?: boolean
 }): OrchestrationFleetPage {
   const limit = Math.min(
     ORCHESTRATION_FLEET_PAGE_MAX,
@@ -158,7 +167,14 @@ export function projectOrchestrationFleet(args: {
     : -1
   const start = cursorIndex >= 0 ? cursorIndex + 1 : 0
   const rows = args.workers.slice(start, start + limit)
-  const statusIndex = createFleetStatusIndex(args.statuses, rows)
+  const identityScopeComplete = args.identityScopeComplete !== false
+  const statusIndex =
+    args.statusIndex ??
+    createFleetStatusIndex(
+      args.statuses,
+      identityScopeComplete ? args.workers : rows,
+      identityScopeComplete
+    )
   const now = args.now ?? Date.now()
   const workers = rows.map((worker) =>
     projectOrchestrationFleetWorker(worker, statusForFleetWorker(worker, statusIndex), now)

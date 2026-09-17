@@ -231,7 +231,8 @@ export function projectFleetWorkerPage(
     attentionFacts: db.getWorkerAttentionFactsForDispatches([dispatchId], now),
     statuses: runtime.getOrchestrationFleetAgentStatusSnapshot(),
     limit: 1,
-    now
+    now,
+    identityScopeComplete: false
   })
 }
 
