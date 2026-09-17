@@ -15,6 +15,9 @@ export function prepareStartingWorkerAuthority(
     effects: unknown[]
     setupState: string
     hostScope?: string | null
+    // The lab runtime is one aggregate cleanup obligation created before host preparation. Its
+    // authority attach may update effects, but must compare-and-preserve that exact receipt.
+    preserveCreatedLabRuntimeResidual?: true
     // 'created': this worker-start operation created the agent terminal (agent-first worktree
     // creation included; its pre-rename effects rows said 'reused_agent_terminal'). 'external':
     // an explicit --terminal reuse; ownership transfers only from an exact owned settled resource.
@@ -32,6 +35,18 @@ export function prepareStartingWorkerAuthority(
         `Dispatch ${params.dispatchId} is not starting.`
       )
     }
+    const residualResources = params.preserveCreatedLabRuntimeResidual
+      ? requireExactCreatedLabRuntimeResidual(worker.residual_resources, params.dispatchId)
+      : JSON.stringify(
+          params.effects.filter((effect) =>
+            Boolean(
+              effect &&
+              typeof effect === 'object' &&
+              ((effect as { action?: string }).action?.startsWith('created') ||
+                (effect as { action?: string }).action === 'reused_agent_terminal')
+            )
+          )
+        )
     if (
       dispatch.launch_token_hash &&
       params.launchTokenHash &&
@@ -49,7 +64,7 @@ export function prepareStartingWorkerAuthority(
       )
     }
     const capability = `dcap_${randomBytes(32).toString('base64url')}`
-    const endpointId = this.getWorkerDispatch(params.dispatchId)?.runtime_epoch ?? null
+    const endpointId = worker.runtime_epoch
     const contextUpdate = this.db
       .prepare(
         `UPDATE dispatch_contexts
@@ -88,16 +103,7 @@ export function prepareStartingWorkerAuthority(
         params.handle,
         params.setupState,
         JSON.stringify(params.effects),
-        JSON.stringify(
-          params.effects.filter((effect) =>
-            Boolean(
-              effect &&
-              typeof effect === 'object' &&
-              ((effect as { action?: string }).action?.startsWith('created') ||
-                (effect as { action?: string }).action === 'reused_agent_terminal')
-            )
-          )
-        ),
+        residualResources,
         params.dispatchId
       )
     if (workerUpdate.changes !== 1) {
@@ -158,6 +164,40 @@ export function prepareStartingWorkerAuthority(
     this.db.exec('ROLLBACK')
     throw error
   }
+}
+
+function requireExactCreatedLabRuntimeResidual(serialized: string, dispatchId: string): string {
+  let residualResources: unknown
+  try {
+    residualResources = JSON.parse(serialized) as unknown
+  } catch {
+    throwLabRuntimeResidualMismatch(dispatchId)
+  }
+  if (!Array.isArray(residualResources) || residualResources.length !== 1) {
+    throwLabRuntimeResidualMismatch(dispatchId)
+  }
+  const resource: unknown = residualResources[0]
+  if (!resource || typeof resource !== 'object' || Array.isArray(resource)) {
+    throwLabRuntimeResidualMismatch(dispatchId)
+  }
+  const keys = Object.keys(resource)
+  if (
+    keys.length !== 2 ||
+    !keys.includes('kind') ||
+    !keys.includes('id') ||
+    (resource as { kind?: unknown }).kind !== 'created_lab_runtime' ||
+    (resource as { id?: unknown }).id !== dispatchId
+  ) {
+    throwLabRuntimeResidualMismatch(dispatchId)
+  }
+  return serialized
+}
+
+function throwLabRuntimeResidualMismatch(dispatchId: string): never {
+  throw new OrchestrationError(
+    'request_mismatch',
+    `Dispatch ${dispatchId} does not hold its exact created lab runtime cleanup receipt.`
+  )
 }
 
 /**
