@@ -88,6 +88,17 @@ function makeConfig(): Record<string, unknown> {
     file_opener: 'none',
     allow_login_shell: false,
     analytics: { enabled: false },
+    feedback: { enabled: false },
+    otel: {
+      tool_result: {},
+      log_user_prompt: false,
+      environment: null,
+      exporter: 'none',
+      trace_exporter: 'none',
+      metrics_exporter: 'none',
+      span_attributes: null,
+      tracestate: null
+    },
     history: { persistence: 'none', max_bytes: null },
     tools: {
       web_search: null,
@@ -328,6 +339,62 @@ describe('TASK-757 Codex app-server policy attestation', () => {
       ready: false,
       reason: 'effective_config_broadened',
       field: 'config.analytics'
+    })
+  })
+
+  it('rejects enabled or missing feedback', async () => {
+    const enabled = makeConfig()
+    enabled.feedback = { enabled: true }
+    const enabledCase = fakeInput({ config: { config: enabled, origins: {}, layers: [] } })
+    await expect(probeCodexLabAppServerReadiness(enabledCase.input)).resolves.toEqual({
+      ready: false,
+      reason: 'effective_config_broadened',
+      field: 'config.feedback'
+    })
+
+    const missing = makeConfig()
+    delete missing.feedback
+    const missingCase = fakeInput({ config: { config: missing, origins: {}, layers: [] } })
+    await expect(probeCodexLabAppServerReadiness(missingCase.input)).resolves.toEqual({
+      ready: false,
+      reason: 'effective_config_broadened',
+      field: 'config.feedback'
+    })
+  })
+
+  it.each([
+    { label: 'prompt logging', override: { log_user_prompt: true } },
+    { label: 'log export', override: { exporter: 'statsig' } },
+    { label: 'trace export', override: { trace_exporter: 'statsig' } },
+    { label: 'metrics export', override: { metrics_exporter: 'statsig' } },
+    { label: 'telemetry environment', override: { environment: 'production' } },
+    { label: 'span attributes', override: { span_attributes: { source: 'lab' } } },
+    { label: 'trace state', override: { tracestate: { vendor: { key: 'value' } } } }
+  ])('rejects broadened $label', async ({ override }) => {
+    const broadened = makeConfig()
+    const otel = broadened.otel
+    if (!otel || typeof otel !== 'object' || Array.isArray(otel)) {
+      throw new Error('test fixture is missing its OTEL configuration')
+    }
+    broadened.otel = { ...otel, ...override }
+    const { input } = fakeInput({
+      config: { config: broadened, origins: {}, layers: [] }
+    })
+    await expect(probeCodexLabAppServerReadiness(input)).resolves.toEqual({
+      ready: false,
+      reason: 'effective_config_broadened',
+      field: 'config.otel'
+    })
+  })
+
+  it('rejects missing telemetry confinement', async () => {
+    const missing = makeConfig()
+    delete missing.otel
+    const { input } = fakeInput({ config: { config: missing, origins: {}, layers: [] } })
+    await expect(probeCodexLabAppServerReadiness(input)).resolves.toEqual({
+      ready: false,
+      reason: 'effective_config_broadened',
+      field: 'config.otel'
     })
   })
 

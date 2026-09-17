@@ -81,6 +81,14 @@ export function validateCodexLabEffectiveConfig(
   if (!analytics || analytics.enabled !== false) {
     return invalid('config.analytics')
   }
+  const feedback = exactRecord(config.feedback, ['enabled'])
+  if (!feedback || feedback.enabled !== false) {
+    return invalid('config.feedback')
+  }
+  const telemetryFailure = validateTelemetryConfig(config.otel)
+  if (telemetryFailure) {
+    return telemetryFailure
+  }
   const tools = knownRecord(config.tools, [
     'web_search',
     'experimental_request_user_input',
@@ -119,6 +127,32 @@ export function validateCodexLabEffectiveConfig(
     return invalid('config.skills')
   }
   return validateCodexLabPermissionConfig(config.permissions, expected)
+}
+
+function validateTelemetryConfig(value: unknown): ValidationFailure | null {
+  const otel = knownRecord(value, [
+    'tool_result',
+    'log_user_prompt',
+    'environment',
+    'exporter',
+    'trace_exporter',
+    'metrics_exporter',
+    'span_attributes',
+    'tracestate'
+  ])
+  if (
+    !otel ||
+    otel.log_user_prompt !== false ||
+    otel.exporter !== 'none' ||
+    otel.trace_exporter !== 'none' ||
+    otel.metrics_exporter !== 'none' ||
+    !isAbsent(otel.environment) ||
+    !isAbsent(otel.span_attributes) ||
+    !isAbsent(otel.tracestate)
+  ) {
+    return invalid('config.otel')
+  }
+  return null
 }
 
 function validateScalarConfig(
