@@ -24,6 +24,7 @@ export const DISABLED_CODEX_LAB_FEATURES = [
   'plugins',
   'recommended_plugins',
   'remote_plugin',
+  'secret_auth_storage',
   'shell_snapshot',
   'skill_mcp_dependency_install',
   'skill_search',

@@ -115,6 +115,7 @@ describe('sealed Codex laboratory launch plan', () => {
     expect(plan.configToml).toContain('goals = false')
     expect(plan.configToml).toContain('sleep_tool = false')
     expect(plan.configToml).toContain('plugins = false')
+    expect(plan.configToml).toContain('secret_auth_storage = false')
     expect(plan.configToml).toContain('computer_use = false')
     expect(plan.configToml).toContain('image_generation = false')
     expect(plan.configToml).toContain('view_image = false')

@@ -437,6 +437,21 @@ describe('TASK-757 Codex app-server policy attestation', () => {
     })
   })
 
+  it('rejects encrypted Secrets auth storage so the direct keyring locator stays authoritative', async () => {
+    const withEncryptedAuthStorage = makeConfig()
+    const features = requireRecord(withEncryptedAuthStorage.features, 'features')
+    features.secret_auth_storage = true
+    const encryptedAuthCase = fakeInput({
+      config: { config: withEncryptedAuthStorage, origins: {}, layers: [] }
+    })
+
+    await expect(probeCodexLabAppServerReadiness(encryptedAuthCase.input)).resolves.toEqual({
+      ready: false,
+      reason: 'effective_config_broadened',
+      field: 'config.features.secret_auth_storage'
+    })
+  })
+
   it.each([
     [{ account: { type: 'apiKey' }, requiresOpenaiAuth: true }, 'account/read.account.type'],
     [
