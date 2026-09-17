@@ -61,7 +61,12 @@ function makeOpenedThread(): Record<string, unknown> {
 function makeAccount(): Record<string, unknown> {
   return {
     account: { type: 'chatgpt', email: null, planType: 'business' },
-    requiresOpenaiAuth: false
+    requiresOpenaiAuth: true,
+    workspaceRouting: {
+      chatgptAccountId: EXPECTED.workspaceId,
+      backendOrigin: 'https://chatgpt.com',
+      accountRoutingOverride: 'NO_CONSTRAINT'
+    }
   }
 }
 
@@ -366,14 +371,29 @@ describe('TASK-757 Codex app-server policy attestation', () => {
   })
 
   it.each([
-    [{ account: { type: 'apiKey' }, requiresOpenaiAuth: false }, 'account/read.account.type'],
+    [{ account: { type: 'apiKey' }, requiresOpenaiAuth: true }, 'account/read.account.type'],
     [
-      { account: { type: 'chatgpt', email: null, planType: 'plus' }, requiresOpenaiAuth: false },
+      { account: { type: 'chatgpt', email: null, planType: 'plus' }, requiresOpenaiAuth: true },
       'account/read.account.planType'
     ],
+    [{ ...makeAccount(), requiresOpenaiAuth: false }, 'account/read.requiresOpenaiAuth'],
     [
-      { account: { type: 'chatgpt', email: null, planType: 'business' }, requiresOpenaiAuth: true },
-      'account/read.requiresOpenaiAuth'
+      {
+        account: { type: 'chatgpt', email: null, planType: 'business' },
+        requiresOpenaiAuth: true
+      },
+      'account/read.workspaceRouting'
+    ],
+    [
+      {
+        ...makeAccount(),
+        workspaceRouting: {
+          chatgptAccountId: 'another_workspace',
+          backendOrigin: 'https://chatgpt.com',
+          accountRoutingOverride: 'NO_CONSTRAINT'
+        }
+      },
+      'account/read.workspaceRouting'
     ]
   ])('rejects non-workspace or unresolved account routing %#', async (account, field) => {
     const { input } = fakeInput({ account })

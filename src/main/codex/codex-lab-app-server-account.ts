@@ -20,12 +20,17 @@ export function validateCodexLabAccount(
   expected: CodexLabAppServerAttestationExpected
 ): ValidationFailure | null {
   const response = knownRecord(value, ['account', 'requiresOpenaiAuth', 'workspaceRouting'])
-  if (!response || response.requiresOpenaiAuth !== false) {
-    return invalid('account/read.requiresOpenaiAuth')
+  if (!response) {
+    return invalid('account/read')
   }
   const account = knownRecord(response.account, ['type', 'email', 'planType'])
   if (!account || account.type !== 'chatgpt') {
     return invalid('account/read.account.type')
+  }
+  // `requiresOpenaiAuth` describes the selected provider's auth requirement; it
+  // is true for the intended ChatGPT route even when that account is signed in.
+  if (response.requiresOpenaiAuth !== true) {
+    return invalid('account/read.requiresOpenaiAuth')
   }
   if (!CODEX_LAB_WORKSPACE_PLAN_TYPES.has(String(account.planType))) {
     return invalid('account/read.account.planType')
@@ -37,9 +42,6 @@ export function validateCodexLabAccount(
 }
 
 function validateWorkspaceRouting(value: unknown, workspaceId: string): ValidationFailure | null {
-  if (isAbsent(value)) {
-    return null
-  }
   const routing = knownRecord(value, [
     'chatgptAccountId',
     'backendOrigin',
