@@ -103,6 +103,170 @@ describe('federated fleet snapshots', () => {
     })
   })
 
+  it.each([
+    [
+      'non-boolean exactness',
+      {
+        runtimeEpoch: 'epoch-a',
+        items: [
+          { dispatchId: 'dispatch-a', observation: { status: 'live', exactWorker: 'yes' } },
+          { dispatchId: 'dispatch-b', observation: { status: 'live', exactWorker: true } }
+        ]
+      }
+    ],
+    [
+      'unknown status',
+      {
+        runtimeEpoch: 'epoch-a',
+        items: [
+          { dispatchId: 'dispatch-a', observation: { status: 'running', exactWorker: true } },
+          { dispatchId: 'dispatch-b', observation: { status: 'live', exactWorker: true } }
+        ]
+      }
+    ],
+    [
+      'positive status without exact worker identity',
+      {
+        runtimeEpoch: 'epoch-a',
+        items: [
+          { dispatchId: 'dispatch-a', observation: { status: 'live', exactWorker: false } },
+          { dispatchId: 'dispatch-b', observation: { status: 'live', exactWorker: true } }
+        ]
+      }
+    ],
+    [
+      'positive status with an absence reason',
+      {
+        runtimeEpoch: 'epoch-a',
+        items: [
+          {
+            dispatchId: 'dispatch-a',
+            observation: { status: 'exited', exactWorker: true, reason: 'missing_status' }
+          },
+          { dispatchId: 'dispatch-b', observation: { status: 'live', exactWorker: true } }
+        ]
+      }
+    ],
+    [
+      'duplicate id',
+      {
+        runtimeEpoch: 'epoch-a',
+        items: [
+          { dispatchId: 'dispatch-a', observation: { status: 'live', exactWorker: true } },
+          { dispatchId: 'dispatch-a', observation: { status: 'live', exactWorker: true } }
+        ]
+      }
+    ],
+    [
+      'missing id',
+      {
+        runtimeEpoch: 'epoch-a',
+        items: [{ dispatchId: 'dispatch-a', observation: { status: 'live', exactWorker: true } }]
+      }
+    ],
+    [
+      'unexpected id',
+      {
+        runtimeEpoch: 'epoch-a',
+        items: [
+          { dispatchId: 'dispatch-a', observation: { status: 'live', exactWorker: true } },
+          { dispatchId: 'dispatch-other', observation: { status: 'live', exactWorker: true } }
+        ]
+      }
+    ],
+    [
+      'invalid runtime epoch',
+      {
+        runtimeEpoch: '',
+        items: [
+          { dispatchId: 'dispatch-a', observation: { status: 'live', exactWorker: true } },
+          { dispatchId: 'dispatch-b', observation: { status: 'live', exactWorker: true } }
+        ]
+      }
+    ]
+  ])('degrades malformed %s wire truth to host_indeterminate', async (_name, wireSnapshot) => {
+    const dispatchIds = ['dispatch-a', 'dispatch-b']
+    const dispatches = new Map(
+      dispatchIds.map((dispatchId) => [
+        dispatchId,
+        federatedDispatch(dispatchId, 'peer-a', 'epoch-a')
+      ])
+    )
+    const updateFederatedDispatchRuntimeEpoch = vi.fn()
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This fixture supplies every OrchestrationDb method read by the snapshot collector.
+    const db = {
+      listFederatedDispatchesByIds: (ids: readonly string[]) =>
+        ids.flatMap((id) => {
+          const dispatch = dispatches.get(id)
+          return dispatch ? [dispatch] : []
+        }),
+      updateFederatedDispatchRuntimeEpoch,
+      ...observationFenceMethods()
+    } as unknown as OrchestrationDb
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This fixture supplies the two runtime methods the snapshot collector calls.
+    const runtime = {
+      resolveOrchestrationWorkerServer: () => ({
+        environmentId: 'environment-repointed',
+        name: 'repointed',
+        peerFingerprint: 'peer-a',
+        pairingRevision: 1
+      }),
+      callOrchestrationWorkerServer: vi.fn(async () => wireSnapshot)
+    } as unknown as OrcaRuntimeService
+
+    const result = await readFederatedFleetSnapshots({ runtime, db, dispatchIds })
+
+    expect(result.errors).toEqual([])
+    expect([...result.observations.entries()]).toEqual(
+      dispatchIds.map((dispatchId) => [
+        dispatchId,
+        { status: 'unverifiable', exactWorker: false, reason: 'host_indeterminate' }
+      ])
+    )
+    expect(updateFederatedDispatchRuntimeEpoch).not.toHaveBeenCalled()
+  })
+
+  it('ignores additive snapshot fields after strict known-field decoding', async () => {
+    const dispatch = federatedDispatch('dispatch-additive', 'peer-a', 'epoch-a')
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This fixture supplies every OrchestrationDb method read by the snapshot collector.
+    const db = {
+      listFederatedDispatchesByIds: () => [dispatch],
+      updateFederatedDispatchRuntimeEpoch: vi.fn(),
+      ...observationFenceMethods()
+    } as unknown as OrchestrationDb
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This fixture supplies the two runtime methods the snapshot collector calls.
+    const runtime = {
+      resolveOrchestrationWorkerServer: () => ({
+        environmentId: dispatch.environment_id,
+        name: dispatch.environment_name,
+        peerFingerprint: dispatch.peer_fingerprint,
+        pairingRevision: 1
+      }),
+      callOrchestrationWorkerServer: vi.fn(async () => ({
+        runtimeEpoch: 'epoch-a',
+        futureSnapshotField: true,
+        items: [
+          {
+            dispatchId: dispatch.dispatch_id,
+            futureItemField: true,
+            observation: { status: 'live', exactWorker: true, futureObservationField: true }
+          }
+        ]
+      }))
+    } as unknown as OrcaRuntimeService
+
+    const result = await readFederatedFleetSnapshots({
+      runtime,
+      db,
+      dispatchIds: [dispatch.dispatch_id]
+    })
+
+    expect(result.observations.get(dispatch.dispatch_id)).toEqual({
+      status: 'live',
+      exactWorker: true
+    })
+  })
+
   it('does not grant a snapshot call budget after the fleet deadline expires', async () => {
     // Five distinct peers exceed the host concurrency, so the last one only starts after the
     // first wave has already spent the whole fleet budget.
@@ -245,6 +409,7 @@ describe('federated fleet snapshots', () => {
           paneKey: null,
           worktreeId: null,
           terminalState: 'released',
+          federatedEnvironmentId: 'environment-offline',
           resource: null
         }
       ],
@@ -263,8 +428,7 @@ describe('federated fleet snapshots', () => {
             code: 'host_unavailable',
             dispatchIds: ['dispatch-released']
           }
-        ],
-        hosts: new Map([['dispatch-released', 'environment-offline']])
+        ]
       },
       new Map()
     )
@@ -272,6 +436,37 @@ describe('federated fleet snapshots', () => {
     expect(fleet.workers[0]).toMatchObject({
       host: { kind: 'remote', id: 'environment-offline' },
       liveness: { verdict: 'exited', source: 'execution_host' },
+      evidence: { liveStatus: 'unavailable', lastObservedAt: null }
+    })
+  })
+
+  it('does not let host observation override conflicting durable host authority', () => {
+    const durableWorker = {
+      ...runningFederatedWorker('dispatch-conflicting-host'),
+      dispatchHostScope: JSON.stringify({ kind: 'ssh', targetId: 'environment-linux' }),
+      federatedEnvironmentId: 'environment-windows'
+    }
+    const fleet = projectOrchestrationFleet({
+      workers: [durableWorker],
+      statuses: [],
+      now: 1
+    })
+
+    applyFederatedFleetObservations(
+      fleet,
+      {
+        observations: new Map([
+          ['dispatch-conflicting-host', { status: 'live' as const, exactWorker: true }]
+        ]),
+        errors: []
+      },
+      new Map([[durableWorker.dispatchId, durableWorker]]),
+      2
+    )
+
+    expect(fleet.workers[0]).toMatchObject({
+      host: { kind: 'remote', id: 'unknown' },
+      liveness: { verdict: 'unverifiable', reason: 'host_indeterminate' },
       evidence: { liveStatus: 'unavailable', lastObservedAt: null }
     })
   })

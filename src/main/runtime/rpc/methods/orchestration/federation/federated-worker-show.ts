@@ -20,7 +20,6 @@ export function projectFederatedFleetWorker(args: {
   runtime: OrcaRuntimeService
   db: OrchestrationDb
   dispatchId: string
-  environmentId: string
   observation: { status?: string; exactWorker: boolean; reason?: string }
 }): OrchestrationFleetWorker | null {
   const fleet = projectFleetWorkerPage(args.runtime, args.db, args.dispatchId)
@@ -45,8 +44,7 @@ export function projectFederatedFleetWorker(args: {
           }
         ]
       ]),
-      errors: [],
-      hosts: new Map([[args.dispatchId, args.environmentId]])
+      errors: []
     },
     fleet.durable
   )
@@ -102,7 +100,6 @@ export async function showFederatedWorker(args: {
       runtime,
       db,
       dispatchId,
-      environmentId: server.environmentId,
       observation
     }),
     server: { environmentId: server.environmentId, name: server.name },
