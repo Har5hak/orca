@@ -133,10 +133,11 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
     path: ['orchestration', 'task-create'],
     summary: 'Create an orchestration task',
     usage:
-      'orca orchestration task-create --spec <text> [--task-title <text>] [--display-name <text>] [--deps <json_array>] [--parent <task_id>] [--run <run_id>] [--from <handle>] [--retry-request <id>] [--json]',
+      'orca orchestration task-create --spec <text> [--delivery-key <immutable_key>] [--task-title <text>] [--display-name <text>] [--deps <json_array>] [--parent <task_id>] [--run <run_id>] [--from <handle>] [--retry-request <id>] [--json]',
     allowedFlags: [
       ...GLOBAL_FLAGS,
       'spec',
+      'delivery-key',
       'task-title',
       'display-name',
       'deps',
@@ -144,6 +145,9 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
       'run',
       'from',
       'retry-request'
+    ],
+    notes: [
+      '--delivery-key atomically creates or adopts one root Task. It cannot be combined with --parent.'
     ]
   },
   {
