@@ -9,6 +9,7 @@ import {
   isCodexAppServerRequestError,
   type CodexAppServerConnection
 } from './codex-app-server-connection'
+import { CODEX_LAB_DYNAMIC_TOOL_SPECS } from './codex-lab-dynamic-tool-contract'
 import type { CodexStructuredPermissionPolicy } from './codex-structured-permission-policy'
 import { readCodexThreadId, readCodexThreadPath } from './codex-structured-thread-facts'
 
@@ -70,9 +71,13 @@ export async function openCodexThread(
     resumeThreadId: string | null
     resumePath?: string | null
     permissionPolicy?: CodexStructuredPermissionPolicy
+    workerAccessMode?: 'orca-cli' | 'lab-gateway'
   },
   timeoutMs: number | undefined
 ): Promise<CodexOpenedThread> {
+  if (launch.workerAccessMode === 'lab-gateway' && launch.resumeThreadId !== null) {
+    throw new Error('Codex laboratory profiles are disposable and cannot resume provider threads')
+  }
   const resumeParams = launch.resumeThreadId
     ? {
         threadId: launch.resumeThreadId,
@@ -85,7 +90,13 @@ export async function openCodexThread(
     ? await resumeCodexThread(connection, resumeParams, timeoutMs)
     : await connection.request(
         'thread/start',
-        { cwd: launch.cwd, ...launch.permissionPolicy },
+        {
+          cwd: launch.cwd,
+          ...launch.permissionPolicy,
+          ...(launch.workerAccessMode === 'lab-gateway'
+            ? { dynamicTools: CODEX_LAB_DYNAMIC_TOOL_SPECS }
+            : {})
+        },
         { timeoutMs }
       )
   const threadId = readCodexThreadId(opened)

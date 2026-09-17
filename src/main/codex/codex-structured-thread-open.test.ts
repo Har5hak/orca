@@ -15,7 +15,7 @@ function connectionFor(
 
 describe('openCodexThread', () => {
   it('applies the resolved permission policy when starting and resuming a thread', async () => {
-    const request = vi.fn(async (method: string) => ({
+    const request = vi.fn(async (method: string, _params?: Record<string, unknown>) => ({
       thread: { id: method === 'thread/start' ? 'thread-created' : 'thread-existing' }
     }))
     const connection = connectionFor(request)
@@ -41,6 +41,7 @@ describe('openCodexThread', () => {
       { cwd: '/workspace', approvalPolicy: 'never', sandbox: 'danger-full-access' },
       { timeoutMs: 2_000 }
     )
+    expect(request.mock.calls[0]?.[1]).not.toHaveProperty('dynamicTools')
     expect(request).toHaveBeenNthCalledWith(
       2,
       'thread/resume',
