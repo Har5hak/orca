@@ -73,6 +73,7 @@ describe('sealed Codex laboratory launch plan', () => {
       }
     })
     expect(plan.configToml).toContain('approval_policy = "never"')
+    expect(plan.configToml).toContain('allow_login_shell = false')
     expect(plan.configToml).toContain('default_permissions = "orca-lab-readonly-v1"')
     expect(plan.configToml).toContain(
       '[permissions.orca-lab-readonly-v1]\ndescription = "Orca attended disposable read-only laboratory worker"\nextends = ":read-only"'
@@ -103,6 +104,11 @@ describe('sealed Codex laboratory launch plan', () => {
     expect(plan.configToml).toContain('experimental_use_profile = false')
     expect(plan.configToml).toContain('persistence = "none"')
     expect(plan.configToml).toContain('multi_agent = false')
+    expect(plan.configToml).toContain('memories = false')
+    expect(plan.configToml).toContain('shell_snapshot = false')
+    expect(plan.configToml).toContain('code_mode_host = false')
+    expect(plan.configToml).toContain('goals = false')
+    expect(plan.configToml).toContain('sleep_tool = false')
     expect(plan.configToml).toContain('plugins = false')
     expect(plan.configToml).toContain('computer_use = false')
     expect(plan.configToml).toContain('image_generation = false')
