@@ -7,6 +7,7 @@ import { OrchestrationDb } from '../../../../orchestration/db'
 
 const mocks = vi.hoisted(() => ({
   resolveProfileAdmission: vi.fn(),
+  startLocalLabWorker: vi.fn(),
   startLocalWorker: vi.fn()
 }))
 
@@ -16,6 +17,9 @@ vi.mock('./worker-start-profile-admission', () => ({
 }))
 
 vi.mock('./local-worker-start', () => ({ startLocalWorker: mocks.startLocalWorker }))
+vi.mock('./local-lab-worker-start', () => ({
+  startLocalLabWorker: mocks.startLocalLabWorker
+}))
 
 import { ORCHESTRATION_WORKER_START_METHODS } from './workers'
 
@@ -125,10 +129,10 @@ describe('worker-start profile admission boundary', () => {
     expect(mocks.startLocalWorker).not.toHaveBeenCalled()
   })
 
-  it('passes the frozen admission into local start without a mutable worktree selector', async () => {
+  it('branches to the dedicated lab start before generic mode or local launch preparation', async () => {
     const { runtime } = createRuntime([LAB_READONLY_PROFILE_RUNTIME_CAPABILITY])
     mocks.resolveProfileAdmission.mockReturnValueOnce(ADMISSION)
-    mocks.startLocalWorker.mockResolvedValueOnce({ state: 'ready' })
+    mocks.startLocalLabWorker.mockResolvedValueOnce({ state: 'ready' })
 
     await expect(callWorkerStart(runtime)).resolves.toEqual({ state: 'ready' })
 
@@ -136,11 +140,12 @@ describe('worker-start profile admission boundary', () => {
     expect(mocks.resolveProfileAdmission).toHaveBeenCalledWith(
       expect.objectContaining(PROFILE_PARAMS)
     )
-    expect(mocks.startLocalWorker).toHaveBeenCalledWith(
+    expect(mocks.startLocalLabWorker).toHaveBeenCalledWith(
       expect.objectContaining({
-        profileAdmission: ADMISSION,
+        admission: ADMISSION,
         params: expect.not.objectContaining({ worktree: expect.anything() })
       })
     )
+    expect(mocks.startLocalWorker).not.toHaveBeenCalled()
   })
 })

@@ -2,6 +2,7 @@ import { OrchestrationError } from '../../../../orchestration/orchestration-erro
 import { defineMethod } from '../../../core'
 import { startFederatedWorker } from '../federation/federated-worker-start'
 import { startLocalWorker } from './local-worker-start'
+import { startLocalLabWorker } from './local-lab-worker-start'
 import {
   decideWorkerStartMode,
   readWorkerStartModeSettings
@@ -69,6 +70,18 @@ export const ORCHESTRATION_WORKER_START_METHODS = [
         )
       }
       await assertWorkerStartTaskSpecWithinPromptBudget(params.spec ?? existingTask!.spec)
+      if (profileAdmission) {
+        return startLocalLabWorker({
+          params: { ...params, timeoutMs: readinessTimeoutMs },
+          runtime,
+          db,
+          run,
+          coordinatorPane,
+          existingTask,
+          orchestrationMutation,
+          admission: profileAdmission
+        })
+      }
       const mode = decideWorkerStartMode({
         params,
         settings: readWorkerStartModeSettings(runtime)
