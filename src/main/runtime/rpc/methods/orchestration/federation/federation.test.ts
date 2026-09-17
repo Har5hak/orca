@@ -172,24 +172,7 @@ describe('orchestration federation', () => {
     )
   })
 
-  it('does not report remotely rejected preferences as effective', async () => {
-    const task = createHomeTask()
-
-    const response = await homeDispatcher.dispatch(
-      startRequest(task.id, { agent: 'grok', model: 'unsupported-model' })
-    )
-
-    expect(response).toMatchObject({
-      ok: true,
-      result: {
-        state: 'failed',
-        launch: {
-          requested: { agent: 'grok', model: 'unsupported-model', effort: null },
-          effective: null
-        }
-      }
-    })
-  })
+  // Provider persistence and precedence live in federated-worker-provider-projection.test.ts.
 
   it('preserves wait-for-setup gating on the connected worker server', async () => {
     vi.mocked(workerRuntime.createManagedWorktree).mockResolvedValueOnce({

@@ -37,6 +37,13 @@ export type FleetDurableWorker = {
   pendingApproval?: boolean
   terminationReason?: 'operator_close' | 'signaled' | 'exited' | 'unknown' | null
   outcome?: 'in_progress' | 'succeeded' | 'failed' | 'outcome_unknown' | 'finished_unverified'
+  durableProviderTruth?: {
+    requested: { id: string | null; model: string | null; effort: string | null } | null
+    effective: { id: string | null; model: string | null; effort: string | null } | null
+    effectiveSource: 'launch_receipt' | 'legacy_start_options' | null
+  }
+  /** Pre-provider-truth fixture/row compatibility; new listing code supplies the full receipt. */
+  durableProvider?: { id: string; model: string | null } | null
   dispatchHostScope?: string | null
   /** Compatibility for federated rows created before Dispatch host scope was stamped. */
   federatedEnvironmentId?: string | null
@@ -102,7 +109,29 @@ export type OrchestrationFleetWorker = {
   runId: string
   role: 'worker'
   parent: { taskId: string } | null
-  provider: { id: string; model: string | null } | null
+  provider: { id: string; model: string | null }
+  providerTruth: {
+    requested: {
+      id: string | null
+      model: string | null
+      effort: string | null
+      source: 'launch_request'
+    } | null
+    effective: {
+      id: string | null
+      model: string | null
+      effort: string | null
+      source: 'launch_receipt' | 'legacy_start_options'
+    } | null
+    observed: {
+      id: string | null
+      model: string | null
+      effort: null
+      source: 'agent_status'
+      observedAt: number
+      freshness: 'fresh' | 'stale' | 'unverifiable'
+    } | null
+  }
   host: { kind: 'local' | 'remote'; id: string }
   workspace: { id: string; kind: 'folder_or_worktree' } | null
   stage: {

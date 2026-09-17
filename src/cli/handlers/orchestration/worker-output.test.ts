@@ -18,6 +18,7 @@ function fleetProjection(verdict: 'live' | 'unverifiable' | 'exited'): Orchestra
     role: 'worker',
     parent: null,
     provider: { id: 'codex', model: null },
+    providerTruth: { requested: null, effective: null, observed: null },
     host: { kind: 'local', id: 'local' },
     workspace: { id: 'ws_1', kind: 'folder_or_worktree' },
     stage: { worker: 'ready', dispatch: 'dispatched', detail: null, activity: 'working' },

@@ -175,18 +175,14 @@ describe('orchestration worker launch preferences', () => {
     ).toBe(true)
   })
 
-  it('uses the requested launch receipt when an older worker omits it', () => {
+  it('keeps effective launch unknown when an older worker omits confirmation', () => {
     const requested = createPendingWorkerLaunchReceipt({
       agent: 'codex',
       model: 'gpt-5.6-sol',
       effort: 'high'
     })
 
-    expect(resolveFederatedWorkerLaunchReceipt(undefined, requested, true)).toEqual({
-      requested: requested.requested,
-      effective: requested.requested
-    })
-    expect(resolveFederatedWorkerLaunchReceipt(undefined, requested, false)).toBe(requested)
+    expect(resolveFederatedWorkerLaunchReceipt(undefined, requested)).toBe(requested)
   })
 
   it.each([' custom-model', 'custom-model '])(
