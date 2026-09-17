@@ -10,6 +10,7 @@ type WorkerListResult = {
   workers: {
     dispatchId: string
     projection: { attention: { categories: string[] } }
+    terminalState: string | null
   }[]
   counts: Record<string, number>
   page: { total: number; hasMore: boolean; nextCursor: string | null }
@@ -498,6 +499,48 @@ describe('orchestration worker-list pagination', () => {
     expect(all.counts).toEqual({ active: 1 })
     expect(active.workers.map((worker) => worker.dispatchId)).toEqual(['dispatch-unsupervised'])
     expect(active.page.total).toBe(1)
+  })
+
+  it('rejects partially valid prior-owner history consistently across detail and counts', async () => {
+    db = new OrchestrationDb(':memory:')
+    const runtime = new OrcaRuntimeService()
+    runtime.setOrchestrationDb(db)
+    const run = db.createRun({
+      objective: 'Invalid prior-owner history',
+      coordinatorHandle: 'term-coordinator',
+      coordinatorPaneKey: 'tab-coordinator:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    })
+    insertDispatch(db, run.id, 'dispatch-former')
+    insertWorkerInventory(db, run.id, 'dispatch-owner', 'succeeded', 'released', 'released')
+    sqliteFor(db)
+      .prepare(
+        `UPDATE worker_terminal_resources
+            SET prior_owner_dispatch_ids = ?
+          WHERE owner_dispatch_id = ?`
+      )
+      .run(JSON.stringify(['dispatch-former', 7]), 'dispatch-owner')
+
+    const all = await callWorkerList(runtime, { run: run.id })
+    const released = await callWorkerList(runtime, {
+      run: run.id,
+      terminalState: 'released'
+    })
+    const retained = await callWorkerList(runtime, {
+      run: run.id,
+      terminalState: 'retained'
+    })
+
+    expect(
+      all.workers.map(({ dispatchId, terminalState }) => ({ dispatchId, terminalState }))
+    ).toEqual([
+      { dispatchId: 'dispatch-former', terminalState: 'retained' },
+      { dispatchId: 'dispatch-owner', terminalState: 'released' }
+    ])
+    expect(all.counts).toEqual({ retained: 1, released: 1 })
+    expect(released.workers.map((worker) => worker.dispatchId)).toEqual(['dispatch-owner'])
+    expect(released.page.total).toBe(1)
+    expect(retained.workers.map((worker) => worker.dispatchId)).toEqual(['dispatch-former'])
+    expect(retained.page.total).toBe(1)
   })
 
   describe('a legacy cursor anchored outside the requested Run', () => {

@@ -264,6 +264,37 @@ describe('orchestration fleet projection', () => {
     expect(result.workers[0]?.provider).toBeNull()
   })
 
+  it('rejects exact status after terminal custody transfers to another Dispatch', () => {
+    const result = projectOrchestrationFleet({
+      workers: [
+        worker('old-owner', {
+          resource: {
+            id: 'resource-transferred',
+            ownerDispatchId: 'new-owner',
+            worktreeId: 'workspace-old-owner',
+            paneKey: 'tab-old-owner:leaf-old-owner',
+            processIncarnation: 'pty-old-owner:inc-1',
+            hostScope: JSON.stringify({ kind: 'local', hostId: 'local' }),
+            ownershipState: 'transferred',
+            releaseState: 'active',
+            updatedAt: '2026-09-17T00:00:00Z'
+          }
+        })
+      ],
+      statuses: [
+        status('old-owner', 100, {
+          orchestration: { taskId: 'task-old-owner', dispatchId: 'old-owner' }
+        })
+      ],
+      now: 100
+    })
+
+    expect(result.workers[0]).toMatchObject({
+      resource: { state: 'transferred', ownerDispatchId: 'new-owner' },
+      liveness: { verdict: 'unverifiable', reason: 'missing_status' }
+    })
+  })
+
   it('accepts a reminted pane when the Dispatch and terminal handle both match', () => {
     const durable = worker('dispatch-1', {
       paneKey: 'old-tab:old-leaf',

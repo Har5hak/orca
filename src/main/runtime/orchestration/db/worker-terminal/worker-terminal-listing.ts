@@ -16,6 +16,7 @@ import {
   countWorkerTerminalInventory,
   scanWorkerTerminalStates
 } from './worker-terminal-inventory-counts'
+import { readWorkerTerminalResourceRelations } from './worker-terminal-resource-relations'
 import { markWorkerTerminalUserOwned } from './worker-terminal-user-takeover'
 
 export {
@@ -200,20 +201,13 @@ export function listWorkerTerminalResources(
     created_at: string
     database_id: number
   }[]
-  const resources =
-    rows.length === 0
-      ? []
-      : (this.db
-          .prepare(
-            `SELECT r.* FROM worker_terminal_resources r
-               WHERE r.owner_dispatch_id IN (${rows.map(() => '?').join(',')})`
-          )
-          .all(...rows.map((row) => row.dispatch_id)) as WorkerTerminalResourceRow[])
-  const resourceByOwner = new Map(
-    resources.map((resource) => [resource.owner_dispatch_id, resource])
+  const resourceRelations = readWorkerTerminalResourceRelations(
+    this,
+    rows.map((row) => row.dispatch_id)
   )
   return rows.map((row) => {
-    const resource = resourceByOwner.get(row.dispatch_id) ?? null
+    const resourceRelation = resourceRelations.get(row.dispatch_id)
+    const resource = resourceRelation?.resource ?? null
     return {
       dispatchId: row.dispatch_id,
       taskId: row.task_id,
@@ -228,7 +222,8 @@ export function listWorkerTerminalResources(
       terminalState: deriveWorkerTerminalListState({
         workerState: row.worker_state,
         agentTerminalHandle: row.agent_terminal_handle,
-        resource
+        resource,
+        isCurrentResourceOwner: resourceRelation?.relation === 'current_owner'
       }),
       pendingInput: row.pending_input === 1,
       pendingApproval: row.pending_approval === 1,

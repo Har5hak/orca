@@ -103,11 +103,14 @@ function projectResource(worker: FleetDurableWorker): FleetResourceProjection {
       reason: worker.workerState === 'unsupervised' ? 'unsupervised' : 'not_materialized'
     }
   }
-  const state = ['owned', 'transferred', 'user_owned', 'external', 'released'].includes(
-    resource.ownershipState
-  )
-    ? (resource.ownershipState as Exclude<FleetResourceProjection['state'], 'absent'>)
-    : 'external'
+  const state =
+    resource.ownerDispatchId !== worker.dispatchId
+      ? 'transferred'
+      : ['owned', 'transferred', 'user_owned', 'external', 'released'].includes(
+            resource.ownershipState
+          )
+        ? (resource.ownershipState as Exclude<FleetResourceProjection['state'], 'absent'>)
+        : 'external'
   return {
     state,
     id: resource.id,
@@ -144,7 +147,9 @@ export function projectFleetNextAction(
   // A settled worker still owning its terminal owes the release decision. Pointing it at
   // worker-show was a self-loop: the command that reported the settlement.
   if (SETTLED_WORKER_STATES.has(worker.workerState) && worker.resource) {
-    return worker.resource.ownershipState === 'owned' && worker.resource.releaseState !== 'released'
+    return worker.resource.ownerDispatchId === worker.dispatchId &&
+      worker.resource.ownershipState === 'owned' &&
+      worker.resource.releaseState !== 'released'
       ? {
           kind: 'release',
           argv: ['orchestration', 'worker-release', '--dispatch', worker.dispatchId]

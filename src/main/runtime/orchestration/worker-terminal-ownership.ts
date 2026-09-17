@@ -95,6 +95,7 @@ export function deriveWorkerTerminalListState(params: {
   workerState: WorkerDispatchListState
   agentTerminalHandle: string | null
   resource: Pick<WorkerTerminalResourceRow, 'ownership_state' | 'release_state'> | null
+  isCurrentResourceOwner: boolean
 }): WorkerTerminalListState | null {
   const { resource } = params
   if (!resource) {
@@ -108,6 +109,9 @@ export function deriveWorkerTerminalListState(params: {
   }
   if (resource.release_state === 'requested' || resource.release_state === 'releasing') {
     return 'release_pending'
+  }
+  if (!params.isCurrentResourceOwner) {
+    return null
   }
   if (resource.ownership_state !== 'owned' || resource.release_state === 'retained') {
     return 'retained'
