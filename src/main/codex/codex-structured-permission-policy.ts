@@ -1,9 +1,17 @@
 import type { GlobalSettings } from '../../shared/global-settings-types'
 import { resolvedTuiAgentArgsBypassPermissions } from '../../shared/tui-agent-launch-defaults'
+import { CODEX_LAB_PERMISSION_PROFILE_ID } from '../runtime/orchestration/lab-profile/codex-lab-launch-policy'
+
+export const CODEX_LAB_READONLY_PERMISSION_PROFILE_ID = CODEX_LAB_PERMISSION_PROFILE_ID
 
 export type CodexStructuredPermissionPolicy =
   | { approvalPolicy: 'never'; sandbox: 'danger-full-access' }
   | { approvalPolicy: 'on-request'; sandbox: 'workspace-write' }
+  | {
+      approvalPolicy: 'never'
+      permissions: typeof CODEX_LAB_READONLY_PERMISSION_PROFILE_ID
+      runtimeWorkspaceRoots: readonly [string]
+    }
 
 /** Yolo: no approval prompts, no sandbox. */
 const BYPASS_POLICY = { approvalPolicy: 'never', sandbox: 'danger-full-access' } as const

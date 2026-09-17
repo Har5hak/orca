@@ -37,12 +37,14 @@
 
 import { getAppEnvironment, hasAppEnvironment } from '../../shared/app-environment'
 import { prependOrcaCliDirToChildPath } from '../cli/orca-cli-child-path'
+import { resolvePathEnvKey } from '../pty/windows-environment-path'
 import { ORCA_STRUCTURED_SESSION_ENV } from '../../shared/structured-session-marker'
 import { structuredWorkerIdentities } from './structured-worker-identity'
 
 export function structuredWorkerChildIdentityEnv(
   sessionId: string,
-  childEnv: Record<string, string>
+  childEnv: Record<string, string>,
+  options: { inheritAmbientPath?: boolean } = {}
 ): Record<string, string> {
   const identity = structuredWorkerIdentities.getBySessionId(sessionId)
   if (!identity) {
@@ -53,7 +55,7 @@ export function structuredWorkerChildIdentityEnv(
     ORCA_TERMINAL_HANDLE: identity.handle,
     ORCA_CLI_COMMAND: 'orca'
   }
-  applyOrcaCliPath(env)
+  applyOrcaCliPath(env, options.inheritAmbientPath !== false)
   return env
 }
 
@@ -61,9 +63,13 @@ export function structuredWorkerChildIdentityEnv(
  * A host with no app environment installed — a plain-Node fork, or a unit test — has no userData
  * root to resolve, and inventing one would write a shim into the wrong directory.
  */
-function applyOrcaCliPath(env: Record<string, string>): void {
+function applyOrcaCliPath(env: Record<string, string>, inheritAmbientPath: boolean): void {
   if (!hasAppEnvironment()) {
     return
+  }
+  if (!inheritAmbientPath) {
+    const pathKey = resolvePathEnvKey(env, process.platform)
+    env[pathKey] ??= ''
   }
   const app = getAppEnvironment()
   prependOrcaCliDirToChildPath(env, {

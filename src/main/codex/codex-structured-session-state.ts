@@ -16,6 +16,7 @@ import type { CodexJournalTranslator } from './codex-structured-journal-translat
 import type { CodexTurnProcessSnapshot } from './codex-structured-turn-processes'
 import type { StructuredAgentSessionLifecycleEvent } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type { CodexStructuredPermissionPolicy } from './codex-structured-permission-policy'
+import type { CodexAppServerEnvironmentMode } from './codex-app-server-environment'
 
 export type CodexStructuredLaunch = {
   command: string
@@ -26,6 +27,7 @@ export type CodexStructuredLaunch = {
   resumePath?: string | null
   permissionPolicy?: CodexStructuredPermissionPolicy
   env?: Record<string, string>
+  environmentMode?: CodexAppServerEnvironmentMode
 }
 
 export type CodexStructuredSessionEvent =

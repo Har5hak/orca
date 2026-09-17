@@ -1,5 +1,13 @@
 /** Per-command flag help, kept out of the shared help chain it would crowd. */
 const COMMAND_SCOPED_FLAG_HELP: Record<string, Record<string, string>> = {
+  'orchestration worker-start': {
+    profile: '--profile <profile>   Versioned supervised execution profile',
+    adapter: '--adapter <adapter>   Versioned provider adapter for the profile',
+    'worktree-identity':
+      '--worktree-identity <identity> Immutable wt2 execution-host/occupant identity',
+    'expected-worktree-path':
+      '--expected-worktree-path <absolute-path> Independently supplied exact checkout path'
+  },
   'skills get': {
     full: '--full                 Print the full guide with bundled references',
     reference: '--reference <name>     Print one bundled reference by name',

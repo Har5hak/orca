@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ORCHESTRATION_COMMAND_SPECS } from './orchestration'
+import { formatCommandHelp } from '../help'
 
 describe('orchestration send command spec', () => {
   it('documents valid message types and the question reply path', () => {
@@ -53,6 +54,23 @@ describe('orchestration worker-start command spec', () => {
     expect(notes).not.toContain('the same worker-read sources')
     expect(notes).toContain('Not every worker has a terminal')
     expect(notes).toContain('--source transcript')
+  })
+
+  it('exposes the four explicit lab profile admission inputs without overloading --worktree', () => {
+    expect(startSpec?.allowedFlags).toEqual(
+      expect.arrayContaining(['profile', 'adapter', 'worktree-identity', 'expected-worktree-path'])
+    )
+    expect(startSpec?.usage).toContain('--profile <profile>')
+    expect(startSpec?.usage).toContain('--adapter <adapter>')
+    expect(startSpec?.usage).toContain('--worktree-identity <identity>')
+    expect(startSpec?.usage).toContain('--expected-worktree-path <absolute-path>')
+    const help = formatCommandHelp(startSpec!)
+    expect(help).toContain('--profile <profile>')
+    expect(help).toContain('Versioned supervised execution profile')
+    expect(help).toContain('--adapter <adapter>')
+    expect(help).toContain('--worktree-identity <identity>')
+    expect(help).toContain('--expected-worktree-path <absolute-path>')
+    expect(help).not.toContain('--profile <id>        Browser profile id')
   })
 })
 
