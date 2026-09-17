@@ -10,10 +10,14 @@ export function buildCodexStructuredChildEnvironment(
   return {
     // Only a dispatched structured worker gets the orchestration identity and the Orca CLI on
     // PATH; an ordinary chat session's env passes through untouched.
-    ...structuredWorkerChildIdentityEnv(sessionId, {
-      ...launch.env,
-      ...(launch.codexHome ? { CODEX_HOME: launch.codexHome } : {})
-    }),
+    ...structuredWorkerChildIdentityEnv(
+      sessionId,
+      {
+        ...launch.env,
+        ...(launch.codexHome ? { CODEX_HOME: launch.codexHome } : {})
+      },
+      { inheritAmbientPath: launch.environmentMode !== 'exact' }
+    ),
     [CODEX_SPAWN_TOKEN_ENV]: spawnToken
   }
 }

@@ -10,14 +10,25 @@ import { isDevCliInvocation } from './runtime-compatibility'
 import { resolveCoordinatorTerminalHandle } from './terminal-identity'
 import { formatWorkerStart } from './worker-output'
 import { renderResolvedOrchestrationCommand } from '../../orchestration-mutation-recovery'
+import { LAB_READONLY_PROFILE_RUNTIME_CAPABILITY } from '../../../shared/rpc-contract/orchestration-worker-start-params'
 
 export const ORCHESTRATION_WORKER_LAUNCH_HANDLER: Record<string, CommandHandler> = {
   'orchestration worker-start': async ({ flags, client, cwd, json }) => {
     const model = getOptionalStringFlag(flags, 'model')
     const effort = getOptionalStringFlag(flags, 'effort')
-    if (model || effort) {
+    const profile = getOptionalStringFlag(flags, 'profile')
+    const adapter = getOptionalStringFlag(flags, 'adapter')
+    const worktreeIdentity = getOptionalStringFlag(flags, 'worktree-identity')
+    const expectedWorktreePath = getOptionalStringFlag(flags, 'expected-worktree-path')
+    const requestsProfileAdmission =
+      profile !== undefined ||
+      adapter !== undefined ||
+      worktreeIdentity !== undefined ||
+      expectedWorktreePath !== undefined
+    if (model || effort || requestsProfileAdmission) {
       const status = await client.call<RuntimeStatus>('status.get')
       if (
+        (model || effort) &&
         !status.result.capabilities?.includes(
           ORCHESTRATION_WORKER_LAUNCH_PREFERENCES_RUNTIME_CAPABILITY
         )
@@ -25,6 +36,15 @@ export const ORCHESTRATION_WORKER_LAUNCH_HANDLER: Record<string, CommandHandler>
         throw new RuntimeClientError(
           'incompatible_runtime',
           'The connected Orca runtime does not support worker model or effort overrides. Update or restart Orca and try again.'
+        )
+      }
+      if (
+        requestsProfileAdmission &&
+        !status.result.capabilities?.includes(LAB_READONLY_PROFILE_RUNTIME_CAPABILITY)
+      ) {
+        throw new RuntimeClientError(
+          'incompatible_runtime',
+          'The connected Orca runtime is not ready to enforce the requested supervised execution profile.'
         )
       }
     }
@@ -53,6 +73,10 @@ export const ORCHESTRATION_WORKER_LAUNCH_HANDLER: Record<string, CommandHandler>
       ...(parent ? { parent } : {}),
       on: getOptionalStringFlag(flags, 'on'),
       worktree: getOptionalStringFlag(flags, 'worktree'),
+      profile,
+      adapter,
+      worktreeIdentity,
+      expectedWorktreePath,
       name: getOptionalStringFlag(flags, 'name'),
       repo: getOptionalStringFlag(flags, 'repo'),
       baseBranch: getOptionalStringFlag(flags, 'base-branch'),

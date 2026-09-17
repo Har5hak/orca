@@ -264,6 +264,15 @@ export const AGENT_LAUNCH_REPLAY_RUNTIME_CAPABILITY = 'agent.launch.replay.v1' a
 export const AGENT_LAUNCH_REPLAY_REQUIRED_RUNTIME_CAPABILITY =
   'agent.launch.replay-required.v1' as const
 
+/**
+ * Dynamic host readiness for the narrow attended Codex laboratory profile.
+ *
+ * Deliberately absent from `RUNTIME_CAPABILITIES`: protocol support is not launch authorization.
+ * A host may advertise this only after its local profile probes and cleanup reconciliation pass.
+ */
+export const LAB_READONLY_PROFILE_RUNTIME_CAPABILITY =
+  'orchestration.lab-readonly-profile.v1' as const
+
 // Generic native clients include the CLI and must not claim Electron-only page
 // placement support.
 export const NATIVE_REMOTE_RUNTIME_CLIENT_CAPABILITIES = [

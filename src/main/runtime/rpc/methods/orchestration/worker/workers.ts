@@ -13,6 +13,11 @@ import {
   resolveWorkerStartReadinessTimeoutMs
 } from '../../../../../../shared/orchestration-timing-budgets'
 import { assertWorkerStartTaskSpecWithinPromptBudget } from './worker-start-prompt-budget'
+import {
+  LAB_PROFILE_REFUSAL_CODE,
+  resolveWorkerStartProfileAdmission
+} from './worker-start-profile-admission'
+import { LAB_READONLY_PROFILE_RUNTIME_CAPABILITY } from '../../../../../../shared/rpc-contract/orchestration-worker-start-params'
 
 export const ORCHESTRATION_WORKER_START_METHODS = [
   defineMethod({
@@ -22,6 +27,21 @@ export const ORCHESTRATION_WORKER_START_METHODS = [
       params,
       { runtime, orchestrationMutation, orchestrationCompatibilityEvidence }
     ) => {
+      const profileAdmission = resolveWorkerStartProfileAdmission(params)
+      if (
+        profileAdmission &&
+        !runtime
+          .getStatus()
+          .capabilities?.some(
+            (capability) => capability === LAB_READONLY_PROFILE_RUNTIME_CAPABILITY
+          )
+      ) {
+        throw new OrchestrationError(
+          LAB_PROFILE_REFUSAL_CODE,
+          'This runtime has not advertised the requested lab execution profile.',
+          { reason: 'profile_capability_unavailable' }
+        )
+      }
       if (!isWorkerStartTimeoutWithinTimerLimit(params.timeoutMs)) {
         throw new OrchestrationError(
           'invalid_argument',
@@ -74,7 +94,8 @@ export const ORCHESTRATION_WORKER_START_METHODS = [
         coordinatorPane,
         existingTask,
         orchestrationMutation,
-        mode
+        mode,
+        profileAdmission
       })
     }
   })

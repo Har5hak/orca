@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CODEX_SPAWN_TOKEN_ENV } from './codex-structured-owner-identity'
 import { buildCodexStructuredChildEnvironment } from './codex-structured-child-environment'
 import { ORCA_STRUCTURED_SESSION_ENV } from '../../shared/structured-session-marker'
@@ -10,6 +10,10 @@ import {
 } from '../runtime/structured-worker-identity'
 
 describe('buildCodexStructuredChildEnvironment', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   it('keeps shell exports while pinned launch values win', () => {
     expect(
       buildCodexStructuredChildEnvironment(
@@ -67,5 +71,30 @@ describe('buildCodexStructuredChildEnvironment', () => {
     } finally {
       structuredWorkerIdentities.forget(handle)
     }
+  })
+
+  it('does not inherit ambient secrets for an exact laboratory launch', () => {
+    vi.stubEnv('OPENAI_API_KEY', 'forbidden')
+    vi.stubEnv('HTTP_PROXY', 'forbidden')
+    const env = buildCodexStructuredChildEnvironment(
+      {
+        command: '/opt/codex',
+        args: ['app-server'],
+        cwd: '/lab/worktree',
+        codexHome: '/lab/codex-home',
+        resumeThreadId: null,
+        env: { HOME: '/lab/fake-home' },
+        environmentMode: 'exact'
+      },
+      'spawn-token',
+      'session-not-a-worker'
+    )
+
+    expect(env).toEqual({
+      CODEX_HOME: '/lab/codex-home',
+      HOME: '/lab/fake-home',
+      [CODEX_SPAWN_TOKEN_ENV]: 'spawn-token',
+      [ORCA_STRUCTURED_SESSION_ENV]: '1'
+    })
   })
 })

@@ -25,6 +25,7 @@ import { tearDownFailedWorkerStart } from './failed-worker-start-teardown'
 import { requireWorkerAuthority, type WorkerEffect } from './worker-topology'
 import { prepareLocalWorkerStart } from './worker-start-validation'
 import { deliverAndSettleWorkerStartReadiness } from './worker-start-readiness-settlement'
+import type { LabWorkerStartAdmission } from './worker-start-profile-admission'
 
 type WorkerStartMutation = {
   callerFingerprint: string
@@ -43,6 +44,7 @@ export async function startLocalWorker(args: {
   orchestrationMutation?: WorkerStartMutation
   /** Settings-driven; the executing host still gets to refuse below. */
   mode: WorkerStartModeReceipt
+  profileAdmission?: LabWorkerStartAdmission | null
 }): Promise<unknown> {
   const { params, runtime, db, run, coordinatorPane, existingTask, orchestrationMutation } = args
   const requestedWorktree = params.worktree ?? 'current'

@@ -7,17 +7,23 @@
 // for, which is how a resume becomes a fork wearing a resume's name.
 
 import type { AgentSessionJournalIdentity } from '../../shared/agent-session-journal-types'
+import type { AgentSessionRecord } from '../../shared/agent-session-record'
 import { agentSessionProviderHandleChainHead } from '../../shared/agent-session-provider-handle'
 import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import { resolveCodexCommand } from '../codex-cli/command'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
 import type { CodexStructuredLaunch } from './codex-structured-session-adapter'
 import type { CodexStructuredPermissionPolicy } from './codex-structured-permission-policy'
+import { CODEX_LAB_READONLY_PERMISSION_PROFILE_ID } from './codex-structured-permission-policy'
 import { resolvePinnedCodexRolloutProof } from './codex-tui-rollout-proof'
 import { isWindowsProcessStartTimeAvailable } from '../windows/windows-process-table'
+import {
+  getCodexLabStructuredLaunchBinding,
+  type CodexLabStructuredLaunchBinding
+} from '../runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-registry'
 
 export type CodexStructuredLaunchResolverDeps = {
-  store: AgentSessionRecordStore
+  store: Pick<AgentSessionRecordStore, 'getRecord'>
   /** Absolute path of a workspace on this host. Rejects when the workspace no
    *  longer resolves, which is the case a stale mobile client hits. */
   resolveWorkspacePath: (workspaceId: string) => Promise<string>
@@ -63,6 +69,15 @@ export function createCodexStructuredLaunchResolver(
     if (accountHome.variable !== 'CODEX_HOME') {
       throw new Error(`codex sessions pin CODEX_HOME, not ${accountHome.variable}`)
     }
+    const labBinding = getCodexLabStructuredLaunchBinding(identity.sessionId)
+    if (labBinding) {
+      return resolveCodexLabStructuredLaunch(
+        identity.sessionId,
+        record,
+        labBinding,
+        await deps.resolveWorkspacePath(location.workspaceId)
+      )
+    }
     const environment = await deps.resolveEnvironment?.()
     const pathEnv = environment?.PATH ?? environment?.Path ?? null
     const homePath = environment?.HOME ?? environment?.USERPROFILE
@@ -93,6 +108,41 @@ export function createCodexStructuredLaunchResolver(
             )
           }
         : {})
+    }
+  }
+}
+
+function resolveCodexLabStructuredLaunch(
+  sessionId: string,
+  record: AgentSessionRecord,
+  binding: CodexLabStructuredLaunchBinding,
+  workspacePath: string
+): CodexStructuredLaunch {
+  const { plan, worktree } = binding
+  if (
+    record.sessionId !== sessionId ||
+    record.location.workspaceKind !== 'git-worktree' ||
+    record.accountHome.variable !== 'CODEX_HOME' ||
+    record.accountHome.path !== plan.runtimePaths.codexHome ||
+    record.providerHandleChain.length !== 0 ||
+    workspacePath !== plan.cwd ||
+    workspacePath !== worktree.observation.realpath ||
+    worktree.receipt.worktreePath !== workspacePath
+  ) {
+    throw new Error('Codex lab launch binding does not match the durable session record.')
+  }
+  return {
+    command: plan.executable,
+    args: [...plan.argv],
+    cwd: workspacePath,
+    codexHome: plan.runtimePaths.codexHome,
+    resumeThreadId: null,
+    env: { ...plan.environment.injected },
+    environmentMode: 'exact',
+    permissionPolicy: {
+      approvalPolicy: 'never',
+      permissions: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID,
+      runtimeWorkspaceRoots: [workspacePath]
     }
   }
 }

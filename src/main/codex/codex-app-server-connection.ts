@@ -8,6 +8,10 @@ import { terminateCodexAppServerProcessTree } from './codex-app-server-process-t
 import { CODEX_SPAWN_TOKEN_ENV } from './codex-structured-owner-identity'
 import { waitForProcessExitUntil } from './codex-process-exit-deadline'
 import {
+  buildCodexAppServerChildEnvironment,
+  type CodexAppServerEnvironmentMode
+} from './codex-app-server-environment'
+import {
   CodexAppServerTimeoutError,
   CodexAppServerUnsupportedError
 } from './codex-app-server-session'
@@ -39,6 +43,8 @@ export type CodexAppServerLaunch = {
   cwd?: string
   /** Overlay on the inherited environment — the pinned CODEX_HOME lives here. */
   env?: Record<string, string>
+  /** Exact mode refuses ambient process environment inheritance. */
+  environmentMode?: CodexAppServerEnvironmentMode
   /** Keys stripped after the overlay, matching `CodexAppServerInvocation`. */
   envToDelete?: readonly string[]
 }
@@ -58,10 +64,7 @@ export async function openCodexAppServerConnection(
   handlers: CodexAppServerConnectionHandlers = {},
   spawnImpl: typeof spawnProcess = spawnProcess
 ): Promise<CodexAppServerConnection> {
-  const childEnv: NodeJS.ProcessEnv = { ...process.env, ...launch.env }
-  for (const key of launch.envToDelete ?? []) {
-    delete childEnv[key]
-  }
+  const childEnv = buildCodexAppServerChildEnvironment(launch)
   const spawnSpec = createProviderSpawnSpec(launch, childEnv, process.platform)
   const child = spawnImpl(spawnSpec)
   const spawnToken = launch.env?.[CODEX_SPAWN_TOKEN_ENV]

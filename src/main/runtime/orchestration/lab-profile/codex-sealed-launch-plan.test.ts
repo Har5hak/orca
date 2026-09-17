@@ -1,0 +1,285 @@
+import { describe, expect, it } from 'vitest'
+import {
+  CODEX_LAB_LAUNCH_REFUSAL_CODE,
+  assertSealedCodexLabLaunchPlan,
+  buildSealedCodexLabLaunchPlan,
+  type CodexLabLaunchFacts
+} from './codex-sealed-launch-plan'
+
+const SHA256_A = 'a'.repeat(64)
+
+function facts(): CodexLabLaunchFacts {
+  return {
+    platform: 'darwin',
+    profile: 'lab-readonly-supervised-v1',
+    adapter: 'codex-workspace-chatgpt-v1',
+    dispatch: {
+      id: 'dispatch-757-canary-1',
+      runtimeRoot: '/private/tmp/orca-lab/runtime',
+      codexHomeState: 'absent',
+      fakeHomeState: 'absent'
+    },
+    worktree: {
+      identity: 'wt2:local:disposable-instance',
+      expectedPath: '/private/tmp/orca-lab/disposable-worktree',
+      observedPath: '/private/tmp/orca-lab/disposable-worktree',
+      observedRealPath: '/private/tmp/orca-lab/disposable-worktree',
+      kind: 'directory',
+      disposable: true
+    },
+    gateway: {
+      socketPath: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-canary-1/gateway.sock'
+    },
+    binary: {
+      path: '/Applications/ChatGPT.app/Contents/Resources/codex',
+      observedRealPath: '/Applications/ChatGPT.app/Contents/Resources/codex',
+      kind: 'regular-file',
+      executable: true,
+      pinnedSha256: SHA256_A,
+      observedSha256: SHA256_A
+    },
+    authentication: {
+      keyringAvailable: true,
+      keyringBackend: 'macos-keychain',
+      loginMethod: 'chatgpt',
+      expectedWorkspaceId: '018f47a2-9d72-7cc1-b046-7a2868411f42',
+      observedWorkspaceId: '018f47a2-9d72-7cc1-b046-7a2868411f42',
+      subscription: {
+        status: 'active',
+        scope: 'workspace',
+        unambiguous: true
+      },
+      authJson: { state: 'absent' }
+    },
+    ambientEnv: {}
+  }
+}
+
+describe('sealed Codex laboratory launch plan', () => {
+  it('builds a literal, isolated macOS launch from admitted and observed facts', () => {
+    const plan = buildSealedCodexLabLaunchPlan(facts())
+
+    expect(plan.executable).toBe('/Applications/ChatGPT.app/Contents/Resources/codex')
+    expect(plan.argv).toEqual(['--strict-config', 'app-server'])
+    expect(plan.cwd).toBe('/private/tmp/orca-lab/disposable-worktree')
+    expect(plan.environment).toEqual({
+      ambientAllowlist: [],
+      inherited: {},
+      injected: {
+        CODEX_HOME: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-canary-1/codex-home',
+        HOME: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-canary-1/fake-home'
+      }
+    })
+    expect(plan.configToml).toContain('approval_policy = "never"')
+    expect(plan.configToml).toContain('default_permissions = "orca-lab-readonly-v1"')
+    expect(plan.configToml).toContain(
+      '[permissions.orca-lab-readonly-v1]\ndescription = "Orca attended disposable read-only laboratory worker"\nextends = ":read-only"'
+    )
+    expect(plan.configToml).toContain('[permissions.orca-lab-readonly-v1.filesystem]')
+    expect(plan.configToml).toContain('":root" = "deny"')
+    expect(plan.configToml).toContain('":minimal" = "read"')
+    expect(plan.configToml).toContain(
+      '[permissions.orca-lab-readonly-v1.filesystem.":workspace_roots"]'
+    )
+    expect(plan.configToml).toContain('"." = "read"')
+    expect(plan.configToml).toContain('[permissions.orca-lab-readonly-v1.network]')
+    expect(plan.configToml).toContain('enabled = false')
+    expect(plan.configToml).toContain('[permissions.orca-lab-readonly-v1.network.unix_sockets]')
+    expect(plan.configToml).toContain(
+      '"/private/tmp/orca-lab/runtime/dispatches/dispatch-757-canary-1/gateway.sock" = "allow"'
+    )
+    expect(plan.configToml).not.toContain('sandbox_mode')
+    expect(plan.configToml).not.toContain('[sandbox_workspace_write]')
+    expect(plan.configToml).toContain('cli_auth_credentials_store = "keyring"')
+    expect(plan.configToml).toContain('forced_login_method = "chatgpt"')
+    expect(plan.configToml).toContain(
+      'forced_chatgpt_workspace_id = "018f47a2-9d72-7cc1-b046-7a2868411f42"'
+    )
+    expect(plan.configToml).toContain('web_search = "disabled"')
+    expect(plan.configToml).toContain('experimental_use_profile = false')
+    expect(plan.configToml).toContain('persistence = "none"')
+    expect(plan.configToml).toContain('multi_agent = false')
+    expect(plan.configToml).toContain('plugins = false')
+    expect(plan.configToml).toContain('computer_use = false')
+    expect(plan.configToml).toContain('[mcp_servers]')
+    expect(plan.configToml).toContain('[hooks]')
+    expect(plan.unverifiedBoundaries).toEqual([
+      'effective-config-enforcement',
+      'filesystem-confinement',
+      'network-confinement',
+      'process-spawn',
+      'provider-session'
+    ])
+    expect(() => assertSealedCodexLabLaunchPlan(plan)).not.toThrow()
+  })
+
+  it('returns secret-free, deterministic receipt inputs bound to observed facts', () => {
+    const first = buildSealedCodexLabLaunchPlan(facts())
+    const second = buildSealedCodexLabLaunchPlan(facts())
+
+    expect(first).toEqual(second)
+    expect(first.receiptInputs).toMatchObject({
+      schemaVersion: 1,
+      dispatchId: 'dispatch-757-canary-1',
+      profile: 'lab-readonly-supervised-v1',
+      adapter: 'codex-workspace-chatgpt-v1',
+      platform: 'darwin',
+      codexExecutableSha256: SHA256_A,
+      keyringBackend: 'macos-keychain',
+      loginMethod: 'chatgpt',
+      subscriptionStatus: 'active-workspace'
+    })
+    expect(first.receiptInputs.gatewaySocketPathSha256).toMatch(/^[a-f0-9]{64}$/)
+    expect(first.receiptInputs.configSha256).toMatch(/^[a-f0-9]{64}$/)
+    expect(first.receiptInputs.argvSha256).toMatch(/^[a-f0-9]{64}$/)
+    expect(JSON.stringify(first.receiptInputs)).not.toContain(
+      '018f47a2-9d72-7cc1-b046-7a2868411f42'
+    )
+    expect(JSON.stringify(first.receiptInputs)).not.toMatch(/token|secret|credential/i)
+  })
+
+  it.each([
+    ['OPENAI_API_KEY', 'sk-not-real'],
+    ['ANTHROPIC_API_KEY', 'not-real'],
+    ['OPENROUTER_API_KEY', 'not-real'],
+    ['AWS_BEARER_TOKEN_BEDROCK', 'not-real'],
+    ['HTTP_PROXY', 'http://proxy.invalid'],
+    ['https_proxy', 'http://proxy.invalid']
+  ])('rejects forbidden ambient provider or proxy env %s', (name, value) => {
+    expect(() =>
+      buildSealedCodexLabLaunchPlan({ ...facts(), ambientEnv: { [name]: value } })
+    ).toThrowError(
+      expect.objectContaining({
+        code: CODEX_LAB_LAUNCH_REFUSAL_CODE,
+        data: { reason: 'forbidden_ambient_env', field: name }
+      })
+    )
+  })
+
+  it('rejects ambient names even when they are not secret-bearing', () => {
+    expect(() =>
+      buildSealedCodexLabLaunchPlan({ ...facts(), ambientEnv: { LANG: 'en_GB.UTF-8' } })
+    ).toThrowError(
+      expect.objectContaining({
+        code: CODEX_LAB_LAUNCH_REFUSAL_CODE,
+        data: { reason: 'ambient_env_not_allowlisted', field: 'LANG' }
+      })
+    )
+  })
+
+  it.each([
+    ['copied', { state: 'copied', sourcePath: '/Users/dev/.codex/auth.json' }],
+    ['symlinked', { state: 'symlink', targetPath: '/Users/dev/.codex/auth.json' }],
+    ['regular', { state: 'regular-file' }]
+  ] as const)('rejects a %s auth.json', (_label, authJson) => {
+    const input = facts()
+    expect(() =>
+      buildSealedCodexLabLaunchPlan({
+        ...input,
+        authentication: { ...input.authentication, authJson }
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: CODEX_LAB_LAUNCH_REFUSAL_CODE,
+        data: { reason: 'auth_json_forbidden', field: 'authentication.authJson' }
+      })
+    )
+  })
+
+  it.each([
+    ['linux', { platform: 'linux' }],
+    ['relative binary', { binary: { ...facts().binary, path: 'bin/codex' } }],
+    ['unpinned binary', { binary: { ...facts().binary, observedSha256: 'b'.repeat(64) } }],
+    [
+      'unavailable keyring',
+      { authentication: { ...facts().authentication, keyringAvailable: false } }
+    ],
+    ['API login', { authentication: { ...facts().authentication, loginMethod: 'api' } }],
+    [
+      'ambiguous subscription',
+      {
+        authentication: {
+          ...facts().authentication,
+          subscription: { status: 'active', scope: 'workspace', unambiguous: false }
+        }
+      }
+    ],
+    [
+      'personal subscription',
+      {
+        authentication: {
+          ...facts().authentication,
+          subscription: { status: 'active', scope: 'personal', unambiguous: true }
+        }
+      }
+    ]
+  ])('fails closed for %s observations', (_label, override) => {
+    expect(() => buildSealedCodexLabLaunchPlan({ ...facts(), ...override })).toThrowError(
+      expect.objectContaining({ code: CODEX_LAB_LAUNCH_REFUSAL_CODE })
+    )
+  })
+
+  it('rejects pre-existing per-Dispatch homes instead of reusing them', () => {
+    const input = facts()
+    expect(() =>
+      buildSealedCodexLabLaunchPlan({
+        ...input,
+        dispatch: { ...input.dispatch, codexHomeState: 'present' }
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        data: { reason: 'dispatch_home_not_fresh', field: 'dispatch.codexHomeState' }
+      })
+    )
+  })
+
+  it.each([
+    ['approval policy', 'approval_policy = "never"', 'approval_policy = "on-request"'],
+    ['permission inheritance', 'extends = ":read-only"', 'extends = ":workspace"'],
+    [
+      'filesystem policy',
+      '":workspace_roots"]\n"." = "read"',
+      '":workspace_roots"]\n"." = "write"'
+    ],
+    ['multi-agent policy', 'multi_agent = false', 'multi_agent = true']
+  ])('detects a broadened %s mutation', (_label, from, to) => {
+    const plan = buildSealedCodexLabLaunchPlan(facts())
+    const mutated = { ...plan, configToml: plan.configToml.replace(from, to) }
+
+    expect(() => assertSealedCodexLabLaunchPlan(mutated)).toThrowError(
+      expect.objectContaining({
+        code: CODEX_LAB_LAUNCH_REFUSAL_CODE,
+        data: { reason: 'launch_plan_policy_broadened', field: 'configToml' }
+      })
+    )
+  })
+
+  it('detects injected environment and argv mutations', () => {
+    const plan = buildSealedCodexLabLaunchPlan(facts())
+
+    expect(() =>
+      assertSealedCodexLabLaunchPlan({
+        ...plan,
+        environment: {
+          ...plan.environment,
+          injected: { ...plan.environment.injected, OPENAI_API_KEY: 'sk-not-real' }
+        }
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        data: expect.objectContaining({ reason: 'launch_plan_policy_broadened' })
+      })
+    )
+
+    expect(() =>
+      assertSealedCodexLabLaunchPlan({
+        ...plan,
+        argv: plan.argv.filter((value) => value !== '--strict-config')
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        data: expect.objectContaining({ reason: 'launch_plan_policy_broadened' })
+      })
+    )
+  })
+})

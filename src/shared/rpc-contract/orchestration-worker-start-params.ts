@@ -1,10 +1,26 @@
 import { z } from 'zod'
 import { OptionalFiniteNumber, OptionalString, requiredString } from './rpc-param-primitives'
 
+export { LAB_READONLY_PROFILE_RUNTIME_CAPABILITY } from '../protocol-version'
+
 export const OptionalWorkerLaunchPreference = z
   .string()
   .min(1)
   .max(512)
+  .refine((value) => value === value.trim(), 'Surrounding whitespace is invalid')
+  .optional()
+
+const OptionalLabProfileReference = z
+  .string()
+  .min(1)
+  .max(512)
+  .refine((value) => value === value.trim(), 'Surrounding whitespace is invalid')
+  .optional()
+
+const OptionalExpectedWorktreePath = z
+  .string()
+  .min(1)
+  .max(4096)
   .refine((value) => value === value.trim(), 'Surrounding whitespace is invalid')
   .optional()
 
@@ -19,6 +35,10 @@ export const WorkerStartParams = z
     run: OptionalString,
     from: requiredString('Missing --from'),
     worktree: OptionalString,
+    profile: OptionalLabProfileReference,
+    adapter: OptionalLabProfileReference,
+    worktreeIdentity: OptionalLabProfileReference,
+    expectedWorktreePath: OptionalExpectedWorktreePath,
     name: OptionalString,
     repo: OptionalString,
     baseBranch: OptionalString,
