@@ -452,6 +452,27 @@ describe('orchestration federated worker output', () => {
     const firstDispatchId = await startRemoteWorker()
     remoteCalls = []
 
+    const durableOnly = await homeDispatcher.dispatch({
+      id: 'rpc_durable_remote_fleet',
+      authToken: 'coordinator-token',
+      method: 'orchestration.workerList',
+      params: {}
+    })
+    expect(
+      remoteCalls.filter((method) => method === 'orchestration.federationFleetSnapshot')
+    ).toHaveLength(0)
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This narrows the registered worker-list RPC response for the assertion below.
+    const durableResult = durableOnly as {
+      result: { workers: { dispatchId: string; projection: unknown }[] }
+    }
+    const durableWorker = durableResult.result.workers.find(
+      (worker) => worker.dispatchId === firstDispatchId
+    )
+    expect(durableWorker?.projection).toMatchObject({
+      host: { kind: 'remote', id: 'environment_windows' },
+      liveness: { verdict: 'unverifiable' }
+    })
+
     const healthy = await homeDispatcher.dispatch({
       id: 'rpc_remote_fleet',
       authToken: 'coordinator-token',
@@ -494,6 +515,7 @@ describe('orchestration federated worker output', () => {
       unavailable as { result: { workers: { dispatchId: string; projection: unknown }[] } }
     ).result.workers.find((worker) => worker.dispatchId === firstDispatchId)
     expect(unavailableWorker?.projection).toMatchObject({
+      host: { kind: 'remote', id: 'environment_windows' },
       liveness: { verdict: 'unverifiable', reason: 'host_unavailable' }
     })
   })

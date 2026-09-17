@@ -209,7 +209,11 @@ async function projectWorkerListPageWithFilteredSnapshot(
     statuses,
     limit,
     now: authorityNow,
-    completeProjection: args.completeProjection
+    completeProjection: args.completeProjection,
+    identityScopeComplete:
+      args.completeProjection === true &&
+      params.run === undefined &&
+      params.terminalState === undefined
   })
   const federated = params.includeRemote
     ? await readFederatedFleetSnapshots({

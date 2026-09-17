@@ -4,6 +4,7 @@ import {
   type FleetDurableWorker
 } from '../../../../../../shared/orchestration-fleet-projection'
 import { resolveFleetWorkerOutcome } from '../../../../../../shared/orchestration-fleet-outcome-resolution'
+import { createFleetStatusIndex } from '../../../../../../shared/orchestration-fleet-status-index'
 import type { WorkerTerminalListState } from '../../../../orchestration/worker-terminal-ownership'
 import type { OrchestrationDb } from '../../../../orchestration/db'
 
@@ -21,6 +22,7 @@ export function projectWorkerFleet(args: {
   limit: number
   now: number
   completeProjection?: boolean
+  identityScopeComplete?: boolean
 }) {
   const workers: FleetDurableWorker[] = args.rows.map((row) => {
     return {
@@ -30,6 +32,8 @@ export function projectWorkerFleet(args: {
         workerState: row.workerState,
         dispatchStatus: row.dispatchStatus
       }),
+      dispatchHostScope: row.dispatchHostScope,
+      federatedEnvironmentId: row.federatedEnvironmentId,
       resource: row.resource
         ? {
             id: row.resource.id,
@@ -54,20 +58,27 @@ export function projectWorkerFleet(args: {
         workers,
         statuses: args.statuses,
         limit: args.limit,
-        now: args.now
+        now: args.now,
+        identityScopeComplete: args.identityScopeComplete
       }),
       durable
     }
   }
 
   const projections: ReturnType<typeof projectOrchestrationFleet>['workers'] = []
+  const statusIndex = createFleetStatusIndex(
+    args.statuses,
+    workers,
+    args.identityScopeComplete === true
+  )
   for (let offset = 0; offset < workers.length; offset += ORCHESTRATION_FLEET_PAGE_MAX) {
     projections.push(
       ...projectOrchestrationFleet({
         workers: workers.slice(offset, offset + ORCHESTRATION_FLEET_PAGE_MAX),
         statuses: args.statuses,
         limit: ORCHESTRATION_FLEET_PAGE_MAX,
-        now: args.now
+        now: args.now,
+        statusIndex
       }).workers
     )
   }

@@ -57,41 +57,52 @@ function createRuntime(args: {
   } as unknown as OrcaRuntimeService
 }
 
-function createDb(): OrchestrationDb {
+function createDb(includeOffPageCollision = false): OrchestrationDb {
+  const target = {
+    dispatchId: DISPATCH_ID,
+    taskId: 'task-fleet',
+    runId: 'run-fleet',
+    parentTaskId: 'task-parent',
+    workerState: 'ready',
+    dispatchStatus: 'dispatched',
+    workerStage: 'input_accepted',
+    agentTerminalHandle: TERMINAL_HANDLE,
+    paneKey: PANE_KEY,
+    worktreeId: 'wt-fleet',
+    terminalState: 'active',
+    pendingInput: false,
+    pendingApproval: false,
+    terminationReason: null,
+    resource: {
+      id: 'res-fleet',
+      owner_dispatch_id: DISPATCH_ID,
+      worktree_id: 'wt-fleet',
+      pane_key: PANE_KEY,
+      process_incarnation: PROCESS_INCARNATION,
+      endpoint_id: null,
+      endpoint_incarnation: null,
+      host_scope: JSON.stringify({ kind: 'local', hostId: 'local' }),
+      ownership_state: 'owned',
+      release_state: 'none',
+      updated_at: new Date().toISOString()
+    },
+    createdAt: new Date(Date.now() - 60_000).toISOString(),
+    databaseId: 1
+  }
+  const collision = {
+    ...target,
+    dispatchId: 'disp-collision',
+    taskId: 'task-collision',
+    resource: { ...target.resource, id: 'res-collision', owner_dispatch_id: 'disp-collision' },
+    databaseId: 2
+  }
+  const inventory = includeOffPageCollision ? [target, collision] : [target]
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This focused fixture implements only the two DB reads exercised by projectFleetWorkerPage.
   return {
-    listWorkerTerminalResources: () => [
-      {
-        dispatchId: DISPATCH_ID,
-        taskId: 'task-fleet',
-        runId: 'run-fleet',
-        parentTaskId: 'task-parent',
-        workerState: 'ready',
-        dispatchStatus: 'dispatched',
-        workerStage: 'input_accepted',
-        agentTerminalHandle: TERMINAL_HANDLE,
-        paneKey: PANE_KEY,
-        worktreeId: 'wt-fleet',
-        terminalState: 'active',
-        pendingInput: false,
-        pendingApproval: false,
-        terminationReason: null,
-        resource: {
-          id: 'res-fleet',
-          owner_dispatch_id: DISPATCH_ID,
-          worktree_id: 'wt-fleet',
-          pane_key: PANE_KEY,
-          process_incarnation: PROCESS_INCARNATION,
-          endpoint_id: null,
-          endpoint_incarnation: null,
-          host_scope: JSON.stringify({ kind: 'local', hostId: 'local' }),
-          ownership_state: 'owned',
-          release_state: 'none',
-          updated_at: new Date().toISOString()
-        },
-        createdAt: new Date(Date.now() - 60_000).toISOString(),
-        databaseId: 1
-      }
-    ],
+    listWorkerTerminalResources: (params: { dispatchIds?: string[] } = {}) =>
+      params.dispatchIds
+        ? inventory.filter((row) => params.dispatchIds?.includes(row.dispatchId))
+        : inventory,
     getWorkerAttentionFactsForDispatches: () => new Map()
   } as unknown as OrchestrationDb
 }
@@ -103,7 +114,7 @@ describe('local fleet liveness from a hook row that carries only a pane key', ()
     expect(hookRowAsPublished().orchestration).toBeUndefined()
   })
 
-  it('reads live for a running local worker whose pane still owns its handle', () => {
+  it('fails pane-only evidence closed when a one-row detail slice cannot prove uniqueness', () => {
     const page = projectFleetWorkerPage(
       createRuntime({ handleForPane: TERMINAL_HANDLE }),
       createDb(),
@@ -111,11 +122,24 @@ describe('local fleet liveness from a hook row that carries only a pane key', ()
     )
 
     expect(page?.workers[0]).toMatchObject({
-      liveness: { verdict: 'live', source: 'agent_status' },
-      evidence: { liveStatus: 'fresh' },
-      stage: { activity: 'working' },
+      liveness: { verdict: 'unverifiable', reason: 'missing_status' },
+      evidence: { liveStatus: 'unavailable' },
+      stage: { activity: 'unknown' },
       nextAction: { kind: 'none' },
-      attention: { requiresAction: false }
+      attention: { requiresAction: true }
+    })
+  })
+
+  it('does not bind pane-only evidence when a colliding worker sits outside the detail slice', () => {
+    const page = projectFleetWorkerPage(
+      createRuntime({ handleForPane: TERMINAL_HANDLE }),
+      createDb(true),
+      DISPATCH_ID
+    )
+
+    expect(page?.workers[0]?.liveness).toEqual({
+      verdict: 'unverifiable',
+      reason: 'missing_status'
     })
   })
 
@@ -203,7 +227,11 @@ describe('local fleet liveness from a hook row that carries only a pane key', ()
   // incarnation the durable resource named, the same pane reads live again.
   it('reads live again once the rebind restores the durable incarnation', () => {
     const page = projectFleetWorkerPage(
-      createRuntime({ handleForPane: TERMINAL_HANDLE, incarnationForHandle: PROCESS_INCARNATION }),
+      createRuntime({
+        handleForPane: TERMINAL_HANDLE,
+        incarnationForHandle: PROCESS_INCARNATION,
+        orchestration: { dispatchId: DISPATCH_ID } as AgentStatusOrchestrationContext
+      }),
       createDb(),
       DISPATCH_ID
     )

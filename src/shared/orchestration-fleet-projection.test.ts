@@ -119,6 +119,66 @@ describe('orchestration fleet projection', () => {
     expect(JSON.stringify(result)).not.toContain('secret transcript body')
   })
 
+  it('never lets a foreign status connection relabel durable local authority', () => {
+    const result = projectOrchestrationFleet({
+      workers: [
+        worker('local-foreign', {
+          dispatchHostScope: JSON.stringify({ kind: 'local', hostId: 'local' })
+        })
+      ],
+      statuses: [
+        status('local-foreign', 100, {
+          connectionId: 'environment-foreign',
+          orchestration: {
+            taskId: 'task-local-foreign',
+            dispatchId: 'local-foreign'
+          }
+        })
+      ],
+      now: 100
+    })
+
+    expect(result.workers[0]).toMatchObject({
+      host: { kind: 'local', id: 'local' },
+      liveness: { verdict: 'unverifiable', reason: 'missing_status' }
+    })
+  })
+
+  it('projects a context-only SSH dispatch from durable Dispatch authority', () => {
+    const result = projectOrchestrationFleet({
+      workers: [
+        worker('context-ssh', {
+          dispatchHostScope: JSON.stringify({ kind: 'ssh', targetId: 'ssh-target' }),
+          resource: null
+        })
+      ],
+      statuses: [],
+      now: 100
+    })
+
+    expect(result.workers[0]).toMatchObject({
+      host: { kind: 'remote', id: 'ssh-target' },
+      liveness: { verdict: 'unverifiable', reason: 'missing_status' }
+    })
+  })
+
+  it('rejects status when durable host scope is unreadable', () => {
+    const result = projectOrchestrationFleet({
+      workers: [worker('malformed-host', { dispatchHostScope: '{not-json' })],
+      statuses: [
+        status('malformed-host', 100, {
+          orchestration: { taskId: 'task-malformed-host', dispatchId: 'malformed-host' }
+        })
+      ],
+      now: 100
+    })
+
+    expect(result.workers[0]).toMatchObject({
+      host: { kind: 'remote', id: 'unknown' },
+      liveness: { verdict: 'unverifiable', reason: 'missing_status' }
+    })
+  })
+
   it('keeps local folder and unsupervised rows instead of assuming git resources', () => {
     const result = projectOrchestrationFleet({
       workers: [

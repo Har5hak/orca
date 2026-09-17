@@ -27,6 +27,11 @@ export type WorkerTerminalHostScopeRead =
       scope: WorkerTerminalHostScope | null
     }
 
+export type WorkerTerminalHostAuthority =
+  | { kind: 'local'; id: string }
+  | { kind: 'remote'; id: string; targetId: string }
+  | { kind: 'indeterminate'; id: 'unknown' }
+
 export function readWorkerTerminalHostScope(
   value: string | null | undefined
 ): WorkerTerminalHostScopeRead {
@@ -79,4 +84,41 @@ export function readWorkerTerminalHostScope(
 export function parseWorkerTerminalHostScope(value: string | null): WorkerTerminalHostScope | null {
   const read = readWorkerTerminalHostScope(value)
   return read.kind === 'local' || read.kind === 'remote' ? read.scope : null
+}
+
+/** Durable authority decides where evidence must originate. Federation identity outranks the
+ * Dispatch scope; the resource scope is only a compatibility arm for older local rows. */
+export function resolveWorkerTerminalHostAuthority(
+  dispatchHostScope: string | null | undefined,
+  federatedTargetId?: string | null,
+  legacyResourceHostScope?: string | null
+): WorkerTerminalHostAuthority {
+  if (federatedTargetId !== null && federatedTargetId !== undefined) {
+    if (federatedTargetId.length === 0) {
+      return { kind: 'indeterminate', id: 'unknown' }
+    }
+    if (dispatchHostScope === null || dispatchHostScope === undefined) {
+      return { kind: 'remote', id: federatedTargetId, targetId: federatedTargetId }
+    }
+    const dispatchRead = readWorkerTerminalHostScope(dispatchHostScope)
+    return dispatchRead.kind === 'remote' && dispatchRead.targetId === federatedTargetId
+      ? { kind: 'remote', id: federatedTargetId, targetId: federatedTargetId }
+      : { kind: 'indeterminate', id: 'unknown' }
+  }
+  const authorityScope = dispatchHostScope ?? legacyResourceHostScope
+  if (authorityScope === null || authorityScope === undefined) {
+    return { kind: 'local', id: 'local' }
+  }
+  const read = readWorkerTerminalHostScope(authorityScope)
+  if (read.kind === 'local') {
+    // Bare pre-JSON local scopes are valid legacy authority. A JSON local/WSL scope that failed
+    // strict parsing is contradictory rather than evidence that this machine owns the worker.
+    return read.scope || authorityScope.startsWith('local:')
+      ? { kind: 'local', id: read.id }
+      : { kind: 'indeterminate', id: 'unknown' }
+  }
+  if (read.kind === 'remote' && read.targetId) {
+    return { kind: 'remote', id: read.id, targetId: read.targetId }
+  }
+  return { kind: 'indeterminate', id: 'unknown' }
 }

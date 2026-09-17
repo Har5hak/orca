@@ -5,7 +5,7 @@ import {
   isUnsupervisedSettledDispatch,
   resolveFleetWorkerOutcome
 } from './orchestration-fleet-outcome-resolution'
-import { readWorkerTerminalHostScope } from './worker-terminal-host-scope'
+import { resolveWorkerTerminalHostAuthority } from './worker-terminal-host-scope'
 import type {
   FleetDurableWorker,
   FleetLiveness,
@@ -22,6 +22,8 @@ type FleetLivenessSubject = {
   workerState?: string | null
   dispatchStatus?: string | null
   terminationReason?: FleetDurableWorker['terminationReason']
+  dispatchHostScope?: string | null
+  federatedEnvironmentId?: string | null
   resource: { releaseState?: string | null; hostScope: string | null } | null
 }
 
@@ -84,8 +86,7 @@ export function projectLiveness(
   if (observedAt - now > FLEET_STATUS_FUTURE_TOLERANCE_MS) {
     return { verdict: 'unverifiable', reason: 'future_status', observedAt }
   }
-  const remoteHost =
-    projectHost(activity.connectionId, worker.resource?.hostScope).kind === 'remote'
+  const remoteHost = projectHost(worker).kind === 'remote'
   if (remoteHost && !activity.connectionId) {
     return { verdict: 'unverifiable', reason: 'missing_status', observedAt }
   }
@@ -191,27 +192,19 @@ export function projectFleetNextAction(
   }
 }
 
-function projectHost(
-  connectionId: string | null,
-  hostScope: string | null | undefined
-): OrchestrationFleetWorker['host'] {
-  if (connectionId) {
-    return { kind: 'remote', id: connectionId }
-  }
-  const read = readWorkerTerminalHostScope(hostScope)
-  switch (read.kind) {
-    // A missing host scope is the legacy/default representation for local and
-    // folder-workspace authority; do not infer a remote host from resource
-    // materialization alone.
-    case 'absent':
-      return { kind: 'local', id: 'local' }
-    case 'local':
-      return { kind: 'local', id: read.id }
-    case 'remote':
-      return { kind: 'remote', id: read.id }
-    case 'unreadable':
-      return { kind: 'remote', id: 'unknown' }
-  }
+function projectHost(worker: {
+  dispatchHostScope?: string | null
+  federatedEnvironmentId?: string | null
+  resource: { hostScope: string | null } | null
+}): OrchestrationFleetWorker['host'] {
+  const authority = resolveWorkerTerminalHostAuthority(
+    worker.dispatchHostScope,
+    worker.federatedEnvironmentId,
+    worker.resource?.hostScope
+  )
+  return authority.kind === 'local'
+    ? { kind: 'local', id: authority.id }
+    : { kind: 'remote', id: authority.id }
 }
 
 export function projectOrchestrationFleetWorker(
@@ -237,7 +230,7 @@ export function projectOrchestrationFleetWorker(
     role: 'worker',
     parent: worker.parentTaskId ? { taskId: worker.parentTaskId } : null,
     provider: activity?.agentType ? { id: activity.agentType, model: activity.model } : null,
-    host: projectHost(activity?.connectionId ?? null, worker.resource?.hostScope),
+    host: projectHost(worker),
     workspace: workspaceId ? { id: workspaceId, kind: 'folder_or_worktree' } : null,
     stage: {
       worker: worker.workerState,
