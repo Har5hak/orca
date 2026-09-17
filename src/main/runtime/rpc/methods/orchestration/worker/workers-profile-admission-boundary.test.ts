@@ -1,6 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OrchestrationError } from '../../../../orchestration/orchestration-error'
 import { LAB_READONLY_PROFILE_RUNTIME_CAPABILITY } from '../../../../../../shared/rpc-contract/orchestration-worker-start-params'
+import type { RuntimeCapability } from '../../../../../../shared/protocol-version'
+import { OrcaRuntimeService } from '../../../../orca-runtime'
+import { OrchestrationDb } from '../../../../orchestration/db'
 
 const mocks = vi.hoisted(() => ({
   resolveProfileAdmission: vi.fn(),
@@ -36,26 +39,48 @@ const ADMISSION = Object.freeze({
   expectedWorktreePath: '/private/tmp/orca-lab/disposable-worktree'
 })
 
-function createRuntime(capabilities: readonly string[]) {
-  const run = { id: 'run_1' }
-  const task = { id: 'task_1', run_id: run.id, spec: 'Read the disposable checkout.' }
-  const db = {
-    getCurrentRunForPane: vi.fn(() => run),
-    getTask: vi.fn(() => task)
+const COORDINATOR_PANE_KEY = 'tab_coord:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+const databases: OrchestrationDb[] = []
+
+afterEach(() => {
+  for (const db of databases.splice(0)) {
+    db.close()
   }
-  const runtime = {
-    getStatus: vi.fn(() => ({ capabilities })),
-    getOrchestrationDb: vi.fn(() => db),
-    getTerminalPaneKey: vi.fn(() => 'tab_coord:leaf_coord'),
-    getClientSettings: vi.fn(() => null)
+})
+
+function createRuntime(capabilities: readonly RuntimeCapability[]) {
+  const db = new OrchestrationDb(':memory:')
+  databases.push(db)
+  const runtime = new OrcaRuntimeService()
+  runtime.setOrchestrationDb(db)
+  const run = db.createRun({
+    objective: 'Prove profile admission boundaries',
+    coordinatorHandle: 'term_coord',
+    coordinatorPaneKey: COORDINATOR_PANE_KEY
+  })
+  const task = {
+    ...db.createTask({
+      runId: run.id,
+      spec: 'Read the disposable checkout.'
+    }),
+    creator_dispatch_id: null,
+    creator_dispatch_run_id: null,
+    creator_dispatch_pane_key: null,
+    creator_dispatch_process_incarnation: null
   }
+  const status = runtime.getStatus()
+  vi.spyOn(runtime, 'getStatus').mockReturnValue({ ...status, capabilities: [...capabilities] })
+  vi.spyOn(runtime, 'getOrchestrationDb')
+  vi.spyOn(runtime, 'getTerminalPaneKey').mockReturnValue(COORDINATOR_PANE_KEY)
+  vi.spyOn(db, 'getCurrentRunForPane')
+  vi.spyOn(db, 'getTask').mockReturnValue(task)
   return { db, runtime }
 }
 
 async function callWorkerStart(runtime: ReturnType<typeof createRuntime>['runtime'], extra = {}) {
   const method = ORCHESTRATION_WORKER_START_METHODS[0]
   const params = method.params!.parse({ ...PROFILE_PARAMS, ...extra })
-  return method.handler(params, { runtime } as never)
+  return method.handler(params, { runtime })
 }
 
 describe('worker-start profile admission boundary', () => {

@@ -3,6 +3,7 @@ import {
   AGENT_SESSION_RECORD_SCHEMA_VERSION,
   type AgentSessionRecord
 } from '../../shared/agent-session-record'
+import type { AgentSessionJournalIdentity } from '../../shared/agent-session-journal-types'
 import {
   registerCodexLabStructuredLaunchBinding,
   releaseCodexLabStructuredLaunchBinding
@@ -14,9 +15,13 @@ import {
 import { createCodexStructuredLaunchResolver } from './codex-structured-launch-resolution'
 
 const SESSION_ID = 'session_lab_structured'
-const IDENTITY = { sessionId: SESSION_ID } as Parameters<
-  ReturnType<typeof createCodexStructuredLaunchResolver>
->[0]['identity']
+const IDENTITY: AgentSessionJournalIdentity = {
+  sessionId: SESSION_ID,
+  workspaceId: 'worktree-id',
+  hostId: 'local',
+  agent: 'codex',
+  providerHandle: { kind: 'codex', threadId: 'unused-by-launch-resolution' }
+}
 
 function record(accountHome: string): AgentSessionRecord {
   return {

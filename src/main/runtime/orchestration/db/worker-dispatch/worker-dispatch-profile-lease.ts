@@ -1,13 +1,6 @@
 import type Database from '../../../../sqlite/sync-database'
 import { OrchestrationError } from '../../orchestration-error'
-import type { WorkerDispatchState } from '../../types'
 import { WORKER_SETTLED_STATES } from '../../worker-terminal-ownership'
-
-type WorkerProfileLeaseRow = {
-  dispatch_id: string
-  state: WorkerDispatchState
-  terminal_cleanup_pending: number
-}
 
 export type WorkerProfileLeaseBlocker = {
   dispatchId: string
@@ -56,17 +49,22 @@ export function findWorkerProfileLeaseBlocker(
        ORDER BY worker.created_at, worker.dispatch_id
        LIMIT 1`
     )
-    .get(profileId, ...WORKER_SETTLED_STATES) as WorkerProfileLeaseRow | undefined
+    .get(profileId, ...WORKER_SETTLED_STATES)
   if (!row) {
     return undefined
   }
+  const dispatchId = row.dispatch_id
+  const state = row.state
+  if (typeof dispatchId !== 'string' || typeof state !== 'string') {
+    throw new Error('Worker profile lease query returned an invalid row.')
+  }
   const cleanupPending =
-    row.state === 'start_unknown' ||
-    row.state === 'stop_unknown' ||
-    WORKER_SETTLED_STATES.includes(row.state) ||
+    state === 'start_unknown' ||
+    state === 'stop_unknown' ||
+    WORKER_SETTLED_STATES.some((settledState) => settledState === state) ||
     row.terminal_cleanup_pending === 1
   return {
-    dispatchId: row.dispatch_id,
+    dispatchId,
     reason: cleanupPending ? 'cleanup_pending' : 'occupied'
   }
 }

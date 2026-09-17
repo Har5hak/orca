@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getCodexLabStructuredLaunchBinding } from '../../orchestration/lab-profile/codex-lab-structured-launch-binding-registry'
 import { testCodexLabStructuredLaunchBinding } from '../../orchestration/lab-profile/codex-lab-structured-launch-binding-test-support'
+import { OrcaRuntimeService } from '../../orca-runtime'
 
 const hostRef: { current: unknown } = { current: null }
 const createSpy = vi.fn()
@@ -53,7 +54,7 @@ describe('structured worker lab binding lifecycle', () => {
     })
 
     await createStructuredWorkerSession({
-      runtime: { ensureStructuredAgentSessionHost: async () => {} } as never,
+      runtime: new OrcaRuntimeService(),
       worktreeId: 'worktree-id',
       agent: 'codex',
       dispatchId: binding.dispatchId,
@@ -78,7 +79,7 @@ describe('structured worker lab binding lifecycle', () => {
 
     await expect(
       createStructuredWorkerSession({
-        runtime: { ensureStructuredAgentSessionHost: async () => {} } as never,
+        runtime: new OrcaRuntimeService(),
         worktreeId: 'worktree-id',
         agent: 'codex',
         dispatchId: binding.dispatchId,
@@ -95,7 +96,7 @@ describe('structured worker lab binding lifecycle', () => {
 
     await expect(
       createStructuredWorkerSession({
-        runtime: { ensureStructuredAgentSessionHost: async () => {} } as never,
+        runtime: new OrcaRuntimeService(),
         worktreeId: 'worktree-id',
         agent: 'claude',
         dispatchId: binding.dispatchId,

@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const callMock = vi.fn()
-
 vi.mock('../format', () => ({ printResult: vi.fn() }))
 vi.mock('../selectors', () => ({ getTerminalHandle: vi.fn() }))
 
 import { ORCHESTRATION_HANDLERS } from './orchestration'
 import { LAB_READONLY_PROFILE_RUNTIME_CAPABILITY } from '../../shared/rpc-contract/orchestration-worker-start-params'
+import { RuntimeClient } from '../runtime-client'
+
+const client = new RuntimeClient('/tmp/orca-worker-profile-cli-test')
+const callMock = vi.spyOn(client, 'call')
 
 const profileFlags = new Map<string, string | boolean>([
   ['task', 'task_1'],
@@ -21,10 +23,10 @@ const profileFlags = new Map<string, string | boolean>([
 const invokeWorkerStart = () =>
   ORCHESTRATION_HANDLERS['orchestration worker-start']({
     flags: profileFlags,
-    client: { call: callMock },
+    client,
     cwd: '/tmp/repo',
     json: true
-  } as never)
+  })
 
 describe('orchestration worker-start profile CLI contract', () => {
   beforeEach(() => {
@@ -34,10 +36,16 @@ describe('orchestration worker-start profile CLI contract', () => {
   it('forwards the independently supplied lab profile admission contract', async () => {
     callMock
       .mockResolvedValueOnce({
-        result: { capabilities: [LAB_READONLY_PROFILE_RUNTIME_CAPABILITY] }
+        id: 'status-request',
+        ok: true,
+        result: { capabilities: [LAB_READONLY_PROFILE_RUNTIME_CAPABILITY] },
+        _meta: { runtimeId: 'runtime-test' }
       })
       .mockResolvedValueOnce({
-        result: { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', state: 'ready' }
+        id: 'worker-start-request',
+        ok: true,
+        result: { runId: 'run_1', taskId: 'task_1', dispatchId: 'ctx_1', state: 'ready' },
+        _meta: { runtimeId: 'runtime-test' }
       })
 
     await invokeWorkerStart()
@@ -56,7 +64,12 @@ describe('orchestration worker-start profile CLI contract', () => {
   })
 
   it('fails before worker-start when an older runtime would strip profile admission', async () => {
-    callMock.mockResolvedValueOnce({ result: { capabilities: [] } })
+    callMock.mockResolvedValueOnce({
+      id: 'status-request',
+      ok: true,
+      result: { capabilities: [] },
+      _meta: { runtimeId: 'runtime-test' }
+    })
 
     await expect(invokeWorkerStart()).rejects.toMatchObject({ code: 'incompatible_runtime' })
     expect(callMock).toHaveBeenCalledTimes(1)
