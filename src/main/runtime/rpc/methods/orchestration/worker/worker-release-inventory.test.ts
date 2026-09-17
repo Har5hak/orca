@@ -6,6 +6,7 @@ type ListedInventoryWorker = {
   terminalState: string | null
   resource: { ownerDispatchId: string; releaseState: string } | null
   projection: {
+    provider: { id: string; model: string | null }
     liveness: { verdict: string }
     resource: { state: string }
   }
@@ -45,10 +46,15 @@ describe('orchestration worker release inventory', () => {
           terminalState: null,
           resource: expect.objectContaining({ ownerDispatchId: second.dispatchId }),
           projection: expect.objectContaining({
+            provider: { id: 'codex', model: null },
             liveness: expect.objectContaining({ verdict: 'unverifiable' }),
             resource: { state: 'transferred' }
           })
         }),
+        expect.objectContaining({
+          dispatchId: second.dispatchId,
+          projection: expect.objectContaining({ provider: { id: 'unknown', model: null } })
+        })
       ])
     )
     expect(beforeRelease.counts).toEqual({ active: 1 })

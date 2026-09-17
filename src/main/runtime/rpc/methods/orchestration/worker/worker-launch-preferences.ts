@@ -10,7 +10,8 @@ import type { TuiAgent } from '../../../../../../shared/tui-agent'
 import { OrchestrationError } from '../../../../orchestration/orchestration-error'
 
 export type OrchestrationWorkerLaunchSelection = {
-  agent: TuiAgent | null
+  /** Peer receipts may name a provider introduced after this client shipped. */
+  agent: string | null
   model: string | null
   effort: string | null
 }
@@ -146,13 +147,13 @@ export function assertWorkerLaunchPreferencesRuntimeSupported(args: {
 
 export function resolveFederatedWorkerLaunchReceipt(
   remote: OrchestrationWorkerLaunchReceipt | undefined,
-  requested: OrchestrationWorkerLaunchReceipt,
-  remoteReady: boolean
+  requested: OrchestrationWorkerLaunchReceipt
 ): OrchestrationWorkerLaunchReceipt {
   if (remote) {
-    return remote
+    return {
+      ...remote,
+      requested: { ...remote.requested, ...requested.requested }
+    }
   }
-  return remoteReady
-    ? { requested: requested.requested, effective: { ...requested.requested } }
-    : requested
+  return requested
 }

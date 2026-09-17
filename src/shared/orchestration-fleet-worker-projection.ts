@@ -192,6 +192,49 @@ export function projectFleetNextAction(
   }
 }
 
+function projectProviderTruth(
+  worker: FleetDurableWorker,
+  evidence: FleetAgentStatusEvidence | undefined,
+  liveness: FleetLiveness
+): OrchestrationFleetWorker['providerTruth'] {
+  const durable =
+    worker.durableProviderTruth ??
+    (worker.durableProvider
+      ? {
+          requested: null,
+          effective: { ...worker.durableProvider, effort: null },
+          effectiveSource: 'launch_receipt' as const
+        }
+      : null)
+  const activity = evidence?.activity
+  const observed =
+    evidence && activity?.agentType
+      ? {
+          id: activity.agentType,
+          model: activity.model,
+          effort: null,
+          source: 'agent_status' as const,
+          observedAt: evidence.clock.at,
+          freshness:
+            liveness.verdict === 'live'
+              ? ('fresh' as const)
+              : liveness.verdict === 'unverifiable' && liveness.reason === 'stale_status'
+                ? ('stale' as const)
+                : ('unverifiable' as const)
+        }
+      : null
+  return {
+    requested: durable?.requested
+      ? { ...durable.requested, source: 'launch_request' as const }
+      : null,
+    effective:
+      durable?.effective && durable.effectiveSource
+        ? { ...durable.effective, source: durable.effectiveSource }
+        : null,
+    observed
+  }
+}
+
 function projectHost(worker: {
   dispatchHostScope?: string | null
   federatedEnvironmentId?: string | null
@@ -215,6 +258,13 @@ export function projectOrchestrationFleetWorker(
   const liveness = projectLiveness(worker, evidence, now)
   const fresh = liveness.verdict === 'live'
   const activity = evidence?.activity
+  const providerTruth = projectProviderTruth(worker, evidence, liveness)
+  const observedProviderId =
+    providerTruth.observed?.freshness === 'fresh' && typeof providerTruth.observed.id === 'string'
+      ? providerTruth.observed.id
+      : null
+  const effectiveProviderId =
+    typeof providerTruth.effective?.id === 'string' ? providerTruth.effective.id : null
   const workspaceId =
     activity?.worktreeId ?? worker.worktreeId ?? worker.resource?.worktreeId ?? null
   const outcome = resolveFleetWorkerOutcome({
@@ -229,7 +279,12 @@ export function projectOrchestrationFleetWorker(
     runId: worker.runId,
     role: 'worker',
     parent: worker.parentTaskId ? { taskId: worker.parentTaskId } : null,
-    provider: activity?.agentType ? { id: activity.agentType, model: activity.model } : null,
+    provider: observedProviderId
+      ? { id: observedProviderId, model: providerTruth.observed?.model ?? null }
+      : effectiveProviderId
+        ? { id: effectiveProviderId, model: providerTruth.effective?.model ?? null }
+        : { id: 'unknown', model: null },
+    providerTruth,
     host: projectHost(worker),
     workspace: workspaceId ? { id: workspaceId, kind: 'folder_or_worktree' } : null,
     stage: {

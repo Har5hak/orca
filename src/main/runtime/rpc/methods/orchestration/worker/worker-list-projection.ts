@@ -15,6 +15,70 @@ export type WorkerListPageParams = {
   paginate?: boolean
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+type DurableProviderSelection = NonNullable<FleetDurableWorker['durableProviderTruth']>['requested']
+
+function providerFromLaunchSelection(value: unknown): DurableProviderSelection {
+  if (!isRecord(value)) {
+    return null
+  }
+  const agent =
+    value.agent === null
+      ? null
+      : typeof value.agent === 'string' && value.agent.trim() !== ''
+        ? value.agent.trim()
+        : undefined
+  if (agent === undefined) {
+    return null
+  }
+  return {
+    id: agent,
+    model: typeof value.model === 'string' && value.model.trim() !== '' ? value.model.trim() : null,
+    effort:
+      typeof value.effort === 'string' && value.effort.trim() !== '' ? value.effort.trim() : null
+  }
+}
+
+function readDurableProviderTruth(
+  startOptions: string | null
+): FleetDurableWorker['durableProviderTruth'] {
+  if (!startOptions) {
+    return { requested: null, effective: null, effectiveSource: null }
+  }
+  try {
+    const parsed: unknown = JSON.parse(startOptions)
+    if (!isRecord(parsed)) {
+      return { requested: null, effective: null, effectiveSource: null }
+    }
+    if (Object.hasOwn(parsed, 'launch')) {
+      if (!isRecord(parsed.launch)) {
+        return { requested: null, effective: null, effectiveSource: null }
+      }
+      const launch = parsed.launch
+      const requested = providerFromLaunchSelection(launch.requested)
+      const effective = providerFromLaunchSelection(launch.effective)
+      return {
+        requested,
+        effective,
+        effectiveSource: effective ? 'launch_receipt' : null
+      }
+    }
+    const legacy = providerFromLaunchSelection(parsed)
+    const legacyEffective =
+      typeof legacy?.id === 'string' ? { ...legacy, model: null, effort: null } : null
+    return {
+      requested: null,
+      effective: legacyEffective,
+      effectiveSource: legacyEffective ? 'legacy_start_options' : null
+    }
+  } catch {
+    return { requested: null, effective: null, effectiveSource: null }
+  }
+}
+
 export function projectWorkerFleet(args: {
   rows: ReturnType<OrchestrationDb['listWorkerTerminalResources']>
   attentionFacts: ReturnType<OrchestrationDb['getWorkerAttentionFactsForDispatches']>
@@ -32,6 +96,7 @@ export function projectWorkerFleet(args: {
         workerState: row.workerState,
         dispatchStatus: row.dispatchStatus
       }),
+      durableProviderTruth: readDurableProviderTruth(row.startOptions),
       dispatchHostScope: row.dispatchHostScope,
       federatedEnvironmentId: row.federatedEnvironmentId,
       resource: row.resource

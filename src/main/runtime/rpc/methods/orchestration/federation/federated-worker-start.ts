@@ -201,11 +201,8 @@ export async function startFederatedWorker(args: {
         'The worker server returned a different Dispatch attachment.'
       )
     }
-    const launch = resolveFederatedWorkerLaunchReceipt(
-      remote.launch,
-      requestedLaunch,
-      remote.state === 'ready'
-    )
+    const launch = resolveFederatedWorkerLaunchReceipt(remote.launch, requestedLaunch)
+    db.recordWorkerLaunchReceipt(started.dispatch.id, launch)
     if (isReadyRemoteFederatedWorkerStartReceipt(remote)) {
       db.updateFederatedDispatchResources({
         dispatchId: started.dispatch.id,
