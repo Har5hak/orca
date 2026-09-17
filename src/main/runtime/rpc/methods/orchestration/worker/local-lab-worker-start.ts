@@ -14,6 +14,7 @@ import { resolveDispatchCreator } from '../runs/dispatch-creator'
 import { parseTaskDeps } from './task-deps-argument'
 import type { WorkerStartInput } from './worker-start-schema'
 import type { LabWorkerStartAdmission } from './worker-start-profile-admission'
+import type { RuntimeLabProfileReadiness } from '../../../../runtime-lab-profile-readiness'
 
 type WorkerStartMutation = {
   callerFingerprint: string
@@ -22,12 +23,7 @@ type WorkerStartMutation = {
   payloadHash: string
 }
 
-export type LocalLabWorkerStartReadiness =
-  | Readonly<{ ready: true }>
-  | Readonly<{
-      ready: false
-      reason: 'launch_pipeline_incomplete'
-    }>
+export type LocalLabWorkerStartReadiness = RuntimeLabProfileReadiness
 
 export type PreparedLocalLabWorkerStart = Readonly<{
   started: ReturnType<OrchestrationDb['createStartingWorkerDispatch']>
@@ -158,13 +154,10 @@ export async function startLocalLabWorker(args: {
   )
 }
 
-/**
- * This remains false until the native host preparation, sole structured spawn,
- * gateway construction and cleanup reconciliation are wired and executable.
- * Runtime capability publication must eventually derive from the same probe.
- */
-export function readLocalLabWorkerStartReadiness(): LocalLabWorkerStartReadiness {
-  return Object.freeze({ ready: false, reason: 'launch_pipeline_incomplete' })
+export function readLocalLabWorkerStartReadiness(
+  runtime: OrcaRuntimeService
+): LocalLabWorkerStartReadiness {
+  return runtime.readLabProfileReadiness()
 }
 
 async function observeLocalLabWorktree(args: {

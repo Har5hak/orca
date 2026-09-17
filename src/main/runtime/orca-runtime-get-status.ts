@@ -10,6 +10,7 @@ import {
   BROWSER_CERTIFICATE_TRUST_RUNTIME_CAPABILITY,
   BROWSER_HEADLESS_RUNTIME_CAPABILITY,
   BROWSER_IDENTITY_RUNTIME_CAPABILITY,
+  LAB_READONLY_PROFILE_RUNTIME_CAPABILITY,
   MIN_COMPATIBLE_RUNTIME_CLIENT_VERSION,
   REMOTE_RUNTIME_SHARED_CONTROL_CAPABILITY,
   RUNTIME_CAPABILITIES,
@@ -33,6 +34,10 @@ import type {
 } from '../../shared/runtime-client-events'
 import { parsePaneKey } from '../../shared/stable-pane-id'
 import { wakeFolderRepoGitUpgradeWatch } from '../ipc/folder-repo-git-upgrade-wake'
+import {
+  RuntimeLabProfileReadinessGate,
+  type RuntimeLabProfileReadiness
+} from './runtime-lab-profile-readiness'
 
 type RuntimeStatusHost = {
   getAvailableAuthoritativeWindow(): unknown
@@ -43,6 +48,10 @@ type RuntimeStatusHost = {
 }
 
 export class OrcaRuntimeWithGetStatus extends OrcaRuntimeWithGetRuntimeId {
+  private readonly labProfileReadiness = new RuntimeLabProfileReadinessGate(
+    () => this._orchestrationDb
+  )
+
   private asRuntimeStatusHost(): RuntimeStatusHost {
     return this as unknown as RuntimeStatusHost
   }
@@ -82,6 +91,9 @@ export class OrcaRuntimeWithGetStatus extends OrcaRuntimeWithGetRuntimeId {
     // so advertising it would point clients at a method that can only throw.
     if (isBrowserIdentityModeStoreInitialized()) {
       capabilities.push(BROWSER_IDENTITY_RUNTIME_CAPABILITY)
+    }
+    if (this.readLabProfileReadiness().ready) {
+      capabilities.push(LAB_READONLY_PROFILE_RUNTIME_CAPABILITY)
     }
     // Why: certificate proceed is owned by the browser-hosting process for both
     // desktop webviews and offscreen pages. Advertise whenever either backend
@@ -130,6 +142,14 @@ export class OrcaRuntimeWithGetStatus extends OrcaRuntimeWithGetRuntimeId {
       protocolVersion: RUNTIME_PROTOCOL_VERSION,
       minCompatibleMobileVersion: MIN_COMPATIBLE_RUNTIME_CLIENT_VERSION
     }
+  }
+
+  setLabProfileVerifiedHostReady(verified: boolean): void {
+    this.labProfileReadiness.setVerifiedHostReady(verified)
+  }
+
+  readLabProfileReadiness(): RuntimeLabProfileReadiness {
+    return this.labProfileReadiness.read()
   }
 
   setPtyController(controller: RuntimePtyController | null): void {
