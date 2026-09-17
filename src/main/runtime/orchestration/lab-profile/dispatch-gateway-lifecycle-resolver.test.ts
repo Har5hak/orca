@@ -94,6 +94,8 @@ describe('laboratory gateway canonical lifecycle resolver', () => {
 
   it.each([
     ['runtime epoch', worker({ runtime_epoch: 'runtime_old' })],
+    ['worker Dispatch identity', worker({ dispatch_id: 'dispatch_other' })],
+    ['worker terminal identity', worker({ agent_terminal_handle: 'term_other' })],
     ['profile', worker({ start_options: JSON.stringify({ profile: { id: 'broader' } }) })],
     ['malformed start options', worker({ start_options: '{' })],
     ['ambiguous worker state', worker({ state: 'start_unknown' })]

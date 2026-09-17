@@ -32,6 +32,8 @@ export function createLabGatewayLifecycleResolver(
       return null
     }
 
+    const workerIdentityMatches =
+      worker.dispatch_id === dispatch.id && worker.agent_terminal_handle === dispatch.assignee_handle
     const profileMatches = readProfileId(worker.start_options) === input.profileId
     const runtimeMatches = worker.runtime_epoch === input.runtimeEpoch
     const active =
@@ -39,7 +41,7 @@ export function createLabGatewayLifecycleResolver(
     const authorityState: LabGatewayCanonicalLifecycle['authorityState'] =
       dispatch.capability_revoked_at !== null
         ? 'revoked'
-        : !profileMatches || !runtimeMatches
+        : !workerIdentityMatches || !profileMatches || !runtimeMatches
           ? 'invalid'
           : active
             ? 'active'
