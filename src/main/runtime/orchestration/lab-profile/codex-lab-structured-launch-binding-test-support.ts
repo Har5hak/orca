@@ -3,6 +3,11 @@ import {
   LAB_READONLY_SUPERVISED_PROFILE_ID,
   type CodexLabLaunchFacts
 } from './codex-lab-launch-contract'
+import {
+  registerCodexLabStructuredLaunchBinding,
+  releaseCodexLabStructuredLaunchBinding
+} from './codex-lab-structured-launch-binding-registry-internal'
+import type { CodexLabStructuredLaunchBinding } from './codex-lab-structured-launch-binding-registry'
 import { buildSealedCodexLabLaunchPlan } from './codex-sealed-launch-plan'
 import { verifyLabWorktreeObservation } from './lab-worktree-observation'
 
@@ -10,7 +15,7 @@ export const TEST_LAB_DISPATCH_ID = 'dispatch-757-structured'
 export const TEST_LAB_WORKTREE_IDENTITY = 'wt2:local:disposable-structured'
 export const TEST_LAB_WORKTREE_PATH = '/private/tmp/orca-lab/disposable-structured'
 
-export function testCodexLabStructuredLaunchBinding() {
+export function testCodexLabStructuredLaunchBinding(): CodexLabStructuredLaunchBinding {
   const facts: CodexLabLaunchFacts = {
     platform: 'darwin',
     profile: LAB_READONLY_SUPERVISED_PROFILE_ID,
@@ -93,4 +98,20 @@ export function testCodexLabStructuredLaunchBinding() {
     }
   })
   return Object.freeze({ dispatchId: TEST_LAB_DISPATCH_ID, plan, worktree })
+}
+
+/** Installs one test binding and returns its idempotent, dispatch-fenced cleanup. */
+export function installTestCodexLabStructuredLaunchBinding(
+  sessionId: string,
+  binding: CodexLabStructuredLaunchBinding
+): () => void {
+  registerCodexLabStructuredLaunchBinding(sessionId, binding)
+  let active = true
+  return () => {
+    if (!active) {
+      return
+    }
+    active = false
+    releaseCodexLabStructuredLaunchBinding(sessionId, binding.dispatchId)
+  }
 }

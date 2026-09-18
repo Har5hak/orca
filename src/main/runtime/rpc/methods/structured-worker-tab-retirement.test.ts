@@ -316,6 +316,10 @@ describe('structured worker discard retires the chat tab', () => {
     await expect(
       createStructuredWorkerSession({
         runtime,
+        db: {
+          getDispatchContextById: () => ({ status: 'pending' }),
+          getWorkerDispatch: () => ({ state: 'starting' })
+        } as never,
         worktreeId: WORKTREE,
         agent: 'claude',
         dispatchId: 'd_discard',

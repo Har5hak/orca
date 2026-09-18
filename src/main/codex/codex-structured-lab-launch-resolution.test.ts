@@ -5,10 +5,7 @@ import {
 } from '../../shared/agent-session-record'
 import type { AgentSessionJournalIdentity } from '../../shared/agent-session-journal-types'
 import {
-  registerCodexLabStructuredLaunchBinding,
-  releaseCodexLabStructuredLaunchBinding
-} from '../runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-registry'
-import {
+  installTestCodexLabStructuredLaunchBinding,
   TEST_LAB_WORKTREE_PATH,
   testCodexLabStructuredLaunchBinding
 } from '../runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-test-support'
@@ -61,7 +58,7 @@ function record(accountHome: string): AgentSessionRecord {
 describe('structured Codex lab launch resolution', () => {
   it('uses the validated binding and never reads ordinary command, policy, or ambient env', async () => {
     const binding = testCodexLabStructuredLaunchBinding()
-    registerCodexLabStructuredLaunchBinding(SESSION_ID, binding)
+    const cleanup = installTestCodexLabStructuredLaunchBinding(SESSION_ID, binding)
     const resolveEnvironment = vi.fn(async () => ({
       PATH: '/ambient/bin',
       OPENAI_API_KEY: 'forbidden'
@@ -109,13 +106,13 @@ describe('structured Codex lab launch resolution', () => {
       expect(resolveCommand).not.toHaveBeenCalled()
       expect(resolvePermissionPolicy).not.toHaveBeenCalled()
     } finally {
-      releaseCodexLabStructuredLaunchBinding(SESSION_ID, binding.dispatchId)
+      cleanup()
     }
   })
 
   it('fails closed when the durable record does not match the binding', async () => {
     const binding = testCodexLabStructuredLaunchBinding()
-    registerCodexLabStructuredLaunchBinding(SESSION_ID, binding)
+    const cleanup = installTestCodexLabStructuredLaunchBinding(SESSION_ID, binding)
     try {
       const resolve = createCodexStructuredLaunchResolver({
         store: { getRecord: () => record('/wrong/codex-home') },
@@ -123,7 +120,7 @@ describe('structured Codex lab launch resolution', () => {
       })
       await expect(resolve({ identity: IDENTITY })).rejects.toThrow(/lab launch binding/i)
     } finally {
-      releaseCodexLabStructuredLaunchBinding(SESSION_ID, binding.dispatchId)
+      cleanup()
     }
   })
 
@@ -164,7 +161,7 @@ describe('structured Codex lab launch resolution', () => {
       mintedAtFence: 1,
       observedAt: 1
     })
-    registerCodexLabStructuredLaunchBinding(SESSION_ID, binding)
+    const cleanup = installTestCodexLabStructuredLaunchBinding(SESSION_ID, binding)
     try {
       const resolve = createCodexStructuredLaunchResolver({
         store: { getRecord: () => durableRecord },
@@ -172,7 +169,7 @@ describe('structured Codex lab launch resolution', () => {
       })
       await expect(resolve({ identity: IDENTITY })).rejects.toThrow(/lab launch binding/i)
     } finally {
-      releaseCodexLabStructuredLaunchBinding(SESSION_ID, binding.dispatchId)
+      cleanup()
     }
   })
 

@@ -4,11 +4,14 @@ import type { TuiAgent } from '../../../../../../shared/tui-agent'
 import type { OrcaRuntimeService } from '../../../../orca-runtime'
 import type { OrchestrationDb } from '../../../../orchestration/db'
 import { OrchestrationError } from '../../../../orchestration/orchestration-error'
-import type { CodexLabStructuredLaunchBinding } from '../../../../orchestration/lab-profile/codex-lab-structured-launch-binding-registry'
+import { CodexLabStructuredBindingRefusal } from '../../../../orchestration/lab-profile/codex-lab-structured-launch-binding-registry'
+import { createStructuredWorkerSession } from '../../orchestration-structured-worker-session'
 import {
-  createStructuredWorkerSession,
+  assertStructuredWorkerAgentMode,
+  assertStructuredWorkerLaunchMode,
+  type CodexLabStructuredWorkerBeforeAttach,
   type StructuredWorkerBeforeAttach
-} from '../../orchestration-structured-worker-session'
+} from '../../orchestration-structured-worker-session-contract'
 
 export type WorkerEffect = {
   kind: 'worktree' | 'terminal' | 'setup' | 'dispatch_input'
@@ -96,17 +99,39 @@ export async function createExistingWorktreeWorkerTerminal(args: {
  * `requireWorkerAuthority` needs no branch: the runtime's pane-key and process-incarnation getters
  * consult the structured registry, so the handle minted here answers exactly like a PTY handle.
  */
-export async function createStructuredWorkerSessionForWorktree(args: {
+type StructuredWorkerSessionForWorktreeCommonArgs = {
   runtime: OrcaRuntimeService
+  db: OrchestrationDb
   worktreeId: string
-  agent: TuiAgent
   dispatchId: string
   /** `--model`/`--effort`; the session seeds them exactly as a saved selection is seeded. */
   launchPreferences?: AgentLaunchPreferences
-  labLaunchBinding?: CodexLabStructuredLaunchBinding
-  beforeAttach?: StructuredWorkerBeforeAttach
   effects: WorkerEffect[]
-}): Promise<Awaited<ReturnType<typeof createStructuredWorkerSession>>> {
+}
+
+export type CreateStructuredWorkerSessionForWorktreeArgs =
+  StructuredWorkerSessionForWorktreeCommonArgs &
+    (
+      | {
+          agent: TuiAgent
+          launchMode?: 'ordinary'
+          beforeAttach?: StructuredWorkerBeforeAttach
+        }
+      | {
+          agent: 'codex'
+          launchMode: 'codex-lab'
+          beforeAttach: CodexLabStructuredWorkerBeforeAttach
+        }
+    )
+
+export async function createStructuredWorkerSessionForWorktree(
+  args: CreateStructuredWorkerSessionForWorktreeArgs
+): Promise<Awaited<ReturnType<typeof createStructuredWorkerSession>>> {
+  if (Object.hasOwn(args, 'labLaunchBinding')) {
+    throw new CodexLabStructuredBindingRefusal('binding_invalid')
+  }
+  assertStructuredWorkerLaunchMode(args.launchMode)
+  assertStructuredWorkerAgentMode(args.agent, args.launchMode)
   if (args.agent !== 'claude' && args.agent !== 'codex') {
     throw new OrchestrationError(
       'agent_unconfigured',
@@ -114,17 +139,27 @@ export async function createStructuredWorkerSessionForWorktree(args: {
     )
   }
   const options = narrowStructuredLaunchSeedOptions(args.launchPreferences)
-  const created = await createStructuredWorkerSession({
+  const common = {
     runtime: args.runtime,
+    db: args.db,
     worktreeId: args.worktreeId,
-    agent: args.agent,
     dispatchId: args.dispatchId,
-    ...(args.labLaunchBinding ? { labLaunchBinding: args.labLaunchBinding } : {}),
-    ...(args.beforeAttach ? { beforeAttach: args.beforeAttach } : {}),
     ...(options ? { options } : {}),
     onJournalActivity: (sessionId) =>
       args.runtime.notifyStructuredSessionJournalActivity?.(sessionId)
-  })
+  }
+  const created = await (args.launchMode === 'codex-lab'
+    ? createStructuredWorkerSession({
+        ...common,
+        agent: args.agent,
+        launchMode: 'codex-lab',
+        beforeAttach: args.beforeAttach
+      })
+    : createStructuredWorkerSession({
+        ...common,
+        agent: args.agent,
+        ...(args.beforeAttach ? { beforeAttach: args.beforeAttach } : {})
+      }))
   args.effects.push({
     kind: 'terminal',
     role: 'agent',

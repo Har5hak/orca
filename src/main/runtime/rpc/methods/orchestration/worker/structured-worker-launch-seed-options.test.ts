@@ -10,6 +10,10 @@ const createStructuredWorkerSession = vi.fn(async (_args: Record<string, unknown
   identity: { handle: 'structworker_1', sessionId: 'sess_1' },
   host: {}
 }))
+const startingDb = {
+  getDispatchContextById: () => ({ status: 'pending' }),
+  getWorkerDispatch: () => ({ state: 'starting' })
+} as never
 
 vi.mock('../../orchestration-structured-worker-session', () => ({
   createStructuredWorkerSession: (args: never) => createStructuredWorkerSession(args)
@@ -23,6 +27,7 @@ async function createWith(launchPreferences?: Record<string, string>) {
   createStructuredWorkerSession.mockClear()
   await createStructuredWorkerSessionForWorktree({
     runtime: {} as never,
+    db: startingDb,
     worktreeId: 'repo::wt',
     agent: 'codex',
     dispatchId: 'ctx_1',
@@ -59,6 +64,7 @@ describe('a structured worker seeds the dispatch launch preferences', () => {
 
     await createStructuredWorkerSessionForWorktree({
       runtime: {} as never,
+      db: startingDb,
       worktreeId: 'repo::wt',
       agent: 'codex',
       dispatchId: 'ctx_two_phase',
@@ -68,6 +74,87 @@ describe('a structured worker seeds the dispatch launch preferences', () => {
 
     expect(createStructuredWorkerSession.mock.calls[0]?.[0]?.beforeAttach).toBe(beforeAttach)
     expect(beforeAttach).not.toHaveBeenCalled()
+  })
+
+  it('forwards explicit laboratory mode and its required binding callback together', async () => {
+    createStructuredWorkerSession.mockClear()
+    const beforeAttach = vi.fn(async () => ({ labLaunchBinding: {} as never }))
+
+    await createStructuredWorkerSessionForWorktree({
+      runtime: {} as never,
+      db: startingDb,
+      worktreeId: 'repo::wt',
+      agent: 'codex',
+      dispatchId: 'ctx_lab_two_phase',
+      launchMode: 'codex-lab',
+      beforeAttach,
+      effects: []
+    })
+
+    expect(createStructuredWorkerSession.mock.calls[0]?.[0]).toMatchObject({
+      launchMode: 'codex-lab',
+      beforeAttach
+    })
+    expect(beforeAttach).not.toHaveBeenCalled()
+  })
+
+  it('refuses the removed direct laboratory binding input', async () => {
+    createStructuredWorkerSession.mockClear()
+    const staleCallerArgs = {
+      runtime: {} as never,
+      db: startingDb,
+      worktreeId: 'repo::wt',
+      agent: 'codex',
+      dispatchId: 'ctx_removed_direct_binding',
+      labLaunchBinding: { dispatchId: 'ctx_removed_direct_binding' },
+      effects: []
+    } as unknown as Parameters<typeof createStructuredWorkerSessionForWorktree>[0]
+
+    await expect(createStructuredWorkerSessionForWorktree(staleCallerArgs)).rejects.toMatchObject({
+      code: 'ORCA_CODEX_LAB_STRUCTURED_BINDING_REFUSED',
+      reason: 'binding_invalid'
+    })
+    expect(createStructuredWorkerSession).not.toHaveBeenCalled()
+  })
+
+  it('refuses an unknown launch mode instead of stripping it into ordinary mode', async () => {
+    createStructuredWorkerSession.mockClear()
+    const staleCallerArgs = {
+      runtime: {} as never,
+      db: startingDb,
+      worktreeId: 'repo::wt',
+      agent: 'codex',
+      dispatchId: 'ctx_unknown_launch_mode',
+      launchMode: 'legacy-lab',
+      effects: []
+    } as unknown as Parameters<typeof createStructuredWorkerSessionForWorktree>[0]
+
+    await expect(createStructuredWorkerSessionForWorktree(staleCallerArgs)).rejects.toMatchObject({
+      code: 'worker_launch_mode_invalid'
+    })
+    expect(createStructuredWorkerSession).not.toHaveBeenCalled()
+  })
+
+  it('refuses a forged non-Codex lab mode without coercion or callback', async () => {
+    createStructuredWorkerSession.mockClear()
+    const beforeAttach = vi.fn(async () => ({ labLaunchBinding: {} as never }))
+    const forgedArgs = {
+      runtime: {} as never,
+      db: startingDb,
+      worktreeId: 'repo::wt',
+      agent: 'claude',
+      dispatchId: 'ctx_forged_lab_agent',
+      launchMode: 'codex-lab',
+      beforeAttach,
+      effects: []
+    } as unknown as Parameters<typeof createStructuredWorkerSessionForWorktree>[0]
+
+    await expect(createStructuredWorkerSessionForWorktree(forgedArgs)).rejects.toMatchObject({
+      code: 'ORCA_CODEX_LAB_STRUCTURED_BINDING_REFUSED',
+      reason: 'agent_mode_mismatch'
+    })
+    expect(beforeAttach).not.toHaveBeenCalled()
+    expect(createStructuredWorkerSession).not.toHaveBeenCalled()
   })
 })
 

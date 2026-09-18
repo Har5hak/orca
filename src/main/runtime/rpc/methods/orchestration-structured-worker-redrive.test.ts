@@ -12,7 +12,10 @@ import { setStructuredAgentSessionHost } from '../../../native-chat/agent-sessio
 import { OrcaRuntimeService } from '../../orca-runtime'
 import { OrchestrationDb } from '../../orchestration/db'
 import { structuredWorkerIdentities } from '../../structured-worker-identity'
-import { createStructuredWorkerSession } from './orchestration-structured-worker-session'
+import {
+  createStructuredWorkerSession,
+  releaseStructuredWorkerSession
+} from './orchestration-structured-worker-session'
 
 vi.mock('./structured-agent-session-create', () => ({
   createStructuredAgentSessionForWorktree: async (args: { envelope: { sessionId: string } }) => ({
@@ -22,6 +25,10 @@ vi.mock('./structured-agent-session-create', () => ({
 }))
 
 type JournalEmit = (event: { type: string }) => void
+const startingLifecycleDb = {
+  getDispatchContextById: () => ({ status: 'pending' }),
+  getWorkerDispatch: () => ({ state: 'starting' })
+} as never
 
 /** Captures the redrive subscription so the test can drive journal batches by hand. */
 function installHost(): { emit: (type: string) => void; unsubscribed: () => boolean } {
@@ -72,6 +79,7 @@ describe('the structured redrive edge', () => {
   })
 
   afterEach(() => {
+    releaseStructuredWorkerSession('d_redrive', runtime)
     vi.useRealTimers()
     db.close()
     setStructuredAgentSessionHost(null)
@@ -82,6 +90,7 @@ describe('the structured redrive edge', () => {
   async function startWorker(onJournalActivity: (sessionId: string) => void) {
     return createStructuredWorkerSession({
       runtime,
+      db: startingLifecycleDb,
       worktreeId: 'repo::wt',
       agent: 'claude',
       dispatchId: 'd_redrive',

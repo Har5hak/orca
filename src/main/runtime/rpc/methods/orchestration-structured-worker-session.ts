@@ -11,7 +11,6 @@
  * - The dispatch preamble is a turn, not keystrokes.
  */
 
-import { randomUUID } from 'node:crypto'
 import { isDefinitiveAgentSessionCreateRefusal } from '../../../../shared/agent-session-definitive-refusal'
 import type { AgentJournalMessageItem } from '../../../../shared/agent-session-journal-types'
 import type { StructuredAgentSessionHost } from '../../../native-chat/agent-session-wire/structured-agent-session-host'
@@ -26,10 +25,12 @@ import { structuredPointerCallerKey } from '../../orchestration/structured-mailb
 import { retireSettledStructuredWorkerTab } from '../../structured-agent-session-tab-retirement'
 import {
   CodexLabStructuredBindingRefusal,
-  registerCodexLabStructuredLaunchBinding,
-  releaseCodexLabStructuredLaunchBinding,
   type CodexLabStructuredLaunchBinding
 } from '../../orchestration/lab-profile/codex-lab-structured-launch-binding-registry'
+import {
+  registerCodexLabStructuredLaunchBinding,
+  releaseCodexLabStructuredLaunchBinding
+} from '../../orchestration/lab-profile/codex-lab-structured-launch-binding-registry-internal'
 import {
   mintStructuredWorkerHandle,
   structuredWorkerHostScope,
@@ -40,6 +41,17 @@ import {
 } from '../../structured-worker-identity'
 import { createKeyedTrailingEdgeCoalescer } from '../../keyed-trailing-edge-coalescer'
 import { createStructuredAgentSessionForWorktree } from './structured-agent-session-create'
+import { mintStructuredWorkerSessionId } from './structured-worker-session-id'
+import {
+  assertStructuredWorkerStartRequest,
+  assertStructuredWorkerStartNotSettled,
+  finishStructuredWorkerStart,
+  isCodexLabBeforeAttachResult,
+  markPendingStructuredWorkerStartSettled,
+  releaseFailedStructuredWorkerHold,
+  reserveStructuredWorkerStart,
+  type CreateStructuredWorkerSessionArgs
+} from './orchestration-structured-worker-session-contract'
 
 type StructuredWorkerBinding = {
   sessionId: string
@@ -47,19 +59,6 @@ type StructuredWorkerBinding = {
   holderId: string
   disposeSubscription: () => void
 }
-
-export type StructuredWorkerBeforeAttachResult = Readonly<{
-  labLaunchBinding: CodexLabStructuredLaunchBinding
-}>
-
-/**
- * Runs after the worker identity is registered but before any provider attach is attempted.
- * A laboratory caller uses this boundary to persist Dispatch authority and build its host-only
- * gateway, then returns the sealed launch binding that the sole attach must consume.
- */
-export type StructuredWorkerBeforeAttach = (
-  identity: Readonly<StructuredWorkerIdentity>
-) => Promise<StructuredWorkerBeforeAttachResult | void>
 
 const bindingsByDispatchId = new Map<string, StructuredWorkerBinding>()
 
@@ -79,6 +78,7 @@ export function releaseStructuredWorkerSession(
   dispatchId: string,
   runtime?: Pick<OrcaRuntimeService, 'forgetStructuredSessionMail'>
 ): void {
+  markPendingStructuredWorkerStartSettled(dispatchId)
   const binding = bindingsByDispatchId.get(dispatchId)
   if (!binding) {
     return
@@ -96,27 +96,20 @@ export function releaseStructuredWorkerSession(
   }
 }
 
-export async function createStructuredWorkerSession(args: {
-  runtime: OrcaRuntimeService
-  worktreeId: string
-  agent: 'claude' | 'codex'
-  dispatchId: string
-  /** The dispatch's own `--model`/`--effort`, already narrowed to the seedable string subset. */
-  options?: Readonly<Record<string, string>>
-  /** Validated, sealed launch authority for a disposable Codex laboratory dispatch. */
-  labLaunchBinding?: CodexLabStructuredLaunchBinding
-  /** Optional two-phase seam; ordinary workers omit it and keep the existing single call path. */
-  beforeAttach?: StructuredWorkerBeforeAttach
-  /** Retried whenever the session's journal moves, which is the structured idle edge. */
-  onJournalActivity: (sessionId: string) => void
-}): Promise<{ identity: StructuredWorkerIdentity; host: StructuredAgentSessionHost }> {
-  if (
-    args.labLaunchBinding &&
-    (args.agent !== 'codex' || args.labLaunchBinding.dispatchId !== args.dispatchId)
-  ) {
+export async function createStructuredWorkerSession(
+  args: CreateStructuredWorkerSessionArgs
+): Promise<{ identity: StructuredWorkerIdentity; host: StructuredAgentSessionHost }> {
+  // Fail closed for stale JavaScript callers too: a lab binding is accepted only as the result of
+  // the post-registration callback below, never as pre-identity input.
+  if (Object.hasOwn(args, 'labLaunchBinding')) {
     throw new CodexLabStructuredBindingRefusal('binding_invalid')
   }
-  const sessionId = randomUUID()
+  assertStructuredWorkerStartRequest(args)
+  const sessionId = mintStructuredWorkerSessionId()
+  const pendingStart = reserveStructuredWorkerStart(
+    args.dispatchId,
+    bindingsByDispatchId.has(args.dispatchId)
+  )
   // Registered BEFORE the session is created, because `attach` is what spawns the provider child
   // and the child's environment is read from this registry at spawn time. Registering afterwards
   // ships a worker with no ORCA_TERMINAL_HANDLE, whose bare `orca orchestration check` then
@@ -124,24 +117,36 @@ export async function createStructuredWorkerSession(args: {
   //
   // The scope is provisionally local; the record's own location is asserted local below, and a
   // session that resolves anywhere else never reaches a hold.
-  const identity = structuredWorkerIdentities.register({
-    handle: mintStructuredWorkerHandle(),
-    sessionId,
-    agent: args.agent,
-    paneKey: mintStructuredWorkerPaneKey(sessionId),
-    processIncarnation: structuredWorkerProcessIncarnation(sessionId),
-    worktreeId: args.worktreeId,
-    hostScope: { kind: 'local', hostId: 'local' }
-  })
+  let identity: StructuredWorkerIdentity | undefined
   let created: Awaited<ReturnType<typeof createStructuredAgentSessionForWorktree>> | undefined
   let attachAttempted = false
+  let heldHost: StructuredAgentSessionHost | undefined
+  let holderId: string | undefined
+  let disposeSubscription: (() => void) | undefined
   try {
-    const beforeAttachResult = args.beforeAttach ? await args.beforeAttach(identity) : undefined
-    const preparedLabBinding = beforeAttachResult ? beforeAttachResult.labLaunchBinding : undefined
-    if (preparedLabBinding && args.labLaunchBinding) {
-      throw new CodexLabStructuredBindingRefusal('binding_conflict')
+    identity = structuredWorkerIdentities.register({
+      handle: mintStructuredWorkerHandle(),
+      sessionId,
+      agent: args.agent,
+      paneKey: mintStructuredWorkerPaneKey(sessionId),
+      processIncarnation: structuredWorkerProcessIncarnation(sessionId),
+      worktreeId: args.worktreeId,
+      hostScope: { kind: 'local', hostId: 'local' }
+    })
+    let labLaunchBinding: CodexLabStructuredLaunchBinding | undefined
+    if (args.launchMode === 'codex-lab') {
+      const result = args.beforeAttach ? await args.beforeAttach(identity) : undefined
+      if (!isCodexLabBeforeAttachResult(result)) {
+        throw new CodexLabStructuredBindingRefusal('binding_missing')
+      }
+      labLaunchBinding = result.labLaunchBinding
+    } else {
+      const result: unknown = args.beforeAttach ? await args.beforeAttach(identity) : undefined
+      if (isCodexLabBeforeAttachResult(result)) {
+        throw new CodexLabStructuredBindingRefusal('binding_invalid')
+      }
     }
-    const labLaunchBinding = preparedLabBinding ?? args.labLaunchBinding
+    assertStructuredWorkerStartNotSettled(args.dispatchId, pendingStart)
     if (
       labLaunchBinding &&
       (args.agent !== 'codex' || labLaunchBinding.dispatchId !== args.dispatchId)
@@ -178,6 +183,7 @@ export async function createStructuredWorkerSession(args: {
       // Dispatching a worker is background work; it must not pull the surface away from the user.
       activate: false
     })
+    assertStructuredWorkerStartNotSettled(args.dispatchId, pendingStart)
     if (!created.ok) {
       throw new OrchestrationError(
         'agent_unconfigured',
@@ -192,9 +198,11 @@ export async function createStructuredWorkerSession(args: {
         'A structured worker must run on the local execution host outside WSL.'
       )
     }
-    const holderId = structuredWorkerHoldId(args.dispatchId)
+    holderId = structuredWorkerHoldId(args.dispatchId)
     await host.hold(sessionId, holderId)
-    const disposeSubscription = subscribeForRedrive(host, sessionId, args.onJournalActivity)
+    heldHost = host
+    assertStructuredWorkerStartNotSettled(args.dispatchId, pendingStart)
+    disposeSubscription = subscribeForRedrive(host, sessionId, args.onJournalActivity)
     bindingsByDispatchId.set(args.dispatchId, {
       sessionId,
       handle: identity.handle,
@@ -205,12 +213,18 @@ export async function createStructuredWorkerSession(args: {
   } catch (error) {
     // A start that fails after the session exists would otherwise strand a live provider child
     // that no dispatch owns and that nothing else in the runtime will ever retire.
-    structuredWorkerIdentities.forget(identity.handle)
+    disposeSubscription?.()
+    if (identity) {
+      structuredWorkerIdentities.forget(identity.handle)
+    }
+    releaseFailedStructuredWorkerHold(heldHost, sessionId, holderId, args.dispatchId)
     releaseCodexLabStructuredLaunchBinding(sessionId, args.dispatchId)
     if (attachAttempted && structuredCreateMayHaveCommitted(created)) {
       await discardStructuredWorkerSession(sessionId, args.runtime)
     }
     throw error
+  } finally {
+    finishStructuredWorkerStart(args.dispatchId, pendingStart)
   }
 }
 

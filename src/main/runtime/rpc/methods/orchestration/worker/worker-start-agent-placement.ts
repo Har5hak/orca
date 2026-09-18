@@ -157,6 +157,7 @@ async function createWorkerAgentSurface(
   if (mode.mode === 'structured') {
     const structuredSession = await createStructuredWorkerSessionForWorktree({
       runtime: args.runtime,
+      db: args.db,
       worktreeId,
       agent: args.agent as TuiAgent,
       dispatchId: args.dispatchId,
