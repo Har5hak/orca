@@ -22,6 +22,10 @@ import type {
   CodexLabDynamicToolHostPort
 } from './codex-lab-dynamic-tool-host'
 import type { CodexLabAppServerAttestationExpected } from './codex-lab-app-server-attestation'
+import type {
+  CodexLabExternalChatGptAuthBinding,
+  CodexLabExternalChatGptAuthHostPort
+} from './codex-lab-external-chatgpt-auth-authority'
 
 export type CodexStructuredLaunch = {
   command: string
@@ -40,6 +44,10 @@ export type CodexStructuredLaunch = {
   labDynamicToolHost?: CodexLabDynamicToolHostPort
   /** Non-secret exact binding used to re-attest the opaque host at the pre-spawn boundary. */
   labDynamicToolHostAttestationExpected?: CodexLabDynamicToolHostAttestation
+  /** Process-local ChatGPT auth. Token material never enters the child environment or disk. */
+  labExternalChatGptAuthHost?: CodexLabExternalChatGptAuthHostPort
+  /** Non-secret binding used to re-attest the opaque auth host before provider spawn. */
+  labExternalChatGptAuthBindingExpected?: CodexLabExternalChatGptAuthBinding
 }
 
 export type CodexStructuredSessionEvent =

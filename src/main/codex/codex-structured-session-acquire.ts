@@ -1,6 +1,5 @@
 import {
   AgentSessionAcquisitionRefusal,
-  AgentSessionPreSpawnError,
   type AgentSessionAcquisition,
   type StructuredAgentSessionAcquireInput
 } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
@@ -14,17 +13,14 @@ import { createCodexDispatchEchoes } from './codex-structured-dispatch-echo'
 import { createCodexJournalTranslator } from './codex-structured-journal-translation'
 import { openCodexAppServerConnection } from './codex-app-server-connection'
 import { guardCodexAppServerConnectionForWorkerAccess } from './codex-lab-app-server-connection-guard'
-import {
-  attestCodexLabOpenedThread,
-  codexLabAttestationExpectedForLaunch
-} from './codex-lab-session-attestation'
+import type { CodexLabExternalChatGptAppServerAuth } from './codex-lab-external-chatgpt-app-server-auth'
+import { attestCodexLabOpenedThread } from './codex-lab-session-attestation'
 import { codexProcessIdentity, codexProviderHandleLink } from './codex-structured-owner-identity'
 import { buildCodexStructuredChildEnvironment } from './codex-structured-child-environment'
 import { openCodexThread } from './codex-structured-thread-open'
-import {
-  closeCodexPublishedSession,
-  handleCodexSessionExit
-} from './codex-structured-session-close'
+import { closeCodexPublishedSession } from './codex-structured-session-close'
+import { createCodexStructuredSessionConnectionHandlers } from './codex-structured-session-connection-handlers'
+import { resolveCodexStructuredLabLaunchHosts } from './codex-structured-lab-launch-hosts'
 import {
   readCodexStructuredSessionOptionCatalog,
   restoredCodexSessionOptions
@@ -44,6 +40,7 @@ import {
 import type { CodexStructuredTurnCancellation } from './codex-structured-turn-cancellation'
 import type { CodexStructuredNotificationRetry } from './codex-structured-notification-retry'
 import type { deliverCodexServerRequest } from './codex-structured-provider-events'
+import { isCodexAppServerHandshakeExitUnprovenError } from './codex-app-server-handshake-exit-proof'
 
 export async function acquireCodexStructuredSession(input: {
   input: StructuredAgentSessionAcquireInput
@@ -84,6 +81,8 @@ export async function acquireCodexStructuredSession(input: {
   let unbindReadingControl: (() => void) | undefined
   let labDynamicToolHost: CodexSession['labDynamicToolHost']
   let labDynamicToolHostPublished = false
+  let labExternalChatGptAuth: CodexLabExternalChatGptAppServerAuth | null = null
+  const disposeExternalAuthHost = (): void => labExternalChatGptAuth?.dispose()
   let primaryThreadId =
     acquireInput.identity.providerHandle.kind === 'codex'
       ? acquireInput.identity.providerHandle.threadId
@@ -123,25 +122,13 @@ export async function acquireCodexStructuredSession(input: {
       throw new Error(`codex app-server for session ${sessionId} could not be stopped`)
     }
     acquisitions.assertCurrent(sessionId, attempt)
-    const launch = await deps
-      .resolveLaunch({ identity: acquireInput.identity })
-      .catch((error: unknown) => {
-        throw new AgentSessionPreSpawnError(error)
+    const { launch, externalAuth, attestationExpected } =
+      await resolveCodexStructuredLabLaunchHosts({
+        identity: acquireInput.identity,
+        resolveLaunch: deps.resolveLaunch
       })
-    if (launch.labDynamicToolHost && launch.workerAccessMode !== 'lab-gateway') {
-      launch.labDynamicToolHost.dispose()
-      throw new AgentSessionPreSpawnError(
-        new Error('Codex laboratory dynamic tools require lab-gateway worker access')
-      )
-    }
     labDynamicToolHost = launch.labDynamicToolHost
-    const labAttestationExpected = (() => {
-      try {
-        return codexLabAttestationExpectedForLaunch(launch)
-      } catch (error) {
-        throw new AgentSessionPreSpawnError(error)
-      }
-    })()
+    labExternalChatGptAuth = externalAuth
     acquisitions.assertCurrent(sessionId, attempt)
     const upstreamConnection = await open(
       {
@@ -151,57 +138,24 @@ export async function acquireCodexStructuredSession(input: {
         env: buildCodexStructuredChildEnvironment(launch, acquireInput.spawnToken, sessionId),
         ...(launch.environmentMode ? { environmentMode: launch.environmentMode } : {})
       },
-      {
-        onNotification: (method, params) => {
-          // Stamped at receipt, ahead of any pre-publication buffering or retry.
-          const observedAt = isCodexTurnBoundary(method) ? (deps.now?.() ?? Date.now()) : undefined
-          const dispatchSequenceAtReceipt =
-            method === 'turn/started' ? dispatchEchoes.latestSequence() : undefined
-          input.deliver(
-            acquisition,
-            sessionId,
-            () =>
-              notificationRetries.handle(
-                sessionId,
-                method,
-                params,
-                observedAt,
-                dispatchSequenceAtReceipt
-              ),
-            Buffer.byteLength(JSON.stringify(params ?? null), 'utf8')
-          )
-        },
-        onServerRequest: (request) =>
-          input.deliver(
-            acquisition,
-            sessionId,
-            () => input.handleServerRequest(sessionId, request),
-            Buffer.byteLength(JSON.stringify(request), 'utf8')
-          ),
-        onUnhandledFrame: (kind, payload) =>
-          input.deliver(
-            acquisition,
-            sessionId,
-            () => input.handleUnhandledFrame(sessionId, kind, payload),
-            Buffer.byteLength(JSON.stringify(payload ?? null), 'utf8')
-          ),
-        onExit: (error) => {
-          try {
-            handleCodexSessionExit({
-              sessions,
-              sessionId,
-              connection: acquisition.connection,
-              error,
-              prompts: acquisition.prompts,
-              onBackgroundTasksChanged: deps.onBackgroundTasksChanged,
-              ...(deps.onEvent ? { onEvent: deps.onEvent } : {})
-            })
-          } finally {
-            notificationRetries.clear(sessionId, acquisition.connection)
-          }
-        }
-      }
+      createCodexStructuredSessionConnectionHandlers({
+        acquisition,
+        sessionId,
+        sessions,
+        dispatchEchoes,
+        notificationRetries,
+        externalAuth: labExternalChatGptAuth,
+        disposeExternalAuth: disposeExternalAuthHost,
+        now: deps.now,
+        onEvent: deps.onEvent,
+        onBackgroundTasksChanged: deps.onBackgroundTasksChanged,
+        deliver: input.deliver,
+        handleServerRequest: input.handleServerRequest,
+        handleUnhandledFrame: input.handleUnhandledFrame
+      })
     )
+    acquisition.connection = upstreamConnection
+    await labExternalChatGptAuth?.authenticate(upstreamConnection, deps.requestTimeoutMs)
     const connection = guardCodexAppServerConnectionForWorkerAccess(
       upstreamConnection,
       launch.workerAccessMode
@@ -221,7 +175,7 @@ export async function acquireCodexStructuredSession(input: {
     acquisitions.assertCurrent(sessionId, attempt)
     await attestCodexLabOpenedThread({
       connection,
-      expected: labAttestationExpected,
+      expected: attestationExpected,
       opened,
       ...(deps.requestTimeoutMs === undefined ? {} : { timeoutMs: deps.requestTimeoutMs })
     })
@@ -315,6 +269,9 @@ export async function acquireCodexStructuredSession(input: {
     return acquired
   } catch (error) {
     if (sessions.get(sessionId)?.connection !== acquisition.connection) {
+      if (!acquisition.connection && !isCodexAppServerHandshakeExitUnprovenError(error)) {
+        disposeExternalAuthHost()
+      }
       return closeFailedCodexAcquisition({
         sessionId,
         registry: acquisitions,
@@ -335,8 +292,4 @@ export async function acquireCodexStructuredSession(input: {
   } finally {
     attempt.finish()
   }
-}
-
-function isCodexTurnBoundary(method: string): boolean {
-  return method === 'turn/started' || method === 'turn/completed'
 }
