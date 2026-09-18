@@ -5,8 +5,12 @@ import { OrchestrationDb } from './orchestration/db'
 import { readLocalLabWorkerStartReadiness } from './rpc/methods/orchestration/worker/local-lab-worker-start'
 import type { RuntimeLabProfileReadiness } from './runtime-lab-profile-readiness'
 import { verifiedCodexLabHostPrerequisiteReceipt } from './orchestration/lab-profile/codex-lab-host-prerequisites.test-support'
+import {
+  LAB_READONLY_SUPERVISED_PROFILE_ID,
+  LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY
+} from './orchestration/lab-profile/codex-lab-launch-contract'
 
-const PROFILE_ID = 'lab-readonly-supervised-v1'
+const PROFILE_ID = LAB_READONLY_SUPERVISED_PROFILE_ID
 const databases: OrchestrationDb[] = []
 
 afterEach(() => {
@@ -43,8 +47,25 @@ function reserveProfile(db: OrchestrationDb, taskSpec: string) {
     maxDepth: Number.MAX_SAFE_INTEGER,
     taskSpec,
     taskRunId: 'run_legacy_local',
-    startOptions: { profile: { id: PROFILE_ID } },
+    startOptions: {
+      profile: {
+        id: PROFILE_ID,
+        maxConcurrency: LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY
+      }
+    },
     profileLease: { profileId: PROFILE_ID }
+  })
+}
+
+function attachOwnedTerminal(db: OrchestrationDb, dispatchId: string, label: string): void {
+  db.createWorkerTerminalResourceStatement({
+    dispatchId,
+    worktreeId: `worktree-profile-${label}`,
+    terminalHandle: `term_profile_${label}`,
+    paneKey: `tab_profile_${label}:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+    processIncarnation: `process-profile-${label}`,
+    hostScope: 'local',
+    ownership: 'owned'
   })
 }
 
@@ -77,10 +98,35 @@ describe('runtime lab-profile readiness', () => {
     expectReadiness(runtime, { ready: false, reason: 'launch_pipeline_incomplete' })
   })
 
-  it('withdraws both surfaces while the profile lease is occupied', () => {
+  it('advertises below capacity, withdraws at capacity, and readvertises after clean release', () => {
     const { runtime, db } = createHarness()
     installVerifiedHostPrerequisites(runtime)
-    reserveProfile(db, 'active profile owner')
+    expectReadiness(runtime, { ready: true })
+
+    reserveProfile(db, 'first active profile owner')
+    expectReadiness(runtime, { ready: true })
+
+    const second = reserveProfile(db, 'second active profile owner')
+
+    expectReadiness(runtime, { ready: false, reason: 'profile_capacity_exhausted' })
+
+    db.failWorkerStart(second.dispatch.id, 'profile_admission', 'clean release')
+    expectReadiness(runtime, { ready: true })
+  })
+
+  it('counts active owned terminals as occupancy without misclassifying them as cleanup', () => {
+    const { runtime, db } = createHarness()
+    installVerifiedHostPrerequisites(runtime)
+
+    const first = reserveProfile(db, 'first active terminal owner')
+    attachOwnedTerminal(db, first.dispatch.id, 'first')
+    db.markWorkerDispatchReady(first.dispatch.id)
+
+    expectReadiness(runtime, { ready: true })
+
+    const second = reserveProfile(db, 'second active terminal owner')
+    attachOwnedTerminal(db, second.dispatch.id, 'second')
+    db.markWorkerDispatchReady(second.dispatch.id)
 
     expectReadiness(runtime, { ready: false, reason: 'profile_capacity_exhausted' })
   })
@@ -114,6 +160,20 @@ describe('runtime lab-profile readiness', () => {
       ownership: 'owned'
     })
     db.failWorkerStart(started.dispatch.id, 'profile_terminal_created', 'injected failure')
+
+    expectReadiness(runtime, { ready: false, reason: 'profile_cleanup_pending' })
+  })
+
+  it('withdraws both surfaces while owned-terminal cleanup is uncertain', () => {
+    const { runtime, db } = createHarness()
+    installVerifiedHostPrerequisites(runtime)
+    const started = reserveProfile(db, 'uncertain profile terminal owner')
+    attachOwnedTerminal(db, started.dispatch.id, 'uncertain')
+    db.markWorkerStartUnknown(
+      started.dispatch.id,
+      'profile_terminal_created',
+      'terminal acknowledgement unavailable'
+    )
 
     expectReadiness(runtime, { ready: false, reason: 'profile_cleanup_pending' })
   })

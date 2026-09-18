@@ -11,6 +11,7 @@ import type {
   CodexLabRuntimeCustodyState
 } from '../../../../orchestration/db/lab-runtime-custody/lab-runtime-custody-contract'
 import type { CodexLabStructuredLaunchBinding } from '../../../../orchestration/lab-profile/codex-lab-structured-launch-binding-registry'
+import { LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY } from '../../../../orchestration/lab-profile/codex-lab-launch-contract'
 import { buildLabGatewayServerReceipt } from '../../../../orchestration/lab-profile/dispatch-gateway-server-receipt'
 import type { StructuredWorkerIdentity } from '../../../../structured-worker-identity'
 import { publicCodexLabGatewayReceipt } from './local-codex-lab-launch-authority'
@@ -70,7 +71,7 @@ export function harness(binding: CodexLabStructuredLaunchBinding) {
     profile: PROFILE,
     adapter: 'codex-workspace-chatgpt-v1',
     agent: 'codex',
-    maxConcurrency: 1,
+    maxConcurrency: LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY,
     worktreeIdentity: 'wt2:local:disposable-structured',
     worktreeInstanceId: 'disposable-structured',
     expectedWorktreePath: WORKTREE_PATH

@@ -10,6 +10,7 @@ import {
 import type { LabGatewayServerReceipt } from './dispatch-gateway-server'
 import {
   CODEX_WORKSPACE_CHATGPT_ADAPTER_ID,
+  LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY,
   LAB_READONLY_SUPERVISED_PROFILE_ID,
   type CodexLabLaunchFacts
 } from './codex-lab-launch-contract'
@@ -164,7 +165,7 @@ export function testCodexLabStructuredLaunchBinding(): CodexLabStructuredLaunchB
       profile: LAB_READONLY_SUPERVISED_PROFILE_ID,
       adapter: CODEX_WORKSPACE_CHATGPT_ADAPTER_ID,
       agent: 'codex',
-      maxConcurrency: 1,
+      maxConcurrency: LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY,
       worktreeIdentity: TEST_LAB_WORKTREE_IDENTITY,
       worktreeInstanceId: 'disposable-structured',
       expectedWorktreePath: TEST_LAB_WORKTREE_PATH

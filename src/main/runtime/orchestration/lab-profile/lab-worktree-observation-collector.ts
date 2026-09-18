@@ -3,7 +3,8 @@ import { LOCAL_EXECUTION_HOST_ID } from '../../../../shared/execution-host'
 import { canonicalWorktreeIdentity } from '../../../../shared/worktree/identity'
 import {
   CODEX_WORKSPACE_CHATGPT_ADAPTER_ID,
-  LAB_READONLY_SUPERVISED_PROFILE_ID
+  LAB_READONLY_SUPERVISED_PROFILE_ID,
+  LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY
 } from './codex-lab-launch-contract'
 import {
   LabWorktreeObservationRefusal,
@@ -210,7 +211,7 @@ function validateAdmissionBeforeHostReads(admission: LabWorktreeAdmission): void
     admission.profile !== LAB_READONLY_SUPERVISED_PROFILE_ID ||
     admission.adapter !== CODEX_WORKSPACE_CHATGPT_ADAPTER_ID ||
     admission.agent !== 'codex' ||
-    admission.maxConcurrency !== 1 ||
+    admission.maxConcurrency !== LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY ||
     admission.worktreeInstanceId.length === 0 ||
     admission.worktreeIdentity !== expectedIdentity ||
     !isCanonicalAbsolutePath(admission.expectedWorktreePath)

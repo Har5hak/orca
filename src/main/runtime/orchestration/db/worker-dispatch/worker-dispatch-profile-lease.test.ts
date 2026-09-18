@@ -7,6 +7,18 @@ function profileStartOptions(maxConcurrency: unknown = 1): unknown {
   return { profile: { id: PROFILE_ID, maxConcurrency } }
 }
 
+function attachOwnedTerminal(db: OrchestrationDb, dispatchId: string, label: string): void {
+  db.createWorkerTerminalResourceStatement({
+    dispatchId,
+    worktreeId: `worktree-profile-${label}`,
+    terminalHandle: `term_profile_${label}`,
+    paneKey: `tab_profile_${label}:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+    processIncarnation: `process-profile-${label}`,
+    hostScope: 'local',
+    ownership: 'owned'
+  })
+}
+
 describe('worker execution-profile lease', () => {
   let db: OrchestrationDb | undefined
 
@@ -141,6 +153,37 @@ describe('worker execution-profile lease', () => {
         )
         .get(PROFILE_ID)
     ).toEqual({ count: 2 })
+  })
+
+  it('counts active owned terminals as occupied slots instead of cleanup blockers', () => {
+    const d = createDb()
+    const start = (spec: string) =>
+      d.createStartingWorkerDispatch({
+        creator: { kind: 'system' },
+        maxDepth: Number.MAX_SAFE_INTEGER,
+        taskSpec: spec,
+        taskRunId: 'run_legacy_local',
+        startOptions: profileStartOptions(2),
+        profileLease: { profileId: PROFILE_ID }
+      })
+
+    const first = start('first active terminal owner')
+    attachOwnedTerminal(d, first.dispatch.id, 'first')
+    d.markWorkerDispatchReady(first.dispatch.id)
+
+    const second = start('second active terminal owner')
+    attachOwnedTerminal(d, second.dispatch.id, 'second')
+    d.markWorkerDispatchReady(second.dispatch.id)
+
+    expect(() => start('third refused terminal owner')).toThrowError(
+      expect.objectContaining({
+        code: 'lab_profile_refused',
+        data: expect.objectContaining({
+          reason: 'profile_capacity_exhausted',
+          blocker: { dispatchId: expect.stringMatching(/^ctx_/), reason: 'occupied' }
+        })
+      })
+    )
   })
 
   it('fails closed on cleanup pending even when bounded capacity has a free slot', () => {

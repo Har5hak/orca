@@ -4,6 +4,7 @@ import { LAB_READONLY_PROFILE_RUNTIME_CAPABILITY } from '../../../../../../share
 import type { RuntimeCapability } from '../../../../../../shared/protocol-version'
 import { OrcaRuntimeService } from '../../../../orca-runtime'
 import { OrchestrationDb } from '../../../../orchestration/db'
+import { LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY } from '../../../../orchestration/lab-profile/codex-lab-launch-contract'
 
 const mocks = vi.hoisted(() => ({
   resolveProfileAdmission: vi.fn(),
@@ -37,7 +38,7 @@ const ADMISSION = Object.freeze({
   profile: 'lab-readonly-supervised-v1',
   adapter: 'codex-workspace-chatgpt-v1',
   agent: 'codex',
-  maxConcurrency: 1,
+  maxConcurrency: LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY,
   worktreeIdentity: 'wt2:local:disposable-instance',
   worktreeInstanceId: 'disposable-instance',
   expectedWorktreePath: '/private/tmp/orca-lab/disposable-worktree'
