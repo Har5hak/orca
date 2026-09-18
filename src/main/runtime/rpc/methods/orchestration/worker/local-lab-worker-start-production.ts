@@ -7,6 +7,7 @@ import { createProductionLocalCodexLabLaunchAuthorityDeps } from './local-codex-
 import { continuePreparedLocalLabWorkerStart } from './local-lab-worker-start-continuation'
 import type { LocalLabWorkerContinuationDeps } from './local-lab-worker-start-continuation-contract'
 import type { PreparedLocalLabWorkerStart } from './local-lab-worker-start'
+import { parseCodexLabUsageAuthorization } from '../../../../orchestration/lab-profile/codex-lab-usage-authorization'
 
 export type LocalLabWorkerStartContinuationContext = Readonly<{
   runtime: OrcaRuntimeService
@@ -38,6 +39,7 @@ export function continueProductionPreparedLocalLabWorkerStart(
     prepareLaunchAuthority: (input) => {
       const deps = composition.createLaunchAuthorityDeps({
         settings: context.runtime.getCodexLabCredentialSelectionSettings(),
+        usageAuthorization: parseCodexLabUsageAuthorization(context.run.codex_usage_authorization),
         createGateway: (gatewayInput) =>
           composition.createGateway({
             ...gatewayInput,

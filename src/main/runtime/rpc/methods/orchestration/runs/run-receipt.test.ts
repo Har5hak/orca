@@ -10,6 +10,7 @@ const RUN_ROW: RunRow = {
   coordinator_handle: 'term_coord',
   coordinator_pane_key: 'tab_coord:11111111-1111-4111-8111-111111111111',
   consumer_generation: 3,
+  codex_usage_authorization: null,
   legacy: 0,
   created_at: '2026-09-04T18:53:07Z',
   updated_at: '2026-09-04T18:53:09Z'

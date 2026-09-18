@@ -22,6 +22,7 @@ import {
   type CodexLabLaunchFacts
 } from './codex-lab-launch-contract'
 import { buildSealedCodexLabLaunchPlan } from './codex-sealed-launch-plan'
+import { codexLabCapacityPolicy } from './codex-lab-usage-authorization'
 
 type HostCompatibilityOwnership = {
   cleanupLease?: ExactRootCleanupLease
@@ -116,7 +117,17 @@ function materializeHostCompatibilityInput(
       loginMethod: 'chatgpt',
       expectedWorkspaceId: '018f47a2-9d72-7cc1-b046-7a2868411f42',
       observedWorkspaceId: '018f47a2-9d72-7cc1-b046-7a2868411f42',
-      subscription: { status: 'active', scope: 'workspace', unambiguous: true },
+      subscription: {
+        status: 'active',
+        scope: 'workspace',
+        unambiguous: true,
+        planType: 'business'
+      },
+      capacityPolicy: codexLabCapacityPolicy({
+        workspaceId: '018f47a2-9d72-7cc1-b046-7a2868411f42',
+        planType: 'business',
+        authorization: null
+      }),
       authJson: { state: 'absent' }
     },
     ambientEnv: {}

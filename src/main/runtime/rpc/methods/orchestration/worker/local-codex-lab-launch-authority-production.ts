@@ -1,9 +1,6 @@
-import {
-  createSelectedHostCodexChatGptCredentialSource,
-  type CodexLabCredentialSelectionSettings
-} from '../../../../../codex/codex-lab-chatgpt-credential-host-ports'
-import { selectSecureHostCodexCredentialSource } from '../../../../../codex/codex-lab-chatgpt-credential-source-selection'
-import { prepareCodexLabExternalChatGptCredential } from '../../../../../codex/codex-lab-external-chatgpt-auth-registration'
+import type { CodexLabCredentialSelectionSettings } from '../../../../../codex/codex-lab-chatgpt-credential-host-ports'
+import { prepareSelectedHostCodexLabCredential } from '../../../../../codex/codex-lab-selected-credential'
+import type { CodexLabUsageAuthorizationV1 } from '../../../../orchestration/lab-profile/codex-lab-usage-authorization'
 import { createNativeCodexLabLiveConfinementHost } from '../../../../orchestration/lab-profile/codex-lab-command-confinement-live-native'
 import { prepareVerifiedCodexLabLaunch } from '../../../../orchestration/lab-profile/codex-lab-command-confinement-live'
 import {
@@ -25,6 +22,7 @@ import type {
 export function createProductionLocalCodexLabLaunchAuthorityDeps(
   input: Readonly<{
     settings: CodexLabCredentialSelectionSettings
+    usageAuthorization: CodexLabUsageAuthorizationV1 | null
     createGateway: LocalCodexLabLaunchAuthorityDeps['createGateway']
   }>
 ): LocalCodexLabLaunchAuthorityDeps {
@@ -35,16 +33,7 @@ export function createProductionLocalCodexLabLaunchAuthorityDeps(
   return Object.freeze({
     createGateway: input.createGateway,
     async prepareCredential({ dispatchId, sessionId }) {
-      const selected = await selectSecureHostCodexCredentialSource({ settings: input.settings })
-      const expectedWorkspaceId = selected.selectedAccountId
-        ? (input.settings.codexManagedAccounts.find(
-            (account) => account.id === selected.selectedAccountId
-          )?.workspaceAccountId ?? undefined)
-        : undefined
-      const credential = await prepareCodexLabExternalChatGptCredential({
-        ...(expectedWorkspaceId ? { workspaceId: expectedWorkspaceId } : {}),
-        source: createSelectedHostCodexChatGptCredentialSource(selected)
-      })
+      const credential = await prepareSelectedHostCodexLabCredential(input.settings)
       return Object.freeze({
         metadata: credential.metadata,
         register: () => credential.register({ dispatchId, sessionId })
@@ -55,6 +44,7 @@ export function createProductionLocalCodexLabLaunchAuthorityDeps(
         prepared,
         gateway,
         credential,
+        usageAuthorization: input.usageAuthorization,
         executable,
         host: factsHost
       }),

@@ -25,6 +25,7 @@ import {
   LocalLabLaunchAuthorityPreparationRefusal,
   type LocalLabLaunchLifecycleRecorder
 } from './local-lab-launch-authority-contract'
+import { codexLabCapacityPolicy } from '../../../../orchestration/lab-profile/codex-lab-usage-authorization'
 
 const WORKSPACE_ID = '018f47a2-9d72-7cc1-b046-7a2868411f42'
 const bindingFixture = testCodexLabStructuredLaunchBinding()
@@ -83,7 +84,17 @@ function launchFacts(preparedStart: PreparedLocalLabWorkerStart): CodexLabLaunch
       loginMethod: 'chatgpt',
       expectedWorkspaceId: WORKSPACE_ID,
       observedWorkspaceId: WORKSPACE_ID,
-      subscription: { status: 'active', scope: 'workspace', unambiguous: true },
+      subscription: {
+        status: 'active',
+        scope: 'workspace',
+        unambiguous: true,
+        planType: 'team'
+      },
+      capacityPolicy: codexLabCapacityPolicy({
+        workspaceId: WORKSPACE_ID,
+        planType: 'team',
+        authorization: null
+      }),
       authJson: { state: 'absent' }
     },
     ambientEnv: {}

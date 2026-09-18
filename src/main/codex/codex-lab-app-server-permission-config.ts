@@ -14,9 +14,21 @@ export function validateCodexLabPermissionConfig(
 ): ValidationFailure | null {
   const permissions = exactRecord(value, [expected.permissionProfileId])
   const profile = permissions
-    ? exactRecord(permissions[expected.permissionProfileId], ['description', 'extends', 'network'])
+    ? knownRecord(permissions[expected.permissionProfileId], [
+        'description',
+        'extends',
+        'filesystem',
+        'network',
+        'workspace_roots'
+      ])
     : null
-  if (!profile || !nonEmptyString(profile.description) || profile.extends !== ':read-only') {
+  if (
+    !profile ||
+    !nonEmptyString(profile.description) ||
+    profile.extends !== ':read-only' ||
+    !isAbsent(profile.filesystem) ||
+    !isAbsent(profile.workspace_roots)
+  ) {
     return invalid(`config.permissions.${expected.permissionProfileId}`)
   }
   return validateNetwork(profile.network, expected)

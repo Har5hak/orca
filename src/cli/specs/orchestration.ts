@@ -7,10 +7,17 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
     path: ['orchestration', 'run-create'],
     summary: 'Create and bind a lightweight orchestration Run',
     usage:
-      'orca orchestration run-create --objective <text> [--from <handle>] [--retry-request <id>] [--json]',
-    allowedFlags: [...GLOBAL_FLAGS, 'objective', 'from', 'retry-request'],
+      'orca orchestration run-create --objective <text> [--authorize-codex-metered-until <ISO-8601>] [--from <handle>] [--retry-request <id>] [--json]',
+    allowedFlags: [
+      ...GLOBAL_FLAGS,
+      'objective',
+      'authorize-codex-metered-until',
+      'from',
+      'retry-request'
+    ],
     notes: [
       'A Run is a namespace and home inbox. It never schedules or places workers.',
+      '--authorize-codex-metered-until binds the currently selected exact ChatGPT workspace and enterprise usage-based plan to this Run until the canonical UTC instant.',
       '--retry-request is only for exact recovery after an unknown mutation result.'
     ]
   },

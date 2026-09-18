@@ -211,7 +211,8 @@ function resolveCodexLabStructuredLaunch(
       fakeHome: plan.runtimePaths.fakeHome,
       gatewaySocketPath: plan.gatewaySocketPath,
       workspaceId: plan.enforcedWorkspaceId,
-      permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID
+      permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID,
+      capacityPolicy: plan.capacityPolicy
     }),
     permissionPolicy: {
       approvalPolicy: 'never',

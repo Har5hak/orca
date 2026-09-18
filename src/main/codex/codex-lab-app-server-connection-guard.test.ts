@@ -7,6 +7,7 @@ import {
 import type { CodexAppServerConnection } from './codex-app-server-connection-types'
 import {
   CODEX_LAB_ALLOWED_APP_SERVER_REQUEST_METHODS,
+  CodexLabTurnStartRefusedError,
   guardCodexAppServerConnectionForWorkerAccess
 } from './codex-lab-app-server-connection-guard'
 import { CodexLabAppServerMethodRefusedError } from './codex-lab-app-server-attestation-contract'
@@ -20,6 +21,10 @@ import {
 } from './codex-lab-session-attestation-test-support'
 import { adapterFor, fakeCodex, identityFor } from './codex-structured-session-adapter-fixture'
 import { CODEX_LAB_READONLY_PERMISSION_PROFILE_ID } from './codex-structured-permission-policy'
+import {
+  codexLabCapacityPolicy,
+  mintCodexLabUsageAuthorization
+} from '../runtime/orchestration/lab-profile/codex-lab-usage-authorization'
 
 function connection(): CodexAppServerConnection & {
   request: ReturnType<typeof vi.fn<CodexAppServerConnection['request']>>
@@ -48,17 +53,16 @@ describe('Codex laboratory app-server connection guard', () => {
       'account/rateLimits/read',
       'config/read',
       'configRequirements/read',
+      'model/list',
       'permissionProfile/list',
       'thread/start',
       'turn/start',
       'turn/interrupt'
     ])
     for (const method of CODEX_LAB_ALLOWED_APP_SERVER_REQUEST_METHODS) {
-      await expect(guarded.request(method, { proof: method }, { timeoutMs: 757 })).resolves.toEqual(
-        {
-          method
-        }
-      )
+      const params =
+        method === 'turn/start' ? { proof: method, serviceTier: 'default' } : { proof: method }
+      await expect(guarded.request(method, params, { timeoutMs: 757 })).resolves.toEqual({ method })
     }
     expect(upstream.request).toHaveBeenCalledTimes(
       CODEX_LAB_ALLOWED_APP_SERVER_REQUEST_METHODS.length
@@ -67,10 +71,48 @@ describe('Codex laboratory app-server connection guard', () => {
       expect(upstream.request).toHaveBeenNthCalledWith(
         index + 1,
         method,
-        { proof: method },
+        method === 'turn/start' ? { proof: method, serviceTier: 'default' } : { proof: method },
         { timeoutMs: 757 }
       )
     }
+  })
+
+  it.each([undefined, 'priority-live-v2'])('refuses non-standard service tier %s', async (tier) => {
+    const upstream = connection()
+    const guarded = guardCodexAppServerConnectionForWorkerAccess(upstream, 'lab-gateway')
+
+    await expect(
+      guarded.request('turn/start', {
+        threadId: 'thread-1',
+        ...(tier === undefined ? {} : { serviceTier: tier })
+      })
+    ).rejects.toEqual(new CodexLabTurnStartRefusedError('fast_tier_forbidden'))
+    expect(upstream.request).not.toHaveBeenCalled()
+  })
+
+  it('rechecks the Run authorization immediately before every metered turn', async () => {
+    const upstream = connection()
+    const workspaceId = '00000000-0000-4000-8000-000000000757'
+    const authorization = mintCodexLabUsageAuthorization({
+      workspaceId,
+      planType: 'enterprise_cbp_usage_based',
+      expiresAt: '2026-09-24T23:00:00.000Z',
+      nowMs: 0
+    })
+    const guarded = guardCodexAppServerConnectionForWorkerAccess(upstream, 'lab-gateway', {
+      capacityPolicy: codexLabCapacityPolicy({
+        workspaceId,
+        planType: 'enterprise_cbp_usage_based',
+        authorization,
+        nowMs: 0
+      }),
+      now: () => Date.parse('2026-09-24T23:00:00.000Z')
+    })
+
+    await expect(
+      guarded.request('turn/start', { threadId: 'thread-1', serviceTier: 'default' })
+    ).rejects.toEqual(new CodexLabTurnStartRefusedError('metered_authorization_expired'))
+    expect(upstream.request).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -87,7 +129,6 @@ describe('Codex laboratory app-server connection guard', () => {
     'thread/rollback',
     'thread/archive',
     'thread/read',
-    'model/list',
     'web/search',
     'future/unknown'
   ])('refuses %s before the upstream request can run', async (method) => {
@@ -150,7 +191,12 @@ describe('Codex laboratory app-server connection guard', () => {
       fakeHome: '/private/tmp/orca-lab/runtime/dispatches/guard/fake-home',
       gatewaySocketPath: '/private/tmp/orca-lab/runtime/dispatches/guard/gateway.sock',
       workspaceId: '00000000-0000-4000-8000-000000000757',
-      permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID
+      permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID,
+      capacityPolicy: codexLabCapacityPolicy({
+        workspaceId: '00000000-0000-4000-8000-000000000757',
+        planType: 'business',
+        authorization: null
+      })
     })
     const auth = testCodexLabExternalChatGptAuth({
       dispatchId: TEST_LAB_DISPATCH_ID,

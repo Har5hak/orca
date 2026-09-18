@@ -9,23 +9,57 @@ import {
   RunShowParams,
   RunUseParams
 } from '../../../../../../shared/rpc-contract/orchestration-runs-params'
+import { readSelectedHostCodexLabCredentialMetadata } from '../../../../../codex/codex-lab-selected-credential'
+import {
+  mintCodexLabUsageAuthorization,
+  serializeCodexLabUsageAuthorization
+} from '../../../../orchestration/lab-profile/codex-lab-usage-authorization'
+import { resolveDispatchCreator } from './dispatch-creator'
 
 export const ORCHESTRATION_RUN_METHODS = [
   defineMethod({
     name: 'orchestration.runCreate',
     params: RunCreateParams,
-    handler: (params, { orchestrationCompatibilityEvidence, runtime }) => {
+    handler: async (params, { orchestrationCompatibilityEvidence, runtime }) => {
       const paneKey = resolveOrchestrationCaller(runtime, {
         callerTerminalHandle: params.from,
         callerEvidence: orchestrationCompatibilityEvidence,
         requireStablePane: true
       })
       const db = runtime.getOrchestrationDb()
+      let codexUsageAuthorization: string | undefined
+      if (params.authorizeCodexMeteredUntil) {
+        if (db.resolveCreatorDepth(resolveDispatchCreator(runtime, params.from)) !== 0) {
+          throw new OrchestrationError(
+            'codex_usage_authorization_forbidden',
+            'Only a root conductor can authorize metered Codex usage for a Run.'
+          )
+        }
+        try {
+          const credential = await readSelectedHostCodexLabCredentialMetadata(
+            runtime.getCodexLabCredentialSelectionSettings()
+          )
+          codexUsageAuthorization = serializeCodexLabUsageAuthorization(
+            mintCodexLabUsageAuthorization({
+              workspaceId: credential.workspaceId,
+              planType: credential.planType,
+              expiresAt: params.authorizeCodexMeteredUntil
+            })
+          )
+        } catch (error) {
+          throw new OrchestrationError(
+            'codex_usage_authorization_refused',
+            'The selected ChatGPT workspace could not be bound to the requested metered-use authorization.',
+            { cause: error instanceof Error ? error.message : String(error) }
+          )
+        }
+      }
       const priorRun = db.getCurrentRunForPane(paneKey)
       const run = db.createRun({
         objective: params.objective,
         coordinatorHandle: params.from,
-        coordinatorPaneKey: paneKey
+        coordinatorPaneKey: paneKey,
+        ...(codexUsageAuthorization ? { codexUsageAuthorization } : {})
       })
       runtime.cancelMessageWaiters(params.from)
       if (priorRun) {

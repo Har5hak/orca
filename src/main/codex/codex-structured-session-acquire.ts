@@ -162,7 +162,8 @@ export async function acquireCodexStructuredSession(input: {
     )
     const connection = guardCodexAppServerConnectionForWorkerAccess(
       upstreamConnection,
-      launch.workerAccessMode
+      launch.workerAccessMode,
+      attestationExpected ? { capacityPolicy: attestationExpected.capacityPolicy } : {}
     )
     acquisition.connection = connection
     if (connection.pauseReading && connection.resumeReading) {

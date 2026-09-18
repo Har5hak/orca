@@ -65,7 +65,7 @@ const RECEIPT = recordShape(
   {
     schemaVersion: N,
     ...strings(
-      'dispatchId profile adapter platform worktreeIdentity worktreePath codexExecutablePath codexExecutableSha256 loginMethod subscriptionStatus gatewaySocketPathSha256 gatewayAccessSha256 configSha256 argvSha256'
+      'dispatchId profile adapter platform worktreeIdentity worktreePath codexExecutablePath codexExecutableSha256 loginMethod subscriptionStatus capacityPolicy capacityPolicySha256 gatewaySocketPathSha256 gatewayAccessSha256 configSha256 argvSha256'
     )
   },
   true
@@ -91,6 +91,7 @@ export const CODEX_LAB_CONFINEMENT_PLAN_SHAPE = record(
       true
     ),
     runtimePaths: recordShape(strings('codexHome fakeHome'), true),
+    capacityPolicy: record('route workspaceIdSha256 planType expiresAt', {}, true),
     receiptInputs: RECEIPT,
     unverifiedBoundaries: arrayShape(S)
   },

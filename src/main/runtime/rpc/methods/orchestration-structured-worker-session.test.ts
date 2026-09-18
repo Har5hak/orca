@@ -488,19 +488,43 @@ describe('structured worker session hold', () => {
 })
 
 describe('structured worker dispatch preamble', () => {
-  function hostWithSubmission(submission: Record<string, unknown>) {
+  type PreambleHostFixture = Parameters<typeof sendStructuredWorkerPreamble>[0]['host']
+  type PreambleSendResult = Awaited<ReturnType<PreambleHostFixture['send']>>
+  type PreambleSubmission = Extract<PreambleSendResult, { ok: true }>['value']['submission']
+
+  function hostWithSubmission(
+    submission: PreambleSubmission,
+    settled?: PreambleSubmission
+  ): PreambleHostFixture {
     return {
       deps: { store: { getRecord: () => ({ lease: { runtimeFence: 7 } }) } },
-      send: async () => ({ ok: true, value: { clientMessageId: 'c1', submission } })
-    } as never
+      send: async () => ({ ok: true, value: { clientMessageId: 'c1', submission } }),
+      waitForSendSettlement: async () =>
+        settled
+          ? {
+              value: { submission: settled }
+            }
+          : undefined
+    }
   }
 
-  const send = (host: never) =>
+  const send = (host: PreambleHostFixture): Promise<void> =>
     sendStructuredWorkerPreamble({ host, sessionId: 's1', dispatchId: 'd1', preamble: 'spec' })
 
   it('reports the preamble delivered only on an accepted submission', async () => {
     await expect(
       send(hostWithSubmission({ dispatchState: 'accepted', reason: null }))
+    ).resolves.toBeUndefined()
+  })
+
+  it('waits for an admitted preamble to receive its durable provider echo', async () => {
+    await expect(
+      send(
+        hostWithSubmission(
+          { dispatchState: 'pending', reason: null },
+          { dispatchState: 'accepted', reason: null }
+        )
+      )
     ).resolves.toBeUndefined()
   })
 

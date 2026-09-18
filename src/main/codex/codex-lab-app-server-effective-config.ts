@@ -53,8 +53,7 @@ const ABSENT_EXECUTION_SURFACES = [
   'realtime',
   'experimental_use_unified_exec_tool',
   'experimental_realtime_ws_base_url',
-  'experimental_realtime_webrtc_call_base_url',
-  'chatgpt_base_url'
+  'experimental_realtime_webrtc_call_base_url'
 ] as const
 
 export function readCodexLabEffectiveConfig(value: unknown): Record<string, unknown> | null {
@@ -182,6 +181,9 @@ function validateScalarConfig(
   if (!isAbsent(config.openai_base_url)) {
     return invalid('config.openai_base_url')
   }
+  if (!isOfficialChatGptBaseUrl(config.chatgpt_base_url)) {
+    return invalid('config.chatgpt_base_url')
+  }
   if (!isAbsent(config.model_provider) && config.model_provider !== 'openai') {
     return invalid('config.model_provider')
   }
@@ -197,6 +199,30 @@ function validateScalarConfig(
     return invalid('config.forced_chatgpt_workspace_id')
   }
   return null
+}
+
+function isOfficialChatGptBaseUrl(value: unknown): boolean {
+  if (isAbsent(value)) {
+    return true
+  }
+  if (typeof value !== 'string') {
+    return false
+  }
+  try {
+    const url = new URL(value)
+    return (
+      url.protocol === 'https:' &&
+      url.hostname === 'chatgpt.com' &&
+      url.port === '' &&
+      (url.pathname === '/backend-api' || url.pathname === '/backend-api/') &&
+      url.username === '' &&
+      url.password === '' &&
+      url.search === '' &&
+      url.hash === ''
+    )
+  } catch {
+    return false
+  }
 }
 
 function validateShellEnvironment(
@@ -246,11 +272,11 @@ function validateFeatures(value: unknown): ValidationFailure | null {
     return invalid('config.features')
   }
   const expected = new Set(expectedKeys)
-  const unknown = Object.keys(features).find((key) => !expected.has(key))
+  const unknown = Object.keys(features).find((key) => !expected.has(key) && features[key] !== false)
   if (unknown) {
     return invalid(`config.features.${unknown}`)
   }
-  if (Object.keys(features).length !== expected.size || features.network_proxy !== true) {
+  if (features.network_proxy !== true) {
     return invalid('config.features')
   }
   for (const feature of DISABLED_CODEX_LAB_FEATURES) {

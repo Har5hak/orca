@@ -1,5 +1,6 @@
 import type { CodexAppServerConnection } from './codex-app-server-connection-types'
 import { CodexLabAppServerMethodRefusedError } from './codex-lab-app-server-attestation-contract'
+import type { CodexLabCapacityPolicy } from '../runtime/orchestration/lab-profile/codex-lab-usage-authorization'
 
 /**
  * The complete client-request surface a fresh laboratory session needs before
@@ -11,6 +12,7 @@ export const CODEX_LAB_ALLOWED_APP_SERVER_REQUEST_METHODS = Object.freeze([
   'account/rateLimits/read',
   'config/read',
   'configRequirements/read',
+  'model/list',
   'permissionProfile/list',
   'thread/start',
   'turn/start',
@@ -27,7 +29,11 @@ const ALLOWED_REQUEST_METHODS = new Set<string>(CODEX_LAB_ALLOWED_APP_SERVER_REQ
  */
 export function guardCodexAppServerConnectionForWorkerAccess(
   upstream: CodexAppServerConnection,
-  workerAccessMode: 'orca-cli' | 'lab-gateway' | undefined
+  workerAccessMode: 'orca-cli' | 'lab-gateway' | undefined,
+  guardOptions: Readonly<{
+    capacityPolicy?: CodexLabCapacityPolicy
+    now?: () => number
+  }> = {}
 ): CodexAppServerConnection {
   if (workerAccessMode !== 'lab-gateway') {
     return upstream
@@ -40,11 +46,23 @@ export function guardCodexAppServerConnectionForWorkerAccess(
     get closed() {
       return upstream.closed
     },
-    request: (method, params, options) => {
+    request: (method, params, requestOptions) => {
       if (!ALLOWED_REQUEST_METHODS.has(method)) {
         return Promise.reject(new CodexLabAppServerMethodRefusedError(method))
       }
-      return upstream.request(method, params, options)
+      if (method === 'turn/start') {
+        if (ownValue(params, 'serviceTier') !== 'default') {
+          return Promise.reject(new CodexLabTurnStartRefusedError('fast_tier_forbidden'))
+        }
+        const capacityPolicy = guardOptions.capacityPolicy
+        if (
+          capacityPolicy?.route === 'authorized-metered-workspace' &&
+          Date.parse(capacityPolicy.expiresAt) <= (guardOptions.now?.() ?? Date.now())
+        ) {
+          return Promise.reject(new CodexLabTurnStartRefusedError('metered_authorization_expired'))
+        }
+      }
+      return upstream.request(method, params, requestOptions)
     },
     notify: (method) => {
       throw new CodexLabAppServerMethodRefusedError(method)
@@ -55,4 +73,17 @@ export function guardCodexAppServerConnectionForWorkerAccess(
     ...(upstream.resumeReading ? { resumeReading: () => upstream.resumeReading?.() } : {}),
     close: () => upstream.close()
   }
+}
+
+export class CodexLabTurnStartRefusedError extends Error {
+  constructor(readonly reason: 'fast_tier_forbidden' | 'metered_authorization_expired') {
+    super(`Codex laboratory turn/start refused: ${reason}`)
+    this.name = 'CodexLabTurnStartRefusedError'
+  }
+}
+
+function ownValue(value: unknown, key: string): unknown {
+  return typeof value === 'object' && value !== null && Object.hasOwn(value, key)
+    ? Reflect.get(value, key)
+    : undefined
 }

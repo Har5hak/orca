@@ -84,7 +84,6 @@ describe('TASK-757 per-Dispatch laboratory gateway policy', () => {
       params: {
         terminal: BINDING.terminalHandle,
         terminalPaneKey: BINDING.terminalPaneKey,
-        run: BINDING.runId,
         peek: true,
         unread: false,
         types: 'status,dispatch',

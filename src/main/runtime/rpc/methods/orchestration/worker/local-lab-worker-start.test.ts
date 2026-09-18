@@ -382,6 +382,7 @@ describe('local lab worker start', () => {
     expect(readCredentialSettings).toHaveBeenCalledTimes(1)
     expect(createLaunchAuthorityDeps).toHaveBeenCalledWith({
       settings: credentialSettings,
+      usageAuthorization: null,
       createGateway: expect.any(Function)
     })
     expect(createGateway).toHaveBeenCalledWith(

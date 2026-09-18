@@ -1,6 +1,7 @@
 import type { CodexAppServerConnection } from './codex-app-server-connection-types'
 import type { CodexLabExternalChatGptLoginReceipt } from './codex-lab-external-chatgpt-auth-contract'
 import { CODEX_LAB_DYNAMIC_TOOL_BINDINGS } from './codex-lab-dynamic-tool-contract'
+import type { CodexLabCapacityPolicy } from '../runtime/orchestration/lab-profile/codex-lab-usage-authorization'
 
 export const CODEX_LAB_DYNAMIC_TOOL_GATEWAY_MAP = CODEX_LAB_DYNAMIC_TOOL_BINDINGS
 
@@ -36,6 +37,7 @@ export type CodexLabAppServerAttestationExpected = Readonly<{
   gatewaySocketPath: string
   workspaceId: string
   permissionProfileId: string
+  capacityPolicy: CodexLabCapacityPolicy
 }>
 
 export type CodexLabAppServerAttestationInput = Readonly<{
@@ -54,6 +56,7 @@ export type CodexLabAppServerAttestationFailureReason =
   | 'response_invalid'
   | 'account_unverified'
   | 'paid_usage_forbidden'
+  | 'metered_usage_authorization_expired'
   | 'ordinary_usage_blocked'
   | 'ordinary_usage_unavailable'
   | 'effective_config_broadened'
@@ -70,7 +73,7 @@ export type CodexLabAppServerAttestationResult =
         permissionProfilePages: number
         managedRequirements: 'absent' | 'compatible'
         accountRoute: 'chatgpt-workspace'
-        capacityRoute: 'ordinary-included'
+        capacityRoute: 'ordinary-included' | 'authorized-metered-workspace'
         dynamicToolGatewayMap: typeof CODEX_LAB_DYNAMIC_TOOL_GATEWAY_MAP
         outOfBandMethods: 'not-requested-by-attestation-probe'
       }>

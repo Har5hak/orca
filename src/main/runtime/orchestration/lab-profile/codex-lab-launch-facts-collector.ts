@@ -4,6 +4,10 @@ import type { PreparedLocalLabWorkerStart } from '../../rpc/methods/orchestratio
 import { CODEX_LAB_RUNTIME_ROOT, type CodexLabLaunchFacts } from './codex-lab-launch-contract'
 import { observeNativeCodexLabExecutable } from './codex-lab-command-confinement-live-native-observation'
 import type { CodexLabTrustedFileObservation } from './codex-lab-command-confinement-live-contract'
+import {
+  codexLabCapacityPolicy,
+  type CodexLabUsageAuthorizationV1
+} from './codex-lab-usage-authorization'
 
 const USAGE_BASED_WORKSPACE_PLAN_TYPES = new Set([
   'self_serve_business_usage_based',
@@ -20,6 +24,7 @@ export function collectCodexLabLaunchFacts(input: {
   prepared: PreparedLocalLabWorkerStart
   gateway: Readonly<{ endpoint: string; credential: string }>
   credential: Readonly<{ workspaceId: string; planType: string }>
+  usageAuthorization: CodexLabUsageAuthorizationV1 | null
   executable: Readonly<{ path: string; pinnedSha256: string }>
   host: CodexLabLaunchFactsCollectorHost
 }): CodexLabLaunchFacts {
@@ -34,6 +39,11 @@ export function collectCodexLabLaunchFacts(input: {
   const authJsonState: CodexLabLaunchFacts['authentication']['authJson']['state'] =
     input.host.observePath(join(codexHome, 'auth.json')) === 'absent' ? 'absent' : 'regular-file'
   const paidWorkspaceRoute = USAGE_BASED_WORKSPACE_PLAN_TYPES.has(input.credential.planType)
+  const capacityPolicy = codexLabCapacityPolicy({
+    workspaceId: input.credential.workspaceId,
+    planType: input.credential.planType,
+    authorization: input.usageAuthorization
+  })
   return Object.freeze({
     platform: input.host.platform,
     profile: input.prepared.admission.profile,
@@ -69,14 +79,17 @@ export function collectCodexLabLaunchFacts(input: {
       expectedWorkspaceId: input.credential.workspaceId,
       observedWorkspaceId: input.credential.workspaceId,
       subscription: Object.freeze({
-        status: paidWorkspaceRoute
-          ? 'paid-usage'
-          : input.credential.planType
-            ? 'active'
-            : 'ambiguous',
+        status:
+          paidWorkspaceRoute && capacityPolicy.route !== 'authorized-metered-workspace'
+            ? 'paid-usage'
+            : input.credential.planType
+              ? 'active'
+              : 'ambiguous',
         scope: 'workspace',
-        unambiguous: Boolean(input.credential.planType)
+        unambiguous: Boolean(input.credential.planType),
+        planType: input.credential.planType
       }),
+      capacityPolicy,
       authJson: Object.freeze({ state: authJsonState })
     }),
     ambientEnv: Object.freeze({})

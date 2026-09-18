@@ -19,6 +19,7 @@ import {
 } from './codex-lab-structured-launch-binding-registry-internal'
 import type { CodexLabStructuredLaunchBinding } from './codex-lab-structured-launch-binding-registry'
 import { buildSealedCodexLabLaunchPlan } from './codex-sealed-launch-plan'
+import { codexLabCapacityPolicy } from './codex-lab-usage-authorization'
 import { verifyLabWorktreeObservation } from './lab-worktree-observation'
 
 export const TEST_LAB_DISPATCH_ID = 'dispatch-757-structured'
@@ -142,7 +143,17 @@ export function testCodexLabStructuredLaunchBinding(): CodexLabStructuredLaunchB
       loginMethod: 'chatgpt',
       expectedWorkspaceId: '018f47a2-9d72-7cc1-b046-7a2868411f42',
       observedWorkspaceId: '018f47a2-9d72-7cc1-b046-7a2868411f42',
-      subscription: { status: 'active', scope: 'workspace', unambiguous: true },
+      subscription: {
+        status: 'active',
+        scope: 'workspace',
+        unambiguous: true,
+        planType: 'business'
+      },
+      capacityPolicy: codexLabCapacityPolicy({
+        workspaceId: '018f47a2-9d72-7cc1-b046-7a2868411f42',
+        planType: 'business',
+        authorization: null
+      }),
       authJson: { state: 'absent' }
     },
     ambientEnv: {}

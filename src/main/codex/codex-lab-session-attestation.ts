@@ -41,6 +41,7 @@ export function codexLabAttestationExpectedForLaunch(
     launch.env?.CODEX_HOME !== expected.codexHome ||
     launch.env.HOME !== expected.fakeHome ||
     !expected.workspaceId.trim() ||
+    !Object.isFrozen(expected.capacityPolicy) ||
     expected.permissionProfileId !== CODEX_LAB_READONLY_PERMISSION_PROFILE_ID ||
     !permissionPolicy ||
     !('permissions' in permissionPolicy) ||

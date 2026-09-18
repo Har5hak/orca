@@ -5,6 +5,7 @@ import {
   buildSealedCodexLabLaunchPlan,
   type CodexLabLaunchFacts
 } from './codex-sealed-launch-plan'
+import { codexLabCapacityPolicy } from './codex-lab-usage-authorization'
 
 const SHA256_A = 'a'.repeat(64)
 const GATEWAY_CREDENTIAL = `lgw1_${'g'.repeat(43)}`
@@ -47,8 +48,14 @@ function facts(): CodexLabLaunchFacts {
       subscription: {
         status: 'active',
         scope: 'workspace',
-        unambiguous: true
+        unambiguous: true,
+        planType: 'business'
       },
+      capacityPolicy: codexLabCapacityPolicy({
+        workspaceId: '018f47a2-9d72-7cc1-b046-7a2868411f42',
+        planType: 'business',
+        authorization: null
+      }),
       authJson: { state: 'absent' }
     },
     ambientEnv: {}
@@ -107,7 +114,8 @@ describe('sealed Codex laboratory launch plan', () => {
     expect(plan.configToml).toContain('multi_agent = false')
     expect(plan.configToml).toContain('memories = false')
     expect(plan.configToml).toContain('shell_snapshot = false')
-    expect(plan.configToml).toContain('code_mode_host = false')
+    expect(plan.configToml).toContain('code_mode = false')
+    expect(plan.configToml).toContain('code_mode_host = true')
     expect(plan.configToml).toContain('goals = false')
     expect(plan.configToml).toContain('sleep_tool = false')
     expect(plan.configToml).toContain('plugins = false')
@@ -122,7 +130,8 @@ describe('sealed Codex laboratory launch plan', () => {
     expect(plan.configToml).toContain('[skills.bundled]\nenabled = false')
     expect(plan.configToml).toContain('[mcp_servers]')
     expect(plan.configToml).toContain('[hooks]')
-    expect(plan.configToml).not.toMatch(
+    expect(plan.configToml).toContain('api_key_model_discovery = false')
+    expect(plan.configToml.replace('api_key_model_discovery = false', '')).not.toMatch(
       /auth\.json|api[_-]?key|access[_-]?token|refresh[_-]?token/i
     )
     expect(JSON.stringify(plan.environment)).not.toMatch(
@@ -225,7 +234,12 @@ describe('sealed Codex laboratory launch plan', () => {
       {
         authentication: {
           ...facts().authentication,
-          subscription: { status: 'active', scope: 'workspace', unambiguous: false }
+          subscription: {
+            status: 'active',
+            scope: 'workspace',
+            unambiguous: false,
+            planType: 'business'
+          }
         }
       }
     ],
@@ -234,7 +248,12 @@ describe('sealed Codex laboratory launch plan', () => {
       {
         authentication: {
           ...facts().authentication,
-          subscription: { status: 'active', scope: 'personal', unambiguous: true }
+          subscription: {
+            status: 'active',
+            scope: 'personal',
+            unambiguous: true,
+            planType: 'business'
+          }
         }
       }
     ]

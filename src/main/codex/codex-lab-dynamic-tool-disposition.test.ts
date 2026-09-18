@@ -34,6 +34,7 @@ import {
   testCodexLabRateLimits
 } from './codex-lab-session-attestation-test-support'
 import { CODEX_LAB_READONLY_PERMISSION_PROFILE_ID } from './codex-structured-permission-policy'
+import { codexLabCapacityPolicy } from '../runtime/orchestration/lab-profile/codex-lab-usage-authorization'
 
 const SESSION_ID = 'session-lab'
 const THREAD_ID = 'thread-lab'
@@ -328,7 +329,12 @@ describe('Codex laboratory dynamic-tool server-request disposition', () => {
       fakeHome: '/private/tmp/orca-lab/homes/session-757/fake-home',
       gatewaySocketPath: '/private/tmp/orca-lab/homes/session-757/gateway.sock',
       workspaceId: '00000000-0000-4000-8000-000000000757',
-      permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID
+      permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID,
+      capacityPolicy: codexLabCapacityPolicy({
+        workspaceId: '00000000-0000-4000-8000-000000000757',
+        planType: 'business',
+        authorization: null
+      })
     })
     const auth = testCodexLabExternalChatGptAuth({
       dispatchId: gatewayBinding.expectedReceipt.dispatchId,
@@ -562,7 +568,12 @@ describe('Codex laboratory dynamic-tool server-request disposition', () => {
       fakeHome: '/private/tmp/orca-lab/runtime/failure/fake-home',
       gatewaySocketPath: '/private/tmp/orca-lab/runtime/failure/gateway.sock',
       workspaceId: '00000000-0000-4000-8000-000000000757',
-      permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID
+      permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID,
+      capacityPolicy: codexLabCapacityPolicy({
+        workspaceId: '00000000-0000-4000-8000-000000000757',
+        planType: 'business',
+        authorization: null
+      })
     })
     const openConnection = vi.fn<typeof openCodexAppServerConnection>(async () => {
       throw new Error('injected pre-publication open failure')

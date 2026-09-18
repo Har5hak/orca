@@ -164,7 +164,8 @@ describe('structured Codex lab launch resolution', () => {
             fakeHome: binding.plan.runtimePaths.fakeHome,
             gatewaySocketPath: binding.plan.gatewaySocketPath,
             workspaceId: binding.plan.enforcedWorkspaceId,
-            permissionProfileId: 'orca-lab-readonly-v1'
+            permissionProfileId: 'orca-lab-readonly-v1',
+            capacityPolicy: binding.plan.capacityPolicy
           },
           permissionPolicy: {
             approvalPolicy: 'never',

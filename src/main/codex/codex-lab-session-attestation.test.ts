@@ -26,6 +26,7 @@ import {
   type CodexStructuredLaunch,
   type CodexStructuredSessionEvent
 } from './codex-structured-session-adapter'
+import { codexLabCapacityPolicy } from '../runtime/orchestration/lab-profile/codex-lab-usage-authorization'
 
 const SESSION_ID = 'session-lab-attested'
 const THREAD_ID = 'thread-lab-attested'
@@ -36,7 +37,12 @@ const EXPECTED: CodexLabAppServerAttestationExpected = Object.freeze({
   fakeHome: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757/fake-home',
   gatewaySocketPath: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757/gateway.sock',
   workspaceId: '00000000-0000-4000-8000-000000000757',
-  permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID
+  permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID,
+  capacityPolicy: codexLabCapacityPolicy({
+    workspaceId: '00000000-0000-4000-8000-000000000757',
+    planType: 'business',
+    authorization: null
+  })
 })
 
 type Scenario =

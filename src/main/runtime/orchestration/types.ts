@@ -47,6 +47,7 @@ export type RunRow = {
   coordinator_handle: string | null
   coordinator_pane_key: string | null
   consumer_generation: number
+  codex_usage_authorization: string | null
   legacy: number
   created_at: string
   updated_at: string

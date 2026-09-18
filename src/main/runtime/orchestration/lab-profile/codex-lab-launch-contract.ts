@@ -1,3 +1,5 @@
+import type { CodexLabCapacityPolicy } from './codex-lab-usage-authorization'
+
 export const LAB_READONLY_SUPERVISED_PROFILE_ID = 'lab-readonly-supervised-v1'
 export const CODEX_WORKSPACE_CHATGPT_ADAPTER_ID = 'codex-workspace-chatgpt-v1'
 export const CODEX_LAB_RUNTIME_ROOT = '/private/tmp/orca-lab/runtime'
@@ -15,6 +17,8 @@ export type CodexLabLaunchRefusalReason =
   | 'gateway_invalid'
   | 'launch_plan_policy_broadened'
   | 'login_method_unsupported'
+  | 'metered_usage_authorization_expired'
+  | 'metered_usage_authorization_invalid'
   | 'platform_unsupported'
   | 'paid_usage_forbidden'
   | 'profile_unsupported'
@@ -74,7 +78,9 @@ export type CodexLabLaunchFacts = Readonly<{
       status: string
       scope: string
       unambiguous: boolean
+      planType: string
     }>
+    capacityPolicy: CodexLabCapacityPolicy
     authJson:
       | Readonly<{ state: 'absent' }>
       | Readonly<{ state: 'copied'; sourcePath: string }>
@@ -96,6 +102,8 @@ export type CodexLabReceiptInputs = Readonly<{
   codexExecutableSha256: string
   loginMethod: 'chatgpt'
   subscriptionStatus: 'active-workspace'
+  capacityPolicy: CodexLabCapacityPolicy['route']
+  capacityPolicySha256: string
   gatewaySocketPathSha256: string
   gatewayAccessSha256: string
   configSha256: string
@@ -123,6 +131,7 @@ export type SealedCodexLabLaunchPlan = Readonly<{
   gatewaySocketPath: string
   gatewayAccessSha256: string
   enforcedWorkspaceId: string
+  capacityPolicy: CodexLabCapacityPolicy
   configToml: string
   receiptInputs: CodexLabReceiptInputs
   unverifiedBoundaries: readonly [

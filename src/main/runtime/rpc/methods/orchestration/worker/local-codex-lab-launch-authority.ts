@@ -278,7 +278,8 @@ function assertFactsMatchAdmittedAuthority(input: {
     facts.gateway.socketPath !== input.gateway.endpoint ||
     facts.gateway.credential !== input.gateway.credential ||
     facts.authentication.expectedWorkspaceId !== input.credential.workspaceId ||
-    facts.authentication.observedWorkspaceId !== input.credential.workspaceId
+    facts.authentication.observedWorkspaceId !== input.credential.workspaceId ||
+    facts.authentication.subscription.planType !== input.credential.planType
   ) {
     throw new Error('Collected Codex laboratory facts do not match admitted launch authority.')
   }

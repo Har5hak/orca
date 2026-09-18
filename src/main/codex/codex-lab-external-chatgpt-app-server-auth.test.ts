@@ -32,6 +32,7 @@ import type {
   CodexStructuredSessionEvent
 } from './codex-structured-session-state'
 import { CODEX_LAB_READONLY_PERMISSION_PROFILE_ID } from './codex-structured-permission-policy'
+import { codexLabCapacityPolicy } from '../runtime/orchestration/lab-profile/codex-lab-usage-authorization'
 
 const WORKSPACE_ID = '00000000-0000-4000-8000-000000000757'
 const SESSION_ID = 'session-lab-external-auth'
@@ -130,13 +131,19 @@ function labLaunch(
 ): Partial<CodexStructuredLaunch> {
   const authBinding = overrides.authBinding ?? BINDING
   const dynamicDispatchId = overrides.dynamicDispatchId ?? authBinding.dispatchId
+  const workspaceId = overrides.attestedWorkspaceId ?? authBinding.workspaceId
   const expected = Object.freeze({
     cwd: '/private/tmp/orca-lab/worktrees/external-auth',
     codexHome: '/private/tmp/orca-lab/runtime/dispatches/external-auth/codex-home',
     fakeHome: '/private/tmp/orca-lab/runtime/dispatches/external-auth/fake-home',
     gatewaySocketPath: '/private/tmp/orca-lab/runtime/dispatches/external-auth/gateway.sock',
-    workspaceId: overrides.attestedWorkspaceId ?? authBinding.workspaceId,
-    permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID
+    workspaceId,
+    permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID,
+    capacityPolicy: codexLabCapacityPolicy({
+      workspaceId,
+      planType: 'business',
+      authorization: null
+    })
   })
   return {
     cwd: expected.cwd,

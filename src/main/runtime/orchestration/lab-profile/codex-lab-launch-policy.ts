@@ -1,11 +1,11 @@
 export const DISABLED_CODEX_LAB_FEATURES = [
+  'api_key_model_discovery',
   'apps',
   'artifact',
   'browser_use',
   'browser_use_external',
   'browser_use_full_cdp_access',
   'code_mode',
-  'code_mode_host',
   'computer_use',
   'default_mode_request_user_input',
   'enable_mcp_apps',
@@ -18,6 +18,7 @@ export const DISABLED_CODEX_LAB_FEATURES = [
   'in_app_dictation',
   'in_app_local_automation',
   'memories',
+  'mentions_v2',
   'multi_agent',
   'multi_agent_v2',
   'plugin_sharing',
@@ -37,7 +38,10 @@ export const DISABLED_CODEX_LAB_FEATURES = [
   'workspace_dependencies'
 ] as const
 
-export const ENABLED_CODEX_LAB_CONFINEMENT_FEATURES = ['skip_host_skill_discovery'] as const
+export const ENABLED_CODEX_LAB_CONFINEMENT_FEATURES = [
+  'code_mode_host',
+  'skip_host_skill_discovery'
+] as const
 
 export const UNVERIFIED_CODEX_LAB_BOUNDARIES = [
   'effective-config-enforcement',

@@ -280,8 +280,37 @@ export async function discardStructuredWorkerSession(
 }
 
 /** Delivers the dispatch preamble as the worker's first turn. */
+type StructuredWorkerPreambleSubmission = Readonly<{
+  dispatchState: 'pending' | 'accepted' | 'rejected' | 'unknown'
+  reason: string | null
+}>
+
+type StructuredWorkerPreambleHost = Readonly<{
+  deps: Readonly<{
+    store: Readonly<{
+      getRecord: (sessionId: string) => Readonly<{ lease: { runtimeFence: number } }> | null
+    }>
+  }>
+  send: (...args: Parameters<StructuredAgentSessionHost['send']>) => Promise<
+    | Readonly<{
+        ok: true
+        value: Readonly<{
+          clientMessageId: string
+          submission: StructuredWorkerPreambleSubmission
+        }>
+      }>
+    | Readonly<{ ok: false; refusal: Readonly<{ message: string }> }>
+  >
+  waitForSendSettlement: (
+    sessionId: string,
+    clientMessageId: string
+  ) => Promise<
+    Readonly<{ value: Readonly<{ submission: StructuredWorkerPreambleSubmission }> }> | undefined
+  >
+}>
+
 export async function sendStructuredWorkerPreamble(args: {
-  host: StructuredAgentSessionHost
+  host: StructuredWorkerPreambleHost
   sessionId: string
   dispatchId: string
   preamble: string
@@ -310,7 +339,12 @@ export async function sendStructuredWorkerPreamble(args: {
   if (!result.ok) {
     throw new Error(`The dispatch preamble was refused: ${result.refusal.message}`)
   }
-  const submission = result.value.submission
+  const submitted = result.value.submission
+  const submission =
+    submitted.dispatchState === 'pending'
+      ? ((await args.host.waitForSendSettlement(args.sessionId, result.value.clientMessageId))
+          ?.value.submission ?? submitted)
+      : submitted
   if (submission.dispatchState === 'accepted') {
     return
   }

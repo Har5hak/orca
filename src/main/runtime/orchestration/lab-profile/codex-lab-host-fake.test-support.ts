@@ -7,6 +7,7 @@ import {
   type SealedCodexLabLaunchPlan
 } from './codex-lab-launch-contract'
 import { buildSealedCodexLabLaunchPlan } from './codex-sealed-launch-plan'
+import { codexLabCapacityPolicy } from './codex-lab-usage-authorization'
 import {
   buildExpectedCodexLabEffectivePolicy,
   buildExpectedCodexLabRuntimeObservations,
@@ -60,7 +61,17 @@ export function sealedHostPlan(): SealedCodexLabLaunchPlan {
       loginMethod: 'chatgpt',
       expectedWorkspaceId: WORKSPACE_ID,
       observedWorkspaceId: WORKSPACE_ID,
-      subscription: { status: 'active', scope: 'workspace', unambiguous: true },
+      subscription: {
+        status: 'active',
+        scope: 'workspace',
+        unambiguous: true,
+        planType: 'business'
+      },
+      capacityPolicy: codexLabCapacityPolicy({
+        workspaceId: WORKSPACE_ID,
+        planType: 'business',
+        authorization: null
+      }),
       authJson: { state: 'absent' }
     },
     ambientEnv: {}

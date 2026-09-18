@@ -58,7 +58,6 @@ function translateRead(
       params: {
         terminal: binding.terminalHandle,
         terminalPaneKey: binding.terminalPaneKey,
-        run: binding.runId,
         peek: true,
         unread: false,
         types: 'status,dispatch',

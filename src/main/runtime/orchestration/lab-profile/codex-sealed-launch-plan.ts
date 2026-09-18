@@ -14,6 +14,11 @@ import {
   buildCodexLabArgv,
   renderCodexLabConfig
 } from './codex-lab-launch-policy'
+import {
+  CodexLabUsageAuthorizationError,
+  assertCodexLabCapacityPolicy,
+  codexLabCapacityPolicySha256
+} from './codex-lab-usage-authorization'
 
 export {
   CODEX_LAB_LAUNCH_REFUSAL_CODE,
@@ -87,6 +92,7 @@ export function buildSealedCodexLabLaunchPlan(
     gatewaySocketPath: facts.gateway.socketPath,
     gatewayAccessSha256: sha256(facts.gateway.credential),
     enforcedWorkspaceId: facts.authentication.expectedWorkspaceId,
+    capacityPolicy: Object.freeze({ ...facts.authentication.capacityPolicy }),
     configToml,
     receiptInputs,
     unverifiedBoundaries: UNVERIFIED_CODEX_LAB_BOUNDARIES
@@ -129,6 +135,7 @@ export function assertSealedCodexLabLaunchPlan(plan: SealedCodexLabLaunchPlan): 
   if (!sameStrings(plan.unverifiedBoundaries, UNVERIFIED_CODEX_LAB_BOUNDARIES)) {
     refuse('launch_plan_policy_broadened', 'unverifiedBoundaries')
   }
+  validateCapacityPolicy(plan.capacityPolicy, plan.enforcedWorkspaceId)
   const expectedReceipt: CodexLabReceiptInputs = {
     schemaVersion: 1,
     dispatchId: plan.dispatchId,
@@ -141,6 +148,8 @@ export function assertSealedCodexLabLaunchPlan(plan: SealedCodexLabLaunchPlan): 
     codexExecutableSha256: plan.codexExecutableSha256,
     loginMethod: 'chatgpt',
     subscriptionStatus: 'active-workspace',
+    capacityPolicy: plan.capacityPolicy.route,
+    capacityPolicySha256: codexLabCapacityPolicySha256(plan.capacityPolicy),
     gatewaySocketPathSha256: sha256(plan.gatewaySocketPath),
     gatewayAccessSha256: plan.gatewayAccessSha256,
     configSha256: sha256(plan.configToml),
@@ -246,10 +255,12 @@ function validateAuthentication(facts: CodexLabLaunchFacts): void {
   if (
     subscription.status !== 'active' ||
     subscription.scope !== 'workspace' ||
-    !subscription.unambiguous
+    !subscription.unambiguous ||
+    subscription.planType !== authentication.capacityPolicy.planType
   ) {
     refuse('subscription_status_ambiguous', 'authentication.subscription')
   }
+  validateCapacityPolicy(authentication.capacityPolicy, authentication.expectedWorkspaceId)
   if (authentication.authJson.state !== 'absent') {
     refuse('auth_json_forbidden', 'authentication.authJson')
   }
@@ -287,11 +298,30 @@ function buildReceiptInputs(
     codexExecutableSha256: facts.binary.observedSha256,
     loginMethod: 'chatgpt',
     subscriptionStatus: 'active-workspace',
+    capacityPolicy: facts.authentication.capacityPolicy.route,
+    capacityPolicySha256: codexLabCapacityPolicySha256(facts.authentication.capacityPolicy),
     gatewaySocketPathSha256: sha256(facts.gateway.socketPath),
     gatewayAccessSha256: sha256(facts.gateway.credential),
     configSha256: sha256(configToml),
     argvSha256: sha256(argv.join('\0'))
   })
+}
+
+function validateCapacityPolicy(
+  policy: CodexLabLaunchFacts['authentication']['capacityPolicy'],
+  workspaceId: string
+): void {
+  try {
+    assertCodexLabCapacityPolicy({ policy, workspaceId })
+  } catch (error) {
+    if (
+      error instanceof CodexLabUsageAuthorizationError &&
+      error.reason === 'authorization_expired'
+    ) {
+      refuse('metered_usage_authorization_expired', 'authentication.capacityPolicy')
+    }
+    refuse('metered_usage_authorization_invalid', 'authentication.capacityPolicy')
+  }
 }
 
 function isCanonicalAbsolutePath(value: string): boolean {

@@ -41,6 +41,7 @@ export type CodexTurnHost = {
   reportedOptions?: { model?: string }
   fastModeTierByModel: ReadonlyMap<string, string>
   dispatchEchoes: CodexDispatchEchoes
+  workerAccessMode?: 'orca-cli' | 'lab-gateway'
 }
 
 function turnInputFor(body: AgentJournalMessageItem): Record<string, unknown>[] {
@@ -61,6 +62,9 @@ function codexTurnOptions(host: CodexTurnHost): Record<string, string> {
   const options = Object.fromEntries(
     [...host.options].filter(([key]) => key !== 'fastMode' && key !== 'serviceTier')
   )
+  if (host.workerAccessMode === 'lab-gateway') {
+    return { ...options, serviceTier: 'default' }
+  }
   const encodedFastMode = host.options.get('fastMode')
   if (encodedFastMode === undefined) {
     return options

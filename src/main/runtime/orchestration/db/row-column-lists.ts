@@ -14,6 +14,7 @@ export const RUN_COLUMNS = [
   'coordinator_handle',
   'coordinator_pane_key',
   'consumer_generation',
+  'codex_usage_authorization',
   'legacy',
   'created_at',
   'updated_at'

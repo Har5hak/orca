@@ -14,6 +14,10 @@ import {
   type CodexLabAppServerAttestationInput
 } from './codex-lab-app-server-attestation'
 import { CODEX_LAB_DYNAMIC_TOOL_SPECS } from './codex-lab-dynamic-tool-contract'
+import {
+  codexLabCapacityPolicy,
+  mintCodexLabUsageAuthorization
+} from '../runtime/orchestration/lab-profile/codex-lab-usage-authorization'
 
 const EXPECTED = Object.freeze({
   cwd: '/private/tmp/orca-lab/worktree',
@@ -21,7 +25,28 @@ const EXPECTED = Object.freeze({
   fakeHome: '/private/tmp/orca-lab/home',
   gatewaySocketPath: '/private/tmp/orca-lab/runtime/dispatches/test/gateway.sock',
   workspaceId: 'workspace_test',
-  permissionProfileId: 'orca-lab-readonly-v1'
+  permissionProfileId: 'orca-lab-readonly-v1',
+  capacityPolicy: codexLabCapacityPolicy({
+    workspaceId: 'workspace_test',
+    planType: 'business',
+    authorization: null
+  })
+})
+
+const METERED_AUTHORIZATION = mintCodexLabUsageAuthorization({
+  workspaceId: EXPECTED.workspaceId,
+  planType: 'enterprise_cbp_usage_based',
+  expiresAt: '2099-09-24T23:00:00.000Z',
+  nowMs: 0
+})
+const METERED_EXPECTED = Object.freeze({
+  ...EXPECTED,
+  capacityPolicy: codexLabCapacityPolicy({
+    workspaceId: EXPECTED.workspaceId,
+    planType: 'enterprise_cbp_usage_based',
+    authorization: METERED_AUTHORIZATION,
+    nowMs: 0
+  })
 })
 
 type Transcript = Readonly<{
@@ -71,6 +96,40 @@ function makeRateLimits(): Record<string, unknown> {
     accountId: EXPECTED.workspaceId,
     ordinaryUsageAllowed: true,
     rateLimits: { planType: 'business' }
+  }
+}
+
+function makeMeteredRateLimits(
+  overrides: Readonly<Record<string, unknown>> = {}
+): Record<string, unknown> {
+  const rateLimits = {
+    credits: { hasCredits: true, unlimited: false, balance: null },
+    individualLimit: {
+      limit: '1000.00',
+      used: '350.00',
+      remainingPercent: 65.5,
+      resetsAt: 4_102_444_800
+    },
+    limitId: 'codex',
+    limitName: null,
+    normalModelSlug: null,
+    planType: 'enterprise_cbp_usage_based',
+    primary: null,
+    rateLimitReachedType: null,
+    secondary: null,
+    spendControlReached: false,
+    ...(typeof overrides.rateLimits === 'object' && overrides.rateLimits !== null
+      ? overrides.rateLimits
+      : {})
+  }
+  return {
+    accountId: EXPECTED.workspaceId,
+    ordinaryUsageAllowed: null,
+    rateLimitResetCredits: null,
+    rateLimitUpsell: null,
+    rateLimitsByLimitId: null,
+    ...overrides,
+    rateLimits
   }
 }
 
@@ -384,6 +443,43 @@ describe('TASK-757 Codex app-server policy attestation', () => {
     })
   })
 
+  it('accepts only the official ChatGPT backend as an explicit ChatGPT base URL', async () => {
+    const officialConfig = makeConfig()
+    officialConfig.chatgpt_base_url = 'https://chatgpt.com/backend-api/'
+    const official = fakeInput({
+      config: { config: officialConfig, origins: {}, layers: [] }
+    })
+
+    await expect(probeCodexLabAppServerReadiness(official.input)).resolves.toMatchObject({
+      ready: true
+    })
+
+    const proxyConfig = makeConfig()
+    proxyConfig.chatgpt_base_url = 'https://llm-proxy.example/backend-api/'
+    const proxy = fakeInput({ config: { config: proxyConfig, origins: {}, layers: [] } })
+
+    await expect(probeCodexLabAppServerReadiness(proxy.input)).resolves.toEqual({
+      ready: false,
+      reason: 'effective_config_broadened',
+      field: 'config.chatgpt_base_url'
+    })
+  })
+
+  it.each([
+    ['filesystem', { writable_roots: [EXPECTED.cwd] }],
+    ['workspace_roots', [EXPECTED.cwd]]
+  ])('rejects a permission-profile %s override', async (field, value) => {
+    const config = makeConfig()
+    Reflect.set(getProfile(config), field, value)
+    const { input } = fakeInput({ config: { config, origins: {}, layers: [] } })
+
+    await expect(probeCodexLabAppServerReadiness(input)).resolves.toEqual({
+      ready: false,
+      reason: 'effective_config_broadened',
+      field: `config.permissions.${EXPECTED.permissionProfileId}`
+    })
+  })
+
   it('requires proxy enforcement, network enablement, and only the exact gateway socket', async () => {
     const cases = [
       {
@@ -523,7 +619,22 @@ describe('TASK-757 Codex app-server policy attestation', () => {
     })
   })
 
-  it('tolerates unrelated model defaults but rejects unknown policy-subtree keys', async () => {
+  it.each([
+    ['code_mode', true],
+    ['code_mode_host', false]
+  ])('rejects incompatible effective %s feature state', async (feature, value) => {
+    const config = makeConfig()
+    requireRecord(config.features, 'features')[feature] = value
+    const { input } = fakeInput({ config: { config, origins: {}, layers: [] } })
+
+    await expect(probeCodexLabAppServerReadiness(input)).resolves.toEqual({
+      ready: false,
+      reason: 'effective_config_broadened',
+      field: `config.features.${feature}`
+    })
+  })
+
+  it('tolerates inert defaults but rejects enabled unknown policy features', async () => {
     const withModelDefaults = makeConfig()
     withModelDefaults.model = 'gpt-current'
     withModelDefaults.model_context_window = 200_000
@@ -532,6 +643,16 @@ describe('TASK-757 Codex app-server policy attestation', () => {
       config: { config: withModelDefaults, origins: {}, layers: [] }
     })
     await expect(probeCodexLabAppServerReadiness(defaultsCase.input)).resolves.toMatchObject({
+      ready: true
+    })
+
+    const withDisabledFutureFeature = makeConfig()
+    const disabledFeatures = requireRecord(withDisabledFutureFeature.features, 'features')
+    disabledFeatures.future_unattested_power = false
+    const disabledCase = fakeInput({
+      config: { config: withDisabledFutureFeature, origins: {}, layers: [] }
+    })
+    await expect(probeCodexLabAppServerReadiness(disabledCase.input)).resolves.toMatchObject({
       ready: true
     })
 
@@ -748,6 +869,182 @@ describe('TASK-757 Codex app-server policy attestation', () => {
       })
     }
   )
+
+  it('admits only the explicitly authorized exact metered workspace with live capacity', async () => {
+    const { input } = fakeInput({
+      account: {
+        account: {
+          type: 'chatgpt',
+          email: null,
+          planType: 'enterprise_cbp_usage_based'
+        },
+        requiresOpenaiAuth: true
+      },
+      rateLimits: makeMeteredRateLimits()
+    })
+
+    await expect(
+      probeCodexLabAppServerReadiness({
+        ...input,
+        expected: METERED_EXPECTED,
+        externalAuthReceipt: makeExternalAuthReceipt({
+          chatgptPlanType: 'enterprise_cbp_usage_based'
+        })
+      })
+    ).resolves.toMatchObject({
+      ready: true,
+      evidence: { capacityRoute: 'authorized-metered-workspace' }
+    })
+  })
+
+  it('accepts earned reset-credit metadata without treating it as a separate billing route', async () => {
+    const { input } = fakeInput({
+      account: {
+        account: {
+          type: 'chatgpt',
+          email: null,
+          planType: 'enterprise_cbp_usage_based'
+        },
+        requiresOpenaiAuth: true
+      },
+      rateLimits: makeMeteredRateLimits({
+        rateLimitResetCredits: {
+          availableCount: 1,
+          credits: [
+            {
+              id: 'reset-credit-1',
+              resetType: 'codexRateLimits',
+              status: 'available',
+              grantedAt: 4_102_358_400,
+              expiresAt: 4_102_444_800,
+              title: null,
+              description: null
+            }
+          ]
+        }
+      })
+    })
+
+    await expect(
+      probeCodexLabAppServerReadiness({
+        ...input,
+        expected: METERED_EXPECTED,
+        externalAuthReceipt: makeExternalAuthReceipt({
+          chatgptPlanType: 'enterprise_cbp_usage_based'
+        })
+      })
+    ).resolves.toMatchObject({
+      ready: true,
+      evidence: { capacityRoute: 'authorized-metered-workspace' }
+    })
+  })
+
+  it('rechecks the metered authorization expiry during live app-server attestation', async () => {
+    const { input } = fakeInput({
+      account: {
+        account: {
+          type: 'chatgpt',
+          email: null,
+          planType: 'enterprise_cbp_usage_based'
+        },
+        requiresOpenaiAuth: true
+      },
+      rateLimits: makeMeteredRateLimits()
+    })
+    const expiredExpected = Object.freeze({
+      ...METERED_EXPECTED,
+      capacityPolicy: Object.freeze({
+        ...METERED_EXPECTED.capacityPolicy,
+        expiresAt: '2000-01-01T00:00:00.000Z'
+      })
+    })
+
+    await expect(
+      probeCodexLabAppServerReadiness({
+        ...input,
+        expected: expiredExpected,
+        externalAuthReceipt: makeExternalAuthReceipt({
+          chatgptPlanType: 'enterprise_cbp_usage_based'
+        })
+      })
+    ).resolves.toEqual({
+      ready: false,
+      reason: 'metered_usage_authorization_expired',
+      field: 'expected.capacityPolicy.expiresAt'
+    })
+  })
+
+  it.each([
+    [
+      'spent credits',
+      makeMeteredRateLimits({
+        rateLimits: { credits: { hasCredits: false, unlimited: false, balance: null } }
+      }),
+      'ordinary_usage_blocked',
+      'account/rateLimits/read.rateLimits.credits.hasCredits'
+    ],
+    [
+      'malformed keyed codex bucket',
+      makeMeteredRateLimits({ rateLimitsByLimitId: { codex: {} } }),
+      'response_invalid',
+      'account/rateLimits/read.rateLimitsByLimitId.codex.limitId'
+    ],
+    [
+      'exhausted individual limit',
+      makeMeteredRateLimits({
+        rateLimits: {
+          individualLimit: {
+            limit: '1000',
+            used: '1000',
+            remainingPercent: 0,
+            resetsAt: 4_102_444_800
+          }
+        }
+      }),
+      'ordinary_usage_blocked',
+      'account/rateLimits/read.rateLimits.individualLimit'
+    ],
+    [
+      'spend control reached',
+      makeMeteredRateLimits({ rateLimits: { spendControlReached: true } }),
+      'ordinary_usage_blocked',
+      'account/rateLimits/read.rateLimits.spendControlReached'
+    ],
+    [
+      'provider reports a reached limit',
+      makeMeteredRateLimits({ rateLimits: { rateLimitReachedType: 'hard_limit' } }),
+      'ordinary_usage_blocked',
+      'account/rateLimits/read.rateLimits.rateLimitReachedType'
+    ],
+    [
+      'unknown future field',
+      makeMeteredRateLimits({ rateLimits: { futureCapacity: true } }),
+      'account_unverified',
+      'account/rateLimits/read.rateLimits'
+    ]
+  ])('refuses authorized metered evidence with %s', async (_label, rateLimits, reason, field) => {
+    const { input } = fakeInput({
+      account: {
+        account: {
+          type: 'chatgpt',
+          email: null,
+          planType: 'enterprise_cbp_usage_based'
+        },
+        requiresOpenaiAuth: true
+      },
+      rateLimits
+    })
+
+    await expect(
+      probeCodexLabAppServerReadiness({
+        ...input,
+        expected: METERED_EXPECTED,
+        externalAuthReceipt: makeExternalAuthReceipt({
+          chatgptPlanType: 'enterprise_cbp_usage_based'
+        })
+      })
+    ).resolves.toEqual({ ready: false, reason, field })
+  })
 
   it.each([
     [
