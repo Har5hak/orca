@@ -146,6 +146,47 @@ type HostPortDependencies = Readonly<{
   observeTargetAuthJson?: (filePath: string) => Promise<TargetAuthJsonObservation>
 }>
 
+export type CodexLabChatGptCredentialSource = Readonly<{
+  readCredential(): Promise<string | null>
+}>
+
+/** Source-only credential reader for process-local app-server authentication. */
+export function createSelectedHostCodexChatGptCredentialSource(
+  source: SelectedHostCodexCredentialSource,
+  dependencies: Pick<
+    HostPortDependencies,
+    'platform' | 'executeSecurityCommand' | 'readCredentialFile'
+  > = {}
+): CodexLabChatGptCredentialSource {
+  if ((dependencies.platform ?? process.platform) !== 'darwin') {
+    throw refusal('source_selection', 'platform_unsupported')
+  }
+  assertCanonicalHome(source.canonicalCodexHome, 'source_home_invalid', 'source_selection')
+  const execute = dependencies.executeSecurityCommand ?? executeSecurityCommand
+  const readCredentialFile =
+    dependencies.readCredentialFile ?? ((filePath) => readCredentialFileSecurely(filePath, refusal))
+  const sourceLocator = Object.freeze({
+    service: CODEX_AUTH_KEYRING_SERVICE,
+    account: codexAuthKeyringAccount(source.canonicalCodexHome)
+  })
+  return Object.freeze({
+    async readCredential(): Promise<string | null> {
+      try {
+        const credential =
+          source.storage === 'file'
+            ? await readCredentialFile(join(source.canonicalCodexHome, 'auth.json'))
+            : await readKeyringCredential(execute, sourceLocator, 'source_read', refusal)
+        return credential === null ? null : compactJsonCredential(credential)
+      } catch (error) {
+        if (error instanceof CodexLabCredentialHostPortRefusal) {
+          throw error
+        }
+        throw refusal('source_read', 'credential_file_read_failed')
+      }
+    }
+  })
+}
+
 export function createCodexLabChatGptCredentialHostPorts(
   args: Readonly<{
     source: SelectedHostCodexCredentialSource
@@ -160,36 +201,16 @@ export function createCodexLabChatGptCredentialHostPorts(
   assertCanonicalHome(args.canonicalTargetCodexHome, 'target_home_invalid', 'source_selection')
 
   const execute = dependencies.executeSecurityCommand ?? executeSecurityCommand
-  const readCredentialFile =
-    dependencies.readCredentialFile ?? ((filePath) => readCredentialFileSecurely(filePath, refusal))
   const observeTargetAuthJson = dependencies.observeTargetAuthJson ?? observeTargetAuthJsonPath
   const targetLocator = Object.freeze({
     service: CODEX_AUTH_KEYRING_SERVICE,
     account: codexAuthKeyringAccount(args.canonicalTargetCodexHome)
   })
-  const sourceLocator = Object.freeze({
-    service: CODEX_AUTH_KEYRING_SERVICE,
-    account: codexAuthKeyringAccount(args.source.canonicalCodexHome)
-  })
+  const source = createSelectedHostCodexChatGptCredentialSource(args.source, dependencies)
   const targetAuthJsonPath = join(args.canonicalTargetCodexHome, 'auth.json')
 
   return Object.freeze({
-    source: Object.freeze({
-      async readCredential(): Promise<string | null> {
-        try {
-          const credential =
-            args.source.storage === 'file'
-              ? await readCredentialFile(join(args.source.canonicalCodexHome, 'auth.json'))
-              : await readKeyringCredential(execute, sourceLocator, 'source_read', refusal)
-          return credential === null ? null : compactJsonCredential(credential)
-        } catch (error) {
-          if (error instanceof CodexLabCredentialHostPortRefusal) {
-            throw error
-          }
-          throw refusal('source_read', 'credential_file_read_failed')
-        }
-      }
-    }),
+    source,
     targetKeyring: Object.freeze({
       async writeCredential(entry): Promise<void> {
         assertExactLocator(entry, targetLocator, 'target_write')

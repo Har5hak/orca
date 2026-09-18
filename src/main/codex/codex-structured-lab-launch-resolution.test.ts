@@ -5,7 +5,7 @@ import {
 } from '../../shared/agent-session-record'
 import type { AgentSessionJournalIdentity } from '../../shared/agent-session-journal-types'
 import {
-  installTestCodexLabStructuredLaunchBinding,
+  installTestCodexLabStructuredLaunchBinding as installStructuredBinding,
   TEST_LAB_GATEWAY_CREDENTIAL,
   TEST_LAB_GATEWAY_ENDPOINT,
   TEST_LAB_WORKTREE_PATH,
@@ -14,6 +14,12 @@ import {
   testCodexLabStructuredLaunchBinding
 } from '../runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-test-support'
 import { CodexLabDynamicToolHost } from './codex-lab-dynamic-tool-host'
+import { createCodexLabExternalChatGptAuthHostFactory } from './codex-lab-external-chatgpt-auth-authority'
+import {
+  registerCodexLabExternalChatGptAuthAuthority,
+  releaseCodexLabExternalChatGptAuthAuthority
+} from '../runtime/orchestration/lab-profile/codex-lab-external-chatgpt-auth-registry-internal'
+import { getCodexLabExternalChatGptAuthMetadata } from '../runtime/orchestration/lab-profile/codex-lab-external-chatgpt-auth-registry'
 import { createCodexStructuredLaunchResolver } from './codex-structured-launch-resolution'
 
 const SESSION_ID = 'session_lab_structured'
@@ -23,6 +29,49 @@ const IDENTITY: AgentSessionJournalIdentity = {
   hostId: 'local',
   agent: 'codex',
   providerHandle: { kind: 'codex', threadId: 'unused-by-launch-resolution' }
+}
+
+function installTestCodexLabStructuredLaunchBinding(
+  sessionId: string,
+  binding: ReturnType<typeof testCodexLabStructuredLaunchBinding>
+): () => void {
+  const authBinding = {
+    dispatchId: binding.dispatchId,
+    sessionId,
+    workspaceId: binding.plan.enforcedWorkspaceId
+  }
+  const token = jwt({ exp: Math.floor(Date.now() / 1_000) + 600 })
+  registerCodexLabExternalChatGptAuthAuthority({
+    ...authBinding,
+    factory: createCodexLabExternalChatGptAuthHostFactory({
+      binding: authBinding,
+      credential: {
+        type: 'chatgptAuthTokens',
+        accessToken: token,
+        chatgptAccountId: authBinding.workspaceId,
+        chatgptPlanType: 'team'
+      },
+      refresh: async () => ({
+        accessToken: token,
+        chatgptAccountId: authBinding.workspaceId,
+        chatgptPlanType: 'team'
+      })
+    })
+  })
+  try {
+    const cleanupBinding = installStructuredBinding(sessionId, binding)
+    return () => {
+      cleanupBinding()
+      releaseCodexLabExternalChatGptAuthAuthority(sessionId, binding.dispatchId)
+    }
+  } catch (error) {
+    releaseCodexLabExternalChatGptAuthAuthority(sessionId, binding.dispatchId)
+    throw error
+  }
+}
+
+function jwt(payload: Record<string, unknown>): string {
+  return ['e30', Buffer.from(JSON.stringify(payload)).toString('base64url'), 'signature'].join('.')
 }
 
 function record(accountHome: string): AgentSessionRecord {
@@ -98,6 +147,12 @@ describe('structured Codex lab launch resolution', () => {
           workerAccessMode: 'lab-gateway',
           labDynamicToolHost: expect.any(CodexLabDynamicToolHost),
           labDynamicToolHostAttestationExpected: testCodexLabDynamicToolHostAttestation(),
+          labExternalChatGptAuthHost: expect.any(Object),
+          labExternalChatGptAuthBindingExpected: {
+            dispatchId: binding.dispatchId,
+            sessionId: SESSION_ID,
+            workspaceId: binding.plan.enforcedWorkspaceId
+          },
           labAppServerAttestationExpected: {
             cwd: TEST_LAB_WORKTREE_PATH,
             codexHome: binding.plan.runtimePaths.codexHome,
@@ -113,7 +168,9 @@ describe('structured Codex lab launch resolution', () => {
         })
       } finally {
         launch.labDynamicToolHost?.dispose()
+        launch.labExternalChatGptAuthHost?.dispose()
       }
+      expect(getCodexLabExternalChatGptAuthMetadata(SESSION_ID)).toBeUndefined()
       expect(resolveEnvironment).not.toHaveBeenCalled()
       expect(resolveCommand).not.toHaveBeenCalled()
       expect(resolvePermissionPolicy).not.toHaveBeenCalled()
@@ -166,7 +223,7 @@ describe('structured Codex lab launch resolution', () => {
     }
   )
 
-  it('mints fresh acquisition custody and revokes only future hosts on binding release', async () => {
+  it('claims external auth once while dynamic-tool custody remains acquisition-scoped', async () => {
     const binding = testCodexLabStructuredLaunchBinding()
     const cleanup = installTestCodexLabStructuredLaunchBinding(SESSION_ID, binding)
     const resolve = createCodexStructuredLaunchResolver({
@@ -185,30 +242,16 @@ describe('structured Codex lab launch resolution', () => {
       throw new Error('first laboratory launch did not receive a dynamic-tool host')
     }
     firstHost.dispose()
-    const second = await resolve({ identity: IDENTITY })
-    const secondHost = second.labDynamicToolHost
-    if (!secondHost) {
-      throw new Error('second laboratory launch did not receive a dynamic-tool host')
-    }
-
     try {
-      expect(firstHost).not.toBe(secondHost)
       await expect(firstHost.invoke(invalidInvocation)).resolves.toMatchObject({
         success: false,
         contentItems: [{ text: expect.stringContaining('host_disposed') }]
       })
-      await expect(secondHost.invoke(invalidInvocation)).resolves.toMatchObject({
-        success: false,
-        contentItems: [{ text: expect.stringContaining('call_id_invalid') }]
-      })
-
-      cleanup()
-      expect(() => binding.labDynamicToolHostFactory()).toThrow(/factory is revoked/i)
-      await expect(secondHost.invoke(invalidInvocation)).resolves.toMatchObject({
-        contentItems: [{ text: expect.stringContaining('call_id_invalid') }]
+      await expect(resolve({ identity: IDENTITY })).rejects.toMatchObject({
+        reason: 'authority_replayed'
       })
     } finally {
-      secondHost.dispose()
+      first.labExternalChatGptAuthHost?.dispose()
       cleanup()
     }
   })

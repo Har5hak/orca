@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   CODEX_LAB_CREDENTIAL_HOST_PORT_REFUSAL_CODE,
   createCodexLabChatGptCredentialHostPorts,
+  createSelectedHostCodexChatGptCredentialSource,
   resolveSelectedHostCodexCredentialSource,
   type CodexLabSecurityCommandExecutor,
   type CodexLabSecurityCommandRequest,
@@ -100,6 +101,31 @@ function request() {
 }
 
 describe('Codex laboratory ChatGPT credential host ports', () => {
+  it('creates a source-only Keychain reader without target authority', async () => {
+    const executeSecurityCommand = vi.fn(async (request: CodexLabSecurityCommandRequest) => {
+      expect(request.args).toEqual([
+        'find-generic-password',
+        '-s',
+        CODEX_AUTH_KEYRING_SERVICE,
+        '-a',
+        codexAuthKeyringAccount(SOURCE_HOME),
+        '-w'
+      ])
+      return processResult({ stdout: `${credential('source-only')}\n` })
+    })
+    const reader = createSelectedHostCodexChatGptCredentialSource(source('keyring'), {
+      platform: 'darwin',
+      executeSecurityCommand
+    })
+
+    await expect(reader.readCredential()).resolves.toBe(
+      JSON.stringify(JSON.parse(credential('source-only')))
+    )
+    expect(reader).toEqual({ readCredential: expect.any(Function) })
+    expect(reader).not.toHaveProperty('targetKeyring')
+    expect(executeSecurityCommand).toHaveBeenCalledTimes(1)
+  })
+
   it('resolves the current host selection instead of borrowing another account lane', () => {
     const assertManagedHome = vi.fn(() => MANAGED_HOME)
     const selected = resolveSelectedHostCodexCredentialSource(

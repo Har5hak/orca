@@ -25,6 +25,8 @@ import {
   type CodexLabStructuredLaunchBinding
 } from '../runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-resolver'
 import { CODEX_LAB_RUNTIME_ROOT } from '../runtime/orchestration/lab-profile/codex-lab-launch-contract'
+import { claimCodexLabExternalChatGptAuthAuthority } from '../runtime/orchestration/lab-profile/codex-lab-external-chatgpt-auth-resolver'
+import { releaseCodexLabExternalChatGptAuthAuthority } from '../runtime/orchestration/lab-profile/codex-lab-external-chatgpt-auth-registry-internal'
 
 export type CodexStructuredLaunchResolverDeps = {
   store: Pick<AgentSessionRecordStore, 'getRecord'>
@@ -148,11 +150,39 @@ function resolveCodexLabStructuredLaunch(
     endpointSha256: plan.receiptInputs.gatewaySocketPathSha256,
     gatewayAccessSha256: plan.gatewayAccessSha256
   })
+  const expectedAuthBinding = Object.freeze({
+    dispatchId: binding.dispatchId,
+    sessionId,
+    workspaceId: plan.enforcedWorkspaceId
+  })
   const labDynamicToolHost = binding.labDynamicToolHostFactory()
   if (!isCodexLabDynamicToolHostBoundTo(labDynamicToolHost, expectedDynamicHostBinding)) {
     labDynamicToolHost.dispose()
     throw new CodexLabStructuredBindingRefusal('binding_invalid')
   }
+  let claimedAuthHost
+  try {
+    claimedAuthHost = claimCodexLabExternalChatGptAuthAuthority(expectedAuthBinding)
+  } catch (error) {
+    labDynamicToolHost.dispose()
+    throw error
+  }
+  let authReleased = false
+  const labExternalChatGptAuthHost = Object.freeze({
+    takeInitialLoginParams: () => claimedAuthHost.takeInitialLoginParams(),
+    refresh: (candidate: unknown) => claimedAuthHost.refresh(candidate),
+    dispose(): void {
+      if (authReleased) {
+        return
+      }
+      authReleased = true
+      try {
+        claimedAuthHost.dispose()
+      } finally {
+        releaseCodexLabExternalChatGptAuthAuthority(sessionId, binding.dispatchId)
+      }
+    }
+  })
   return {
     command: plan.executable,
     args: [...plan.argv],
@@ -164,6 +194,8 @@ function resolveCodexLabStructuredLaunch(
     workerAccessMode: 'lab-gateway',
     labDynamicToolHost,
     labDynamicToolHostAttestationExpected: expectedDynamicHostBinding,
+    labExternalChatGptAuthHost,
+    labExternalChatGptAuthBindingExpected: expectedAuthBinding,
     labAppServerAttestationExpected: Object.freeze({
       cwd: workspacePath,
       codexHome: plan.runtimePaths.codexHome,

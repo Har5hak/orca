@@ -130,6 +130,22 @@ export function releaseCodexLabExternalChatGptAuthAuthority(
   return true
 }
 
+/** Rolls back only an authority that has not transferred to the provider launch. */
+export function releaseCodexLabExternalChatGptAuthAuthorityIfUnclaimed(
+  sessionId: string,
+  dispatchId: string
+): boolean {
+  const entry = entriesBySessionId.get(sessionId)
+  if (!entry || entry.state !== 'available' || entry.binding.dispatchId !== dispatchId) {
+    return false
+  }
+  if (!entriesBySessionId.delete(sessionId)) {
+    return false
+  }
+  revokeCodexLabExternalChatGptAuthHostFactory(entry.factory)
+  return true
+}
+
 function snapshotBinding(candidate: CodexLabExternalChatGptAuthBinding) {
   return snapshotCodexLabExternalChatGptAuthBinding(candidate)
 }
