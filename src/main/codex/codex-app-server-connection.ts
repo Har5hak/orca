@@ -1,4 +1,5 @@
 import { spawnProcess } from '../../shared/child-process/run-process'
+import { createChildTerminationReporter } from '../../shared/child-process/child-termination-reporter'
 import { RetryableProcessExitProof } from '../../shared/child-process/retryable-process-exit-proof'
 import { createProviderSpawnSpec } from './codex-app-server-posix-supervisor'
 import { buildCodexAppServerExitError } from './codex-app-server-exit-error'
@@ -67,6 +68,8 @@ export async function openCodexAppServerConnection(
   const childEnv = buildCodexAppServerChildEnvironment(launch)
   const spawnSpec = createProviderSpawnSpec(launch, childEnv, process.platform)
   const child = spawnImpl(spawnSpec)
+  const childProcessExisted = child.pid !== undefined
+  const exitObservationReporter = createChildTerminationReporter(handlers.onExitObserved)
   const spawnToken = launch.env?.[CODEX_SPAWN_TOKEN_ENV]
 
   function terminateProcessTree(): Promise<boolean> {
@@ -98,10 +101,16 @@ export async function openCodexAppServerConnection(
     resolveExit()
   }
 
-  child.on('exit', () => {
+  function handleObservedExit(): void {
     observeExit()
-    handleUnexpectedEnd()
-  })
+    try {
+      handleUnexpectedEnd()
+    } finally {
+      exitObservationReporter.reportIf(childProcessExisted)
+    }
+  }
+
+  child.on('exit', handleObservedExit)
 
   function buildExitError(cause?: Error): Error {
     return buildCodexAppServerExitError(stderrTail, cause)
@@ -137,10 +146,7 @@ export async function openCodexAppServerConnection(
   child.on('error', (error) => {
     handleUnexpectedEnd(error)
   })
-  child.on('close', () => {
-    observeExit()
-    handleUnexpectedEnd()
-  })
+  child.on('close', handleObservedExit)
   child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
     stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_MAX_BYTES)
   })

@@ -9,6 +9,8 @@ export type CodexAppServerConnectionHandlers = {
   onServerRequest?: (request: CodexAppServerServerRequest) => void
   onUnhandledFrame?: (kind: string, payload: unknown) => void
   onExit?: (error: Error) => void
+  /** Called once after a spawned child emits `exit` or `close`, including requested closes. */
+  onExitObserved?: () => void
 }
 
 export type CodexAppServerConnection = {
