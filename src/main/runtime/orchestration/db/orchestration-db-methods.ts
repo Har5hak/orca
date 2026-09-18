@@ -36,6 +36,7 @@ import type { MessageInsertMethods } from './messages/message-insert'
 import type { RoleMailboxDeliveryMethods } from './messages/role-mailbox-delivery'
 import type { MutationReceiptStoreMethods } from './mutation-receipts/mutation-receipt-store'
 import type { LifecycleTransitionMethods } from './lifecycle-transition'
+import type { CodexLabRuntimeCustodyMethods } from './lab-runtime-custody/lab-runtime-custody-store'
 import type { QuestionThreadsMethods } from './questions/question-threads'
 import type { OrchestrationResetMethods } from './reset/orchestration-reset'
 import type { RunBindingMethods } from './runs/run-binding'
@@ -76,6 +77,7 @@ export type OrchestrationDbMethods = AttemptObservationStoreMethods &
   AdoptLegacyRunMethods &
   MutationReceiptStoreMethods &
   LifecycleTransitionMethods &
+  CodexLabRuntimeCustodyMethods &
   LegacyCompatibilityPrincipalsMethods &
   LegacyCompatibilityCandidatesMethods &
   LegacyWorkerCompletionMethods &

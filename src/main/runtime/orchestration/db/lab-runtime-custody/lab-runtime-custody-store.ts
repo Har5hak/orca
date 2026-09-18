@@ -1,0 +1,48 @@
+import {
+  beginCodexLabRuntimeCleanup,
+  recordCodexLabRuntimeCleanupResult,
+  releaseCodexLabRuntimeCustody
+} from './lab-runtime-custody-cleanup'
+import { getCodexLabRuntimeCustody } from './lab-runtime-custody-row'
+import {
+  planCodexLabRuntimeCustody,
+  recordCodexLabRuntimeAuthorityAttached,
+  recordCodexLabRuntimeExternalAuthInstalled,
+  recordCodexLabRuntimeGatewayStarted,
+  recordCodexLabRuntimeLayoutPrepared,
+  recordCodexLabRuntimeProviderAttached,
+  recordCodexLabRuntimeProviderReserved,
+  recordCodexLabRuntimeReady
+} from './lab-runtime-custody-transitions'
+
+export type CodexLabRuntimeCustodyMethods = {
+  getCodexLabRuntimeCustody: typeof getCodexLabRuntimeCustody
+  planCodexLabRuntimeCustody: typeof planCodexLabRuntimeCustody
+  recordCodexLabRuntimeAuthorityAttached: typeof recordCodexLabRuntimeAuthorityAttached
+  recordCodexLabRuntimeLayoutPrepared: typeof recordCodexLabRuntimeLayoutPrepared
+  recordCodexLabRuntimeProviderReserved: typeof recordCodexLabRuntimeProviderReserved
+  recordCodexLabRuntimeExternalAuthInstalled: typeof recordCodexLabRuntimeExternalAuthInstalled
+  recordCodexLabRuntimeGatewayStarted: typeof recordCodexLabRuntimeGatewayStarted
+  recordCodexLabRuntimeProviderAttached: typeof recordCodexLabRuntimeProviderAttached
+  recordCodexLabRuntimeReady: typeof recordCodexLabRuntimeReady
+  beginCodexLabRuntimeCleanup: typeof beginCodexLabRuntimeCleanup
+  recordCodexLabRuntimeCleanupResult: typeof recordCodexLabRuntimeCleanupResult
+  releaseCodexLabRuntimeCustody: typeof releaseCodexLabRuntimeCustody
+}
+
+export function attachCodexLabRuntimeCustody(ctor: { prototype: object }): void {
+  Object.assign(ctor.prototype, {
+    getCodexLabRuntimeCustody,
+    planCodexLabRuntimeCustody,
+    recordCodexLabRuntimeAuthorityAttached,
+    recordCodexLabRuntimeLayoutPrepared,
+    recordCodexLabRuntimeProviderReserved,
+    recordCodexLabRuntimeExternalAuthInstalled,
+    recordCodexLabRuntimeGatewayStarted,
+    recordCodexLabRuntimeProviderAttached,
+    recordCodexLabRuntimeReady,
+    beginCodexLabRuntimeCleanup,
+    recordCodexLabRuntimeCleanupResult,
+    releaseCodexLabRuntimeCustody
+  })
+}

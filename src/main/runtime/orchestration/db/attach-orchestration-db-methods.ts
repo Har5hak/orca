@@ -37,6 +37,7 @@ import { attachRoleMailboxDelivery } from './messages/role-mailbox-delivery'
 import { attachStructuredPointerOperationStore } from './messages/structured-pointer-operation-store'
 import { attachMutationReceiptStore } from './mutation-receipts/mutation-receipt-store'
 import { attachLifecycleTransition } from './lifecycle-transition'
+import { attachCodexLabRuntimeCustody } from './lab-runtime-custody/lab-runtime-custody-store'
 import { attachQuestionThreads } from './questions/question-threads'
 import { attachOrchestrationReset } from './reset/orchestration-reset'
 import { attachRunBinding } from './runs/run-binding'
@@ -77,6 +78,7 @@ export function attachOrchestrationDbMethods(ctor: { prototype: object }): void 
   attachAdoptLegacyRun(ctor)
   attachMutationReceiptStore(ctor)
   attachLifecycleTransition(ctor)
+  attachCodexLabRuntimeCustody(ctor)
   attachLegacyCompatibilityPrincipals(ctor)
   attachLegacyCompatibilityCandidates(ctor)
   attachLegacyWorkerCompletion(ctor)
