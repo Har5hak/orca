@@ -123,7 +123,7 @@ function validateRequirementScalars(
   }
   if (
     !isAbsent(requirements.cliAuthCredentialsStore) &&
-    requirements.cliAuthCredentialsStore !== 'keyring'
+    requirements.cliAuthCredentialsStore !== 'ephemeral'
   ) {
     return invalid('requirements.cliAuthCredentialsStore')
   }

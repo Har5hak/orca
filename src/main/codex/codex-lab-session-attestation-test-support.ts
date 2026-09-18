@@ -53,7 +53,7 @@ export function testCodexLabEffectiveConfig(
     forced_login_method: 'chatgpt',
     forced_chatgpt_workspace_id: expected.workspaceId,
     web_search: 'disabled',
-    cli_auth_credentials_store: 'keyring',
+    cli_auth_credentials_store: 'ephemeral',
     check_for_update_on_startup: false,
     file_opener: 'none',
     allow_login_shell: false,

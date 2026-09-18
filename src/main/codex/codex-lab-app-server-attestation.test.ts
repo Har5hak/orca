@@ -83,7 +83,7 @@ function makeConfig(): Record<string, unknown> {
     forced_login_method: 'chatgpt',
     forced_chatgpt_workspace_id: EXPECTED.workspaceId,
     web_search: 'disabled',
-    cli_auth_credentials_store: 'keyring',
+    cli_auth_credentials_store: 'ephemeral',
     check_for_update_on_startup: false,
     file_opener: 'none',
     allow_login_shell: false,
@@ -437,7 +437,7 @@ describe('TASK-757 Codex app-server policy attestation', () => {
     })
   })
 
-  it('rejects encrypted Secrets auth storage so the direct keyring locator stays authoritative', async () => {
+  it('rejects encrypted Secrets auth storage so process-local external auth stays authoritative', async () => {
     const withEncryptedAuthStorage = makeConfig()
     const features = requireRecord(withEncryptedAuthStorage.features, 'features')
     features.secret_auth_storage = true
@@ -451,6 +451,47 @@ describe('TASK-757 Codex app-server policy attestation', () => {
       field: 'config.features.secret_auth_storage'
     })
   })
+
+  it.each(['keyring', 'file', 'auto'])(
+    'rejects non-ephemeral effective credential store %s',
+    async (credentialStore) => {
+      const config = makeConfig()
+      config.cli_auth_credentials_store = credentialStore
+      const { input } = fakeInput({ config: { config, origins: {}, layers: [] } })
+
+      await expect(probeCodexLabAppServerReadiness(input)).resolves.toEqual({
+        ready: false,
+        reason: 'effective_config_broadened',
+        field: 'config.cli_auth_credentials_store'
+      })
+    }
+  )
+
+  it('accepts an exact ephemeral managed credential-store constraint', async () => {
+    const { input } = fakeInput({
+      requirements: { requirements: { cliAuthCredentialsStore: 'ephemeral' } }
+    })
+
+    await expect(probeCodexLabAppServerReadiness(input)).resolves.toMatchObject({
+      ready: true,
+      evidence: { managedRequirements: 'compatible' }
+    })
+  })
+
+  it.each(['keyring', 'file', 'auto'])(
+    'rejects managed credential store %s',
+    async (credentialStore) => {
+      const { input } = fakeInput({
+        requirements: { requirements: { cliAuthCredentialsStore: credentialStore } }
+      })
+
+      await expect(probeCodexLabAppServerReadiness(input)).resolves.toEqual({
+        ready: false,
+        reason: 'requirements_broadened',
+        field: 'requirements.cliAuthCredentialsStore'
+      })
+    }
+  )
 
   it.each([
     [{ account: { type: 'apiKey' }, requiresOpenaiAuth: true }, 'account/read.account.type'],

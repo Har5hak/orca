@@ -164,7 +164,7 @@ function validateScalarConfig(
     ['default_permissions', expected.permissionProfileId],
     ['forced_login_method', 'chatgpt'],
     ['web_search', 'disabled'],
-    ['cli_auth_credentials_store', 'keyring'],
+    ['cli_auth_credentials_store', 'ephemeral'],
     ['check_for_update_on_startup', false],
     ['file_opener', 'none'],
     ['allow_login_shell', false]

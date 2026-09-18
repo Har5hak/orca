@@ -70,7 +70,7 @@ export function renderCodexLabConfig(args: {
     'allow_login_shell = false',
     `default_permissions = "${CODEX_LAB_PERMISSION_PROFILE_ID}"`,
     'web_search = "disabled"',
-    'cli_auth_credentials_store = "keyring"',
+    'cli_auth_credentials_store = "ephemeral"',
     'forced_login_method = "chatgpt"',
     `forced_chatgpt_workspace_id = ${tomlString(args.workspaceId)}`,
     'check_for_update_on_startup = false',

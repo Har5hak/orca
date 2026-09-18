@@ -95,7 +95,7 @@ describe('sealed Codex laboratory launch plan', () => {
     expect(plan.configToml).not.toContain('/gateway.sock')
     expect(plan.configToml).not.toContain('sandbox_mode')
     expect(plan.configToml).not.toContain('[sandbox_workspace_write]')
-    expect(plan.configToml).toContain('cli_auth_credentials_store = "keyring"')
+    expect(plan.configToml).toContain('cli_auth_credentials_store = "ephemeral"')
     expect(plan.configToml).toContain('forced_login_method = "chatgpt"')
     expect(plan.configToml).toContain(
       'forced_chatgpt_workspace_id = "018f47a2-9d72-7cc1-b046-7a2868411f42"'
@@ -126,6 +126,12 @@ describe('sealed Codex laboratory launch plan', () => {
     expect(plan.configToml).toContain('[skills.bundled]\nenabled = false')
     expect(plan.configToml).toContain('[mcp_servers]')
     expect(plan.configToml).toContain('[hooks]')
+    expect(plan.configToml).not.toMatch(
+      /auth\.json|api[_-]?key|access[_-]?token|refresh[_-]?token/i
+    )
+    expect(JSON.stringify(plan.environment)).not.toMatch(
+      /auth\.json|api[_-]?key|access[_-]?token|refresh[_-]?token|secret/i
+    )
     expect(plan.unverifiedBoundaries).toEqual([
       'effective-config-enforcement',
       'filesystem-confinement',
@@ -280,7 +286,22 @@ describe('sealed Codex laboratory launch plan', () => {
       '":workspace_roots"]\n"." = "read"',
       '":workspace_roots"]\n"." = "write"'
     ],
-    ['multi-agent policy', 'multi_agent = false', 'multi_agent = true']
+    ['multi-agent policy', 'multi_agent = false', 'multi_agent = true'],
+    [
+      'keyring credential persistence',
+      'cli_auth_credentials_store = "ephemeral"',
+      'cli_auth_credentials_store = "keyring"'
+    ],
+    [
+      'file credential persistence',
+      'cli_auth_credentials_store = "ephemeral"',
+      'cli_auth_credentials_store = "file"'
+    ],
+    [
+      'automatic credential persistence',
+      'cli_auth_credentials_store = "ephemeral"',
+      'cli_auth_credentials_store = "auto"'
+    ]
   ])('detects a broadened %s mutation', (_label, from, to) => {
     const plan = buildSealedCodexLabLaunchPlan(facts())
     const mutated = { ...plan, configToml: plan.configToml.replace(from, to) }
