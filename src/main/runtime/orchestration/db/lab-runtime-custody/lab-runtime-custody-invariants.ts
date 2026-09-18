@@ -10,8 +10,8 @@ const RESOURCE_LEVELS: readonly Readonly<{
 }>[] = Object.freeze([
   Object.freeze({ resource: 'layout', level: 1 }),
   Object.freeze({ resource: 'provider', level: 2 }),
-  Object.freeze({ resource: 'auth', level: 3 }),
-  Object.freeze({ resource: 'gateway', level: 4 })
+  Object.freeze({ resource: 'gateway', level: 3 }),
+  Object.freeze({ resource: 'auth', level: 4 })
 ])
 
 const ACTIVE_LEVELS: Readonly<Partial<Record<CodexLabRuntimeCustodyState, number>>> = Object.freeze(
@@ -20,8 +20,8 @@ const ACTIVE_LEVELS: Readonly<Partial<Record<CodexLabRuntimeCustodyState, number
     authority_attached: 0,
     layout_prepared: 1,
     provider_reserved: 2,
-    external_auth_installed: 3,
-    gateway_started: 4,
+    gateway_started: 3,
+    external_auth_installed: 4,
     provider_attached: 4,
     ready: 4
   }
@@ -39,8 +39,8 @@ export function requireCodexLabRuntimeCustodyInvariants(row: CodexLabRuntimeCust
   const evidence = [
     layoutParts.every(Boolean),
     row.provider !== null,
-    row.auth !== null,
-    row.gatewayReceipt !== null
+    row.gatewayReceipt !== null,
+    row.auth !== null
   ]
   const firstMissing = evidence.indexOf(false)
   const level = firstMissing === -1 ? evidence.length : firstMissing

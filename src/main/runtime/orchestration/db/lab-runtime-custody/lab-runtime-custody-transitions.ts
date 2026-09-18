@@ -154,7 +154,7 @@ export function recordCodexLabRuntimeExternalAuthInstalled(
   const evidence = normalizeCodexLabExternalAuthEvidence(input)
   return advanceCustody(this, {
     identity: evidence,
-    from: 'provider_reserved',
+    from: 'gateway_started',
     to: 'external_auth_installed',
     assignments: `auth_method = 'chatgptAuthTokens', auth_storage = 'ephemeral',
                   login_start_accepted = 1, auth_json_absent = 1,
@@ -182,7 +182,7 @@ export function recordCodexLabRuntimeGatewayStarted(
   const serializedReceipt = JSON.stringify(receipt)
   return advanceCustody(this, {
     identity: evidence,
-    from: 'external_auth_installed',
+    from: 'provider_reserved',
     to: 'gateway_started',
     assignments: `gateway_public_receipt = ?, gateway_cleanup_state = 'pending'`,
     values: [serializedReceipt],
@@ -214,7 +214,7 @@ export function recordCodexLabRuntimeProviderAttached(
   requireProviderResourceIdentity(resource, evidence)
   return advanceCustody(this, {
     identity: evidence,
-    from: 'gateway_started',
+    from: 'external_auth_installed',
     to: 'provider_attached',
     evidenceMatches: (row) =>
       providerMatches(row, commitments, current?.provider?.terminalResourceId)

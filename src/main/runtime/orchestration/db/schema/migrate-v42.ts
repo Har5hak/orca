@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS codex_lab_runtime_custody (
   state                             TEXT NOT NULL
     CHECK(state IN (
       'planned', 'authority_attached', 'layout_prepared', 'provider_reserved',
-      'external_auth_installed', 'gateway_started', 'provider_attached', 'ready',
+      'gateway_started', 'external_auth_installed', 'provider_attached', 'ready',
       'cleanup_pending', 'released'
     )),
   runtime_root                      TEXT NOT NULL,

@@ -146,6 +146,13 @@ function advanceTo(
   if (target === 'provider_reserved') {
     return custody
   }
+  custody = harness.db.recordCodexLabRuntimeGatewayStarted({
+    ...harness.identity,
+    receipt: gatewayReceipt(harness.dispatchId)
+  })
+  if (target === 'gateway_started') {
+    return custody
+  }
   custody = harness.db.recordCodexLabRuntimeExternalAuthInstalled({
     ...harness.identity,
     authMethod: 'chatgptAuthTokens',
@@ -154,13 +161,6 @@ function advanceTo(
     authJsonAbsent: true
   })
   if (target === 'external_auth_installed') {
-    return custody
-  }
-  custody = harness.db.recordCodexLabRuntimeGatewayStarted({
-    ...harness.identity,
-    receipt: gatewayReceipt(harness.dispatchId)
-  })
-  if (target === 'gateway_started') {
     return custody
   }
   custody = harness.db.recordCodexLabRuntimeProviderAttached(providerEvidence(harness))
@@ -318,19 +318,16 @@ describe('Codex laboratory runtime custody', () => {
     ).toThrow('profile does not match')
   })
 
-  it('reserves exact provider custody before accepting external auth attestation', () => {
+  it('requires provider reservation, then gateway, then external auth before provider attachment', () => {
     const harness = createHarness()
     advanceTo(harness, 'layout_prepared')
 
     expect(() =>
-      harness.db.recordCodexLabRuntimeExternalAuthInstalled({
+      harness.db.recordCodexLabRuntimeGatewayStarted({
         ...harness.identity,
-        authMethod: 'chatgptAuthTokens',
-        authStorage: 'ephemeral',
-        loginStartAccepted: true,
-        authJsonAbsent: true
+        receipt: gatewayReceipt(harness.dispatchId)
       })
-    ).toThrow('expected provider_reserved, not layout_prepared')
+    ).toThrow('provider identity does not match the gateway receipt')
 
     const reserved = harness.db.recordCodexLabRuntimeProviderReserved(providerEvidence(harness))
     expect(reserved).toMatchObject({
@@ -343,6 +340,10 @@ describe('Codex laboratory runtime custody', () => {
       cleanup: { provider: { state: 'pending' } }
     })
     expect(
+      harness.db.recordCodexLabRuntimeProviderReserved(providerEvidence(harness)).revision
+    ).toBe(reserved.revision)
+
+    expect(() =>
       harness.db.recordCodexLabRuntimeExternalAuthInstalled({
         ...harness.identity,
         authMethod: 'chatgptAuthTokens',
@@ -350,7 +351,46 @@ describe('Codex laboratory runtime custody', () => {
         loginStartAccepted: true,
         authJsonAbsent: true
       })
-    ).toMatchObject({
+    ).toThrow('expected gateway_started, not provider_reserved')
+
+    const gateway = harness.db.recordCodexLabRuntimeGatewayStarted({
+      ...harness.identity,
+      receipt: gatewayReceipt(harness.dispatchId)
+    })
+    expect(gateway).toMatchObject({
+      state: 'gateway_started',
+      cleanup: {
+        gateway: { state: 'pending' },
+        auth: { state: 'not_created' }
+      }
+    })
+    expect(
+      harness.db.recordCodexLabRuntimeGatewayStarted({
+        ...harness.identity,
+        receipt: gatewayReceipt(harness.dispatchId)
+      }).revision
+    ).toBe(gateway.revision)
+    expect(() =>
+      harness.db.recordCodexLabRuntimeProviderAttached(providerEvidence(harness))
+    ).toThrow('expected external_auth_installed, not gateway_started')
+
+    const authenticated = harness.db.recordCodexLabRuntimeExternalAuthInstalled({
+      ...harness.identity,
+      authMethod: 'chatgptAuthTokens',
+      authStorage: 'ephemeral',
+      loginStartAccepted: true,
+      authJsonAbsent: true
+    })
+    expect(
+      harness.db.recordCodexLabRuntimeExternalAuthInstalled({
+        ...harness.identity,
+        authMethod: 'chatgptAuthTokens',
+        authStorage: 'ephemeral',
+        loginStartAccepted: true,
+        authJsonAbsent: true
+      }).revision
+    ).toBe(authenticated.revision)
+    expect(authenticated).toMatchObject({
       state: 'external_auth_installed',
       auth: {
         method: 'chatgptAuthTokens',
@@ -359,6 +399,12 @@ describe('Codex laboratory runtime custody', () => {
         authJsonAbsent: true
       }
     })
+
+    const attached = harness.db.recordCodexLabRuntimeProviderAttached(providerEvidence(harness))
+    expect(attached.state).toBe('provider_attached')
+    expect(
+      harness.db.recordCodexLabRuntimeProviderAttached(providerEvidence(harness)).revision
+    ).toBe(attached.revision)
   })
 
   it('snapshots public evidence once and rejects accessors, symbols and extra fields', () => {
@@ -405,7 +451,7 @@ describe('Codex laboratory runtime custody', () => {
 
   it('rejects secret-like, extra and corrupted JSON gateway evidence', () => {
     const harness = createHarness()
-    advanceTo(harness, 'external_auth_installed')
+    advanceTo(harness, 'provider_reserved')
     const forgedDigest = Object.freeze({
       ...gatewayReceipt(harness.dispatchId),
       receiptSha256: '0'.repeat(64)
@@ -450,8 +496,8 @@ describe('Codex laboratory runtime custody', () => {
     'authority_attached',
     'layout_prepared',
     'provider_reserved',
-    'external_auth_installed',
     'gateway_started',
+    'external_auth_installed',
     'provider_attached',
     'ready'
   ] as const)('resumes cleanup from %s without inventing uncreated obligations', (phase) => {
