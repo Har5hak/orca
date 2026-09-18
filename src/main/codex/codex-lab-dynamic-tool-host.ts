@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import {
   LabGatewayClientFailure,
   callLabDispatchGateway,
@@ -58,12 +59,31 @@ export type CodexLabDynamicToolHostPort = Readonly<{
   dispose: () => void
 }>
 
+export type CodexLabDynamicToolHostFactory = () => CodexLabDynamicToolHostPort
+
+export type CodexLabDynamicToolHostAttestation = Readonly<{
+  dispatchId: string
+  endpointSha256: string
+  gatewayAccessSha256: string
+}>
+
+const attestationsByHost = new WeakMap<object, CodexLabDynamicToolHostAttestation>()
+const revokedFactories = new WeakSet<object>()
+const factoryStates = new WeakMap<
+  object,
+  {
+    status: 'fresh' | 'claimed'
+    binding: CodexLabDynamicToolGatewayBinding
+    attestation: CodexLabDynamicToolHostAttestation
+  }
+>()
+
 type CallGateway = typeof callLabDispatchGateway
 
 /** Host-only bridge. The Codex child receives neither the gateway endpoint nor its bearer. */
 export class CodexLabDynamicToolHost {
   readonly #endpoint: string
-  readonly #credential: string
+  #credential: string
   readonly #expectedReceipt: LabGatewayServerReceipt
   readonly #callGateway: CallGateway
   readonly #abort = new AbortController()
@@ -74,10 +94,13 @@ export class CodexLabDynamicToolHost {
     binding: CodexLabDynamicToolGatewayBinding,
     callGateway: CallGateway = callLabDispatchGateway
   ) {
+    const attestation = attestGatewayBinding(binding)
     this.#endpoint = binding.endpoint
     this.#credential = binding.credential
     this.#expectedReceipt = binding.expectedReceipt
     this.#callGateway = callGateway
+    attestationsByHost.set(this, attestation)
+    Object.freeze(this)
   }
 
   async invoke(invocation: CodexLabDynamicToolInvocation): Promise<CodexLabDynamicToolResponse> {
@@ -137,7 +160,62 @@ export class CodexLabDynamicToolHost {
     this.#disposed = true
     this.#abort.abort()
     this.#seenCallIds.clear()
+    this.#credential = ''
   }
+}
+
+/** Captures immutable gateway authority and mints one independently disposable port per acquire. */
+export function createCodexLabDynamicToolHostFactory(
+  candidate: CodexLabDynamicToolGatewayBinding
+): CodexLabDynamicToolHostFactory {
+  const binding = snapshotGatewayBinding(candidate)
+  const attestation = attestGatewayBinding(binding)
+  const factory = allocateSecretFreeDynamicToolHostFactory()
+  factoryStates.set(factory, { status: 'fresh', binding, attestation })
+  return factory
+}
+
+/** Transfers one fresh factory into exactly one in-memory launch binding. */
+export function claimCodexLabDynamicToolHostFactory(
+  factory: CodexLabDynamicToolHostFactory
+): boolean {
+  const state = factoryStates.get(factory)
+  if (state?.status !== 'fresh') {
+    return false
+  }
+  state.status = 'claimed'
+  return true
+}
+
+/** Revokes only future mints; already-published ports retain independent acquisition custody. */
+export function revokeCodexLabDynamicToolHostFactory(
+  factory: CodexLabDynamicToolHostFactory
+): void {
+  if (factoryStates.delete(factory)) {
+    revokedFactories.add(factory)
+  }
+}
+
+export function isCodexLabDynamicToolHostFactoryBoundTo(
+  factory: unknown,
+  expected: CodexLabDynamicToolHostAttestation
+): factory is CodexLabDynamicToolHostFactory {
+  if (typeof factory !== 'function' || !Object.isFrozen(factory)) {
+    return false
+  }
+  const state = factoryStates.get(factory)
+  return sameAttestation(state?.attestation, expected)
+}
+
+/** Confirms that an opaque host port was minted for this exact sealed laboratory binding. */
+export function isCodexLabDynamicToolHostBoundTo(
+  host: unknown,
+  expected: CodexLabDynamicToolHostAttestation
+): boolean {
+  if (typeof host !== 'object' || host === null || !Object.isFrozen(host)) {
+    return false
+  }
+  return sameAttestation(attestationsByHost.get(host), expected)
 }
 
 export function isCodexLabDynamicToolCallId(value: unknown): value is string {
@@ -170,4 +248,67 @@ function fixedFailure(reason: string): CodexLabDynamicToolResponse {
     ] as const),
     success: false
   })
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function attestGatewayBinding(
+  binding: CodexLabDynamicToolGatewayBinding
+): CodexLabDynamicToolHostAttestation {
+  const endpointSha256 = sha256(binding.endpoint)
+  if (
+    binding.expectedReceipt.endpointSha256 !== endpointSha256 ||
+    !Object.isFrozen(binding.expectedReceipt) ||
+    !Object.isFrozen(binding.expectedReceipt.endpointIdentity) ||
+    !Object.isFrozen(binding.expectedReceipt.allowedOperations)
+  ) {
+    throw new Error(
+      'Codex laboratory dynamic-tool host binding is not immutable and self-consistent'
+    )
+  }
+  return Object.freeze({
+    dispatchId: binding.expectedReceipt.dispatchId,
+    endpointSha256,
+    gatewayAccessSha256: sha256(binding.credential)
+  })
+}
+
+function snapshotGatewayBinding(
+  candidate: CodexLabDynamicToolGatewayBinding
+): CodexLabDynamicToolGatewayBinding {
+  return Object.freeze({
+    endpoint: candidate.endpoint,
+    credential: candidate.credential,
+    expectedReceipt: candidate.expectedReceipt
+  })
+}
+
+function sameAttestation(
+  actual: CodexLabDynamicToolHostAttestation | undefined,
+  expected: CodexLabDynamicToolHostAttestation
+): boolean {
+  return (
+    actual?.dispatchId === expected.dispatchId &&
+    actual.endpointSha256 === expected.endpointSha256 &&
+    actual.gatewayAccessSha256 === expected.gatewayAccessSha256
+  )
+}
+
+function allocateSecretFreeDynamicToolHostFactory(): CodexLabDynamicToolHostFactory {
+  // This no-argument activation keeps gateway binding material out of the callable's closure.
+  const factory = (): CodexLabDynamicToolHostPort => mintCodexLabDynamicToolHost(factory)
+  return Object.freeze(factory)
+}
+
+function mintCodexLabDynamicToolHost(
+  factory: CodexLabDynamicToolHostFactory
+): CodexLabDynamicToolHostPort {
+  const state = factoryStates.get(factory)
+  if (state?.status !== 'claimed') {
+    const status = revokedFactories.has(factory) ? 'revoked' : (state?.status ?? 'invalid')
+    throw new Error(`Codex laboratory dynamic-tool host factory is ${status}`)
+  }
+  return new CodexLabDynamicToolHost(state.binding)
 }

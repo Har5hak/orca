@@ -16,13 +16,14 @@ import type { AgentSessionRecordStore } from '../runtime/agent-session-record-st
 import type { CodexStructuredLaunch } from './codex-structured-session-adapter'
 import type { CodexStructuredPermissionPolicy } from './codex-structured-permission-policy'
 import { CODEX_LAB_READONLY_PERMISSION_PROFILE_ID } from './codex-structured-permission-policy'
+import { isCodexLabDynamicToolHostBoundTo } from './codex-lab-dynamic-tool-host'
 import { resolvePinnedCodexRolloutProof } from './codex-tui-rollout-proof'
 import { isWindowsProcessStartTimeAvailable } from '../windows/windows-process-table'
 import {
   CodexLabStructuredBindingRefusal,
-  getCodexLabStructuredLaunchBinding,
+  getCodexLabStructuredLaunchBindingAuthority,
   type CodexLabStructuredLaunchBinding
-} from '../runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-registry'
+} from '../runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-resolver'
 import { CODEX_LAB_RUNTIME_ROOT } from '../runtime/orchestration/lab-profile/codex-lab-launch-contract'
 
 export type CodexStructuredLaunchResolverDeps = {
@@ -72,7 +73,7 @@ export function createCodexStructuredLaunchResolver(
     if (accountHome.variable !== 'CODEX_HOME') {
       throw new Error(`codex sessions pin CODEX_HOME, not ${accountHome.variable}`)
     }
-    const labBinding = getCodexLabStructuredLaunchBinding(identity.sessionId)
+    const labBinding = getCodexLabStructuredLaunchBindingAuthority(identity.sessionId)
     if (labBinding) {
       return resolveCodexLabStructuredLaunch(
         identity.sessionId,
@@ -142,6 +143,16 @@ function resolveCodexLabStructuredLaunch(
   ) {
     throw new Error('Codex lab launch binding does not match the durable session record.')
   }
+  const expectedDynamicHostBinding = Object.freeze({
+    dispatchId: binding.dispatchId,
+    endpointSha256: plan.receiptInputs.gatewaySocketPathSha256,
+    gatewayAccessSha256: plan.gatewayAccessSha256
+  })
+  const labDynamicToolHost = binding.labDynamicToolHostFactory()
+  if (!isCodexLabDynamicToolHostBoundTo(labDynamicToolHost, expectedDynamicHostBinding)) {
+    labDynamicToolHost.dispose()
+    throw new CodexLabStructuredBindingRefusal('binding_invalid')
+  }
   return {
     command: plan.executable,
     args: [...plan.argv],
@@ -151,6 +162,8 @@ function resolveCodexLabStructuredLaunch(
     env: { ...plan.environment.injected },
     environmentMode: 'exact',
     workerAccessMode: 'lab-gateway',
+    labDynamicToolHost,
+    labDynamicToolHostAttestationExpected: expectedDynamicHostBinding,
     labAppServerAttestationExpected: Object.freeze({
       cwd: workspacePath,
       codexHome: plan.runtimePaths.codexHome,

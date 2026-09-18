@@ -2,7 +2,12 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { LabGatewayClientFailure } from '../runtime/orchestration/lab-profile/dispatch-gateway-client'
 import type { LabGatewayServerReceipt } from '../runtime/orchestration/lab-profile/dispatch-gateway-server'
-import { CodexLabDynamicToolHost } from './codex-lab-dynamic-tool-host'
+import {
+  claimCodexLabDynamicToolHostFactory,
+  CodexLabDynamicToolHost,
+  createCodexLabDynamicToolHostFactory,
+  revokeCodexLabDynamicToolHostFactory
+} from './codex-lab-dynamic-tool-host'
 
 const ENDPOINT = '/private/tmp/orca-lab/runtime/dispatches/dispatch-757/gateway.sock'
 const CREDENTIAL = `lgw1_${'A'.repeat(43)}`
@@ -50,6 +55,22 @@ function invocation(overrides: Readonly<Record<string, unknown>> = {}) {
 }
 
 describe('Codex laboratory dynamic-tool host bridge', () => {
+  it('keeps gateway secrets out of the callable closure and drops revocable factory state', () => {
+    const factory = createCodexLabDynamicToolHostFactory({
+      endpoint: ENDPOINT,
+      credential: CREDENTIAL,
+      expectedReceipt: receipt()
+    })
+
+    expect(factory.toString()).not.toMatch(/binding|credential|endpoint|expectedReceipt/u)
+    expect(claimCodexLabDynamicToolHostFactory(factory)).toBe(true)
+    const host = factory()
+    revokeCodexLabDynamicToolHostFactory(factory)
+
+    expect(() => factory()).toThrow(/factory is revoked/i)
+    host.dispose()
+  })
+
   it('maps one validated call to the host gateway without exposing host authority', async () => {
     const callGateway = vi.fn(async () => ({
       ok: true as const,

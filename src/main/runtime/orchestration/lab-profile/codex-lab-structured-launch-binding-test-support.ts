@@ -1,3 +1,13 @@
+import { createHash } from 'node:crypto'
+import {
+  CodexLabDynamicToolHost,
+  createCodexLabDynamicToolHostFactory,
+  type CodexLabDynamicToolHostAttestation,
+  type CodexLabDynamicToolHostFactory,
+  type CodexLabDynamicToolHostPort,
+  type CodexLabDynamicToolGatewayBinding
+} from '../../../codex/codex-lab-dynamic-tool-host'
+import type { LabGatewayServerReceipt } from './dispatch-gateway-server'
 import {
   CODEX_WORKSPACE_CHATGPT_ADAPTER_ID,
   LAB_READONLY_SUPERVISED_PROFILE_ID,
@@ -14,6 +24,88 @@ import { verifyLabWorktreeObservation } from './lab-worktree-observation'
 export const TEST_LAB_DISPATCH_ID = 'dispatch-757-structured'
 export const TEST_LAB_WORKTREE_IDENTITY = 'wt2:local:disposable-structured'
 export const TEST_LAB_WORKTREE_PATH = '/private/tmp/orca-lab/disposable-structured'
+export const TEST_LAB_GATEWAY_ENDPOINT =
+  '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-structured/gateway.sock'
+export const TEST_LAB_GATEWAY_CREDENTIAL = `lgw1_${'g'.repeat(43)}`
+
+export function testCodexLabDynamicToolHostFactory(
+  overrides: Readonly<{
+    dispatchId?: string
+    endpoint?: string
+    credential?: string
+  }> = {}
+): CodexLabDynamicToolHostFactory {
+  return createCodexLabDynamicToolHostFactory(testCodexLabDynamicToolGatewayBinding(overrides))
+}
+
+export function testCodexLabDynamicToolGatewayBinding(
+  overrides: Readonly<{
+    dispatchId?: string
+    endpoint?: string
+    credential?: string
+  }> = {}
+): CodexLabDynamicToolGatewayBinding {
+  const dispatchId = overrides.dispatchId ?? TEST_LAB_DISPATCH_ID
+  const endpoint = overrides.endpoint ?? TEST_LAB_GATEWAY_ENDPOINT
+  const endpointIdentity = Object.freeze({
+    device: '1',
+    inode: '757',
+    uid: '501',
+    mode: '0600' as const,
+    type: 'socket' as const
+  })
+  const stableReceipt = Object.freeze({
+    schema: 'orca.lab-dispatch-gateway.v1' as const,
+    policyId: 'policy-757-structured',
+    dispatchId,
+    transport: 'unix' as const,
+    socketMode: '0600' as const,
+    endpointSha256: sha256(endpoint),
+    endpointIdentity,
+    endpointIdentitySha256: sha256(JSON.stringify(endpointIdentity)),
+    processIncarnationSha256: '1'.repeat(64),
+    allowedOperations: Object.freeze([
+      'worker.status',
+      'worker.check',
+      'worker.heartbeat',
+      'worker.ask',
+      'worker.reply.consume',
+      'worker.done'
+    ] as const),
+    lifecycleSource: 'injected-per-request' as const,
+    dcapCustody: 'server-only' as const
+  })
+  const expectedReceipt: LabGatewayServerReceipt = Object.freeze({
+    ...stableReceipt,
+    receiptSha256: sha256(JSON.stringify(stableReceipt))
+  })
+  return Object.freeze({
+    endpoint,
+    credential: overrides.credential ?? TEST_LAB_GATEWAY_CREDENTIAL,
+    expectedReceipt
+  })
+}
+
+export function testCodexLabDynamicToolHostAttestation(
+  overrides: Readonly<{
+    dispatchId?: string
+    endpoint?: string
+    credential?: string
+  }> = {}
+): CodexLabDynamicToolHostAttestation {
+  return Object.freeze({
+    dispatchId: overrides.dispatchId ?? TEST_LAB_DISPATCH_ID,
+    endpointSha256: sha256(overrides.endpoint ?? TEST_LAB_GATEWAY_ENDPOINT),
+    gatewayAccessSha256: sha256(overrides.credential ?? TEST_LAB_GATEWAY_CREDENTIAL)
+  })
+}
+
+export function testCodexLabDynamicToolHost(
+  overrides: Parameters<typeof testCodexLabDynamicToolGatewayBinding>[0] = {},
+  callGateway?: ConstructorParameters<typeof CodexLabDynamicToolHost>[1]
+): CodexLabDynamicToolHostPort {
+  return new CodexLabDynamicToolHost(testCodexLabDynamicToolGatewayBinding(overrides), callGateway)
+}
 
 export function testCodexLabStructuredLaunchBinding(): CodexLabStructuredLaunchBinding {
   const facts: CodexLabLaunchFacts = {
@@ -35,8 +127,8 @@ export function testCodexLabStructuredLaunchBinding(): CodexLabStructuredLaunchB
       disposable: true
     },
     gateway: {
-      socketPath: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757-structured/gateway.sock',
-      credential: `lgw1_${'g'.repeat(43)}`
+      socketPath: TEST_LAB_GATEWAY_ENDPOINT,
+      credential: TEST_LAB_GATEWAY_CREDENTIAL
     },
     binary: {
       path: '/Applications/ChatGPT.app/Contents/Resources/codex',
@@ -97,7 +189,12 @@ export function testCodexLabStructuredLaunchBinding(): CodexLabStructuredLaunchB
       }
     }
   })
-  return Object.freeze({ dispatchId: TEST_LAB_DISPATCH_ID, plan, worktree })
+  return Object.freeze({
+    dispatchId: TEST_LAB_DISPATCH_ID,
+    plan,
+    worktree,
+    labDynamicToolHostFactory: testCodexLabDynamicToolHostFactory()
+  })
 }
 
 /** Installs one test binding and returns its idempotent, dispatch-fenced cleanup. */
@@ -114,4 +211,8 @@ export function installTestCodexLabStructuredLaunchBinding(
     active = false
     releaseCodexLabStructuredLaunchBinding(sessionId, binding.dispatchId)
   }
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
 }

@@ -5,6 +5,7 @@
 export {
   CODEX_LAB_STRUCTURED_BINDING_REFUSAL_CODE,
   CodexLabStructuredBindingRefusal,
-  getCodexLabStructuredLaunchBinding,
-  type CodexLabStructuredLaunchBinding
+  getCodexLabStructuredLaunchBindingMetadata as getCodexLabStructuredLaunchBinding,
+  type CodexLabStructuredLaunchBinding,
+  type CodexLabStructuredLaunchBindingMetadata
 } from './codex-lab-structured-launch-binding-registry-state'

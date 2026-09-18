@@ -8,12 +8,22 @@ import type { CodexAppServerConnection } from './codex-app-server-connection-typ
 import { CODEX_LAB_READONLY_PERMISSION_PROFILE_ID } from './codex-structured-permission-policy'
 import type { CodexStructuredLaunch } from './codex-structured-session-state'
 import type { CodexOpenedThread } from './codex-structured-thread-open'
+import { isCodexLabDynamicToolHostBoundTo } from './codex-lab-dynamic-tool-host'
 
 export function codexLabAttestationExpectedForLaunch(
   launch: CodexStructuredLaunch
 ): CodexLabAppServerAttestationExpected | null {
   if (launch.workerAccessMode !== 'lab-gateway') {
     return null
+  }
+  const dynamicHostExpected = launch.labDynamicToolHostAttestationExpected
+  if (
+    !launch.labDynamicToolHost ||
+    !dynamicHostExpected ||
+    !Object.isFrozen(dynamicHostExpected) ||
+    !isCodexLabDynamicToolHostBoundTo(launch.labDynamicToolHost, dynamicHostExpected)
+  ) {
+    throw new Error('Codex laboratory gateway access requires a dynamic-tool host')
   }
   const expected = launch.labAppServerAttestationExpected
   const permissionPolicy = launch.permissionPolicy

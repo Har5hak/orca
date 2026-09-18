@@ -43,6 +43,14 @@ function installHost() {
   return { release }
 }
 
+function publicBinding(binding: ReturnType<typeof testCodexLabStructuredLaunchBinding>) {
+  return {
+    dispatchId: binding.dispatchId,
+    plan: binding.plan,
+    worktree: binding.worktree
+  }
+}
+
 describe('structured worker lab binding lifecycle', () => {
   beforeEach(() => {
     structuredWorkerIdentities.clear()
@@ -62,7 +70,10 @@ describe('structured worker lab binding lifecycle', () => {
     createSpy.mockImplementation(async (args: { envelope: { sessionId: string } }) => {
       sessionId = args.envelope.sessionId
       expect(sessionId).toBe(reservedSessionId)
-      expect(getCodexLabStructuredLaunchBinding(sessionId)).toEqual(binding)
+      expect(getCodexLabStructuredLaunchBinding(sessionId)).toEqual(publicBinding(binding))
+      expect(getCodexLabStructuredLaunchBinding(sessionId)).not.toHaveProperty(
+        'labDynamicToolHostFactory'
+      )
       return { ok: true, value: { sessionId } }
     })
 
@@ -83,7 +94,7 @@ describe('structured worker lab binding lifecycle', () => {
     expect(createSpy).toHaveBeenCalledWith(
       expect.objectContaining({ accountHomePathOverride: binding.plan.runtimePaths.codexHome })
     )
-    expect(getCodexLabStructuredLaunchBinding(sessionId)).toEqual(binding)
+    expect(getCodexLabStructuredLaunchBinding(sessionId)).toEqual(publicBinding(binding))
 
     releaseStructuredWorkerSession(binding.dispatchId)
     expect(getCodexLabStructuredLaunchBinding(sessionId)).toBeUndefined()
@@ -95,7 +106,7 @@ describe('structured worker lab binding lifecycle', () => {
     let sessionId = ''
     createSpy.mockImplementation(async (args: { envelope: { sessionId: string } }) => {
       sessionId = args.envelope.sessionId
-      expect(getCodexLabStructuredLaunchBinding(sessionId)).toEqual(binding)
+      expect(getCodexLabStructuredLaunchBinding(sessionId)).toEqual(publicBinding(binding))
       throw new Error('attach failed')
     })
 

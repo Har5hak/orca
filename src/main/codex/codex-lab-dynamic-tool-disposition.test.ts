@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentSessionJournalIdentity } from '../../shared/agent-session-journal-types'
+import {
+  testCodexLabDynamicToolGatewayBinding,
+  testCodexLabDynamicToolHost,
+  testCodexLabDynamicToolHostAttestation
+} from '../runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-test-support'
 import { CodexBackgroundTaskTracker } from './codex-background-task-tracker'
 import type {
   CodexLabDynamicToolHostPort,
@@ -31,6 +36,12 @@ import { CODEX_LAB_READONLY_PERMISSION_PROFILE_ID } from './codex-structured-per
 const SESSION_ID = 'session-lab'
 const THREAD_ID = 'thread-lab'
 const TURN_ID = 'turn-active'
+const INVALID_HOST_INVOCATION = Object.freeze({
+  callId: '../disposed',
+  namespace: null,
+  tool: 'orca_worker_status',
+  arguments: {}
+})
 
 const SUCCESS_RESPONSE = Object.freeze({
   contentItems: Object.freeze([
@@ -302,7 +313,12 @@ describe('Codex laboratory dynamic-tool server-request disposition', () => {
   })
 
   it('carries the host-only bridge through lab acquisition and aborts it on provider exit', async () => {
-    const dynamicHost = host()
+    const gatewayBinding = testCodexLabDynamicToolGatewayBinding()
+    const dynamicHost = testCodexLabDynamicToolHost({}, async () => ({
+      ok: true,
+      result: { ready: true },
+      receipt: gatewayBinding.expectedReceipt
+    }))
     const exactConnection = connection()
     const expected = Object.freeze({
       cwd: '/private/tmp/orca-lab/disposable-757',
@@ -348,6 +364,7 @@ describe('Codex laboratory dynamic-tool server-request disposition', () => {
         environmentMode: 'exact',
         workerAccessMode: 'lab-gateway',
         labAppServerAttestationExpected: expected,
+        labDynamicToolHostAttestationExpected: testCodexLabDynamicToolHostAttestation(),
         permissionPolicy: {
           approvalPolicy: 'never',
           permissions: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID,
@@ -377,6 +394,201 @@ describe('Codex laboratory dynamic-tool server-request disposition', () => {
       expect(exactConnection.respond).toHaveBeenCalledWith(31, SUCCESS_RESPONSE)
     )
     handlers.onExit?.(new Error('provider exited'))
+    await expect(dynamicHost.invoke(INVALID_HOST_INVOCATION)).resolves.toMatchObject({
+      contentItems: [{ text: expect.stringContaining('host_disposed') }]
+    })
+  })
+
+  it('rejects a host on an ordinary launch and disposes it exactly once before spawn', async () => {
+    const dynamicHost = host()
+    const openConnection = vi.fn<typeof openCodexAppServerConnection>()
+    const adapter = new CodexStructuredSessionAdapter({
+      resolveLaunch: async () => ({
+        command: 'codex',
+        args: ['app-server'],
+        cwd: '/repos/ordinary',
+        codexHome: '/homes/ordinary',
+        resumeThreadId: null,
+        workerAccessMode: 'orca-cli',
+        labDynamicToolHost: dynamicHost
+      }),
+      openConnection
+    })
+
+    await expect(
+      adapter.acquire({
+        identity: {
+          sessionId: 'session-ordinary-host-smuggle',
+          workspaceId: 'workspace-ordinary',
+          hostId: 'local',
+          agent: 'codex',
+          providerHandle: { kind: 'codex', threadId: 'thread-ordinary' }
+        },
+        fence: 1,
+        spawnToken: 'spawn-ordinary'
+      })
+    ).rejects.toThrow(/dynamic tools require lab-gateway/i)
+
+    expect(openConnection).not.toHaveBeenCalled()
     expect(dynamicHost.dispose).toHaveBeenCalledOnce()
+  })
+
+  it('rejects lab-gateway access with no dynamic-tool host before spawn', async () => {
+    const openConnection = vi.fn<typeof openCodexAppServerConnection>()
+    const adapter = new CodexStructuredSessionAdapter({
+      resolveLaunch: async () => ({
+        command: 'codex',
+        args: ['app-server'],
+        cwd: '/private/tmp/orca-lab/disposable-missing-host',
+        codexHome: '/private/tmp/orca-lab/runtime/missing-host/codex-home',
+        resumeThreadId: null,
+        workerAccessMode: 'lab-gateway'
+      }),
+      openConnection
+    })
+
+    await expect(
+      adapter.acquire({
+        identity: {
+          sessionId: 'session-lab-missing-host',
+          workspaceId: 'workspace-lab-missing-host',
+          hostId: 'local',
+          agent: 'codex',
+          providerHandle: { kind: 'codex', threadId: 'thread-lab-missing-host' }
+        },
+        fence: 1,
+        spawnToken: 'spawn-lab-missing-host'
+      })
+    ).rejects.toThrow(/gateway access requires a dynamic-tool host/i)
+
+    expect(openConnection).not.toHaveBeenCalled()
+  })
+
+  it('rejects a structurally forged lab host before spawn', async () => {
+    const dynamicHost = host()
+    const openConnection = vi.fn<typeof openCodexAppServerConnection>()
+    const adapter = new CodexStructuredSessionAdapter({
+      resolveLaunch: async () => ({
+        command: 'codex',
+        args: ['app-server'],
+        cwd: '/private/tmp/orca-lab/disposable-forged-host',
+        codexHome: '/private/tmp/orca-lab/runtime/forged-host/codex-home',
+        resumeThreadId: null,
+        workerAccessMode: 'lab-gateway',
+        labDynamicToolHost: dynamicHost,
+        labDynamicToolHostAttestationExpected: testCodexLabDynamicToolHostAttestation()
+      }),
+      openConnection
+    })
+
+    await expect(
+      adapter.acquire({
+        identity: {
+          sessionId: 'session-lab-forged-host',
+          workspaceId: 'workspace-lab-forged-host',
+          hostId: 'local',
+          agent: 'codex',
+          providerHandle: { kind: 'codex', threadId: 'thread-lab-forged-host' }
+        },
+        fence: 1,
+        spawnToken: 'spawn-lab-forged-host'
+      })
+    ).rejects.toThrow(/gateway access requires a dynamic-tool host/i)
+
+    expect(openConnection).not.toHaveBeenCalled()
+    expect(dynamicHost.dispose).toHaveBeenCalledOnce()
+  })
+
+  it('rejects a branded host bound to a different Dispatch before spawn', async () => {
+    const dynamicHost = testCodexLabDynamicToolHost()
+    const openConnection = vi.fn<typeof openCodexAppServerConnection>()
+    const adapter = new CodexStructuredSessionAdapter({
+      resolveLaunch: async () => ({
+        command: 'codex',
+        args: ['app-server'],
+        cwd: '/private/tmp/orca-lab/disposable-foreign-host',
+        codexHome: '/private/tmp/orca-lab/runtime/foreign-host/codex-home',
+        resumeThreadId: null,
+        workerAccessMode: 'lab-gateway',
+        labDynamicToolHost: dynamicHost,
+        labDynamicToolHostAttestationExpected: testCodexLabDynamicToolHostAttestation({
+          dispatchId: 'dispatch-foreign'
+        })
+      }),
+      openConnection
+    })
+
+    await expect(
+      adapter.acquire({
+        identity: {
+          sessionId: 'session-lab-foreign-host',
+          workspaceId: 'workspace-lab-foreign-host',
+          hostId: 'local',
+          agent: 'codex',
+          providerHandle: { kind: 'codex', threadId: 'thread-lab-foreign-host' }
+        },
+        fence: 1,
+        spawnToken: 'spawn-lab-foreign-host'
+      })
+    ).rejects.toThrow(/gateway access requires a dynamic-tool host/i)
+
+    expect(openConnection).not.toHaveBeenCalled()
+    await expect(dynamicHost.invoke(INVALID_HOST_INVOCATION)).resolves.toMatchObject({
+      contentItems: [{ text: expect.stringContaining('host_disposed') }]
+    })
+  })
+
+  it('disposes a lab host exactly once when acquisition fails before publication', async () => {
+    const dynamicHost = testCodexLabDynamicToolHost()
+    const expected = Object.freeze({
+      cwd: '/private/tmp/orca-lab/disposable-failure',
+      codexHome: '/private/tmp/orca-lab/runtime/failure/codex-home',
+      fakeHome: '/private/tmp/orca-lab/runtime/failure/fake-home',
+      workspaceId: '00000000-0000-4000-8000-000000000757',
+      permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID
+    })
+    const openConnection = vi.fn<typeof openCodexAppServerConnection>(async () => {
+      throw new Error('injected pre-publication open failure')
+    })
+    const adapter = new CodexStructuredSessionAdapter({
+      resolveLaunch: async () => ({
+        command: 'codex',
+        args: ['app-server'],
+        cwd: expected.cwd,
+        codexHome: expected.codexHome,
+        resumeThreadId: null,
+        env: { CODEX_HOME: expected.codexHome, HOME: expected.fakeHome },
+        environmentMode: 'exact',
+        workerAccessMode: 'lab-gateway',
+        labDynamicToolHost: dynamicHost,
+        labDynamicToolHostAttestationExpected: testCodexLabDynamicToolHostAttestation(),
+        labAppServerAttestationExpected: expected,
+        permissionPolicy: {
+          approvalPolicy: 'never',
+          permissions: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID,
+          runtimeWorkspaceRoots: [expected.cwd]
+        }
+      }),
+      openConnection
+    })
+
+    await expect(
+      adapter.acquire({
+        identity: {
+          sessionId: 'session-lab-open-failure',
+          workspaceId: 'workspace-lab-failure',
+          hostId: 'local',
+          agent: 'codex',
+          providerHandle: { kind: 'codex', threadId: 'thread-lab-failure' }
+        },
+        fence: 1,
+        spawnToken: 'spawn-lab-failure'
+      })
+    ).rejects.toThrow('injected pre-publication open failure')
+
+    expect(openConnection).toHaveBeenCalledOnce()
+    await expect(dynamicHost.invoke(INVALID_HOST_INVOCATION)).resolves.toMatchObject({
+      contentItems: [{ text: expect.stringContaining('host_disposed') }]
+    })
   })
 })

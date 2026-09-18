@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
+import {
+  testCodexLabDynamicToolHost,
+  testCodexLabDynamicToolHostAttestation
+} from '../runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-test-support'
 import type { CodexAppServerConnection } from './codex-app-server-connection-types'
 import {
   CODEX_LAB_ALLOWED_APP_SERVER_REQUEST_METHODS,
@@ -159,6 +163,8 @@ describe('Codex laboratory app-server connection guard', () => {
       env: { CODEX_HOME: expected.codexHome, HOME: expected.fakeHome },
       environmentMode: 'exact',
       workerAccessMode: 'lab-gateway',
+      labDynamicToolHost: testCodexLabDynamicToolHost(),
+      labDynamicToolHostAttestationExpected: testCodexLabDynamicToolHostAttestation(),
       labAppServerAttestationExpected: expected,
       permissionPolicy: {
         approvalPolicy: 'never',
@@ -182,5 +188,6 @@ describe('Codex laboratory app-server connection guard', () => {
       'configRequirements/read',
       'permissionProfile/list'
     ])
+    await expect(adapter.closeSession('session-lab-guard')).resolves.toBe(true)
   })
 })

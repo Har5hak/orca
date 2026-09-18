@@ -32,10 +32,17 @@ describe('Codex lab structured binding registry import boundary', () => {
     ])
   })
 
-  it('limits the mutable state module to its read-only and mutation facades', () => {
+  it('limits authority-bearing reads to the structured Codex launch resolver', () => {
+    expect(consumersOf('codex-lab-structured-launch-binding-resolver')).toEqual([
+      'main/codex/codex-structured-launch-resolution.ts'
+    ])
+  })
+
+  it('limits the mutable state module to its read-only, resolver, and mutation facades', () => {
     expect(consumersOf('codex-lab-structured-launch-binding-registry-state')).toEqual([
       'main/runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-registry-internal.ts',
-      'main/runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-registry.ts'
+      'main/runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-registry.ts',
+      'main/runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-resolver.ts'
     ])
   })
 

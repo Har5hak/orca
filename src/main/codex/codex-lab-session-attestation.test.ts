@@ -8,6 +8,10 @@ import type {
 } from './codex-app-server-connection'
 import type { CodexLabAppServerAttestationExpected } from './codex-lab-app-server-attestation'
 import {
+  testCodexLabDynamicToolHost,
+  testCodexLabDynamicToolHostAttestation
+} from '../runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-test-support'
+import {
   testCodexLabAccount,
   testCodexLabEffectiveConfig,
   testCodexLabOpenedThread,
@@ -59,6 +63,8 @@ function launch(): CodexStructuredLaunch {
     env: { CODEX_HOME: EXPECTED.codexHome, HOME: EXPECTED.fakeHome },
     environmentMode: 'exact',
     workerAccessMode: 'lab-gateway',
+    labDynamicToolHost: testCodexLabDynamicToolHost(),
+    labDynamicToolHostAttestationExpected: testCodexLabDynamicToolHostAttestation(),
     labAppServerAttestationExpected: EXPECTED,
     permissionPolicy: {
       approvalPolicy: 'never',
@@ -213,6 +219,8 @@ describe('Codex laboratory acquisition attestation', () => {
       'event:published'
     ])
     expect(connections[0].closeCount).toBe(0)
+    await expect(adapter.closeSession(SESSION_ID)).resolves.toBe(true)
+    expect(connections[0].closeCount).toBe(1)
   })
 
   it.each([

@@ -1,4 +1,10 @@
 import { createHash } from 'node:crypto'
+import {
+  claimCodexLabDynamicToolHostFactory,
+  isCodexLabDynamicToolHostFactoryBoundTo,
+  revokeCodexLabDynamicToolHostFactory,
+  type CodexLabDynamicToolHostFactory
+} from '../../../codex/codex-lab-dynamic-tool-host'
 import type { SealedCodexLabLaunchPlan } from './codex-lab-launch-contract'
 import { assertSealedCodexLabLaunchPlan } from './codex-sealed-launch-plan'
 import type { VerifiedLabWorktreeObservation } from './lab-worktree-observation'
@@ -10,7 +16,13 @@ export type CodexLabStructuredLaunchBinding = Readonly<{
   dispatchId: string
   plan: SealedCodexLabLaunchPlan
   worktree: VerifiedLabWorktreeObservation
+  /** Ephemeral host authority. This registry is in-memory only; never persist this factory. */
+  labDynamicToolHostFactory: CodexLabDynamicToolHostFactory
 }>
+
+export type CodexLabStructuredLaunchBindingMetadata = Readonly<
+  Pick<CodexLabStructuredLaunchBinding, 'dispatchId' | 'plan' | 'worktree'>
+>
 
 export class CodexLabStructuredBindingRefusal extends Error {
   readonly code = CODEX_LAB_STRUCTURED_BINDING_REFUSAL_CODE
@@ -36,20 +48,37 @@ export function registerCodexLabStructuredLaunchBinding(
   if (!sessionId.trim() || bindingsBySessionId.has(sessionId)) {
     throw new CodexLabStructuredBindingRefusal('binding_conflict')
   }
-  assertBinding(candidate)
   const binding = Object.freeze({
     dispatchId: candidate.dispatchId,
     plan: candidate.plan,
-    worktree: candidate.worktree
+    worktree: candidate.worktree,
+    labDynamicToolHostFactory: candidate.labDynamicToolHostFactory
   })
+  assertBinding(binding)
+  if (!claimCodexLabDynamicToolHostFactory(binding.labDynamicToolHostFactory)) {
+    throw new CodexLabStructuredBindingRefusal('binding_conflict')
+  }
   bindingsBySessionId.set(sessionId, binding)
   return binding
 }
 
-export function getCodexLabStructuredLaunchBinding(
+export function getCodexLabStructuredLaunchBindingAuthority(
   sessionId: string
 ): CodexLabStructuredLaunchBinding | undefined {
   return bindingsBySessionId.get(sessionId)
+}
+
+export function getCodexLabStructuredLaunchBindingMetadata(
+  sessionId: string
+): CodexLabStructuredLaunchBindingMetadata | undefined {
+  const binding = bindingsBySessionId.get(sessionId)
+  return binding
+    ? Object.freeze({
+        dispatchId: binding.dispatchId,
+        plan: binding.plan,
+        worktree: binding.worktree
+      })
+    : undefined
 }
 
 export function releaseCodexLabStructuredLaunchBinding(
@@ -60,7 +89,11 @@ export function releaseCodexLabStructuredLaunchBinding(
   if (!binding || binding.dispatchId !== dispatchId) {
     return false
   }
-  return bindingsBySessionId.delete(sessionId)
+  if (!bindingsBySessionId.delete(sessionId)) {
+    return false
+  }
+  revokeCodexLabDynamicToolHostFactory(binding.labDynamicToolHostFactory)
+  return true
 }
 
 function assertBinding(binding: CodexLabStructuredLaunchBinding): void {
@@ -92,6 +125,11 @@ function assertBinding(binding: CodexLabStructuredLaunchBinding): void {
     receipt.repositoryRoot !== observation.repositoryRoot ||
     receipt.headCommit !== observation.headCommit ||
     receipt.treeHash !== observation.treeHash ||
+    !isCodexLabDynamicToolHostFactoryBoundTo(binding.labDynamicToolHostFactory, {
+      dispatchId: binding.dispatchId,
+      endpointSha256: binding.plan.receiptInputs.gatewaySocketPathSha256,
+      gatewayAccessSha256: binding.plan.gatewayAccessSha256
+    }) ||
     !receipt.clean ||
     !digestsMatch(binding.worktree)
   ) {

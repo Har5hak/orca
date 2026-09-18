@@ -17,7 +17,10 @@ import type { CodexTurnProcessSnapshot } from './codex-structured-turn-processes
 import type { StructuredAgentSessionLifecycleEvent } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
 import type { CodexStructuredPermissionPolicy } from './codex-structured-permission-policy'
 import type { CodexAppServerEnvironmentMode } from './codex-app-server-environment'
-import type { CodexLabDynamicToolHostPort } from './codex-lab-dynamic-tool-host'
+import type {
+  CodexLabDynamicToolHostAttestation,
+  CodexLabDynamicToolHostPort
+} from './codex-lab-dynamic-tool-host'
 import type { CodexLabAppServerAttestationExpected } from './codex-lab-app-server-attestation'
 
 export type CodexStructuredLaunch = {
@@ -35,6 +38,8 @@ export type CodexStructuredLaunch = {
   labAppServerAttestationExpected?: CodexLabAppServerAttestationExpected
   /** Host-only Dispatch bridge. Never serialized into the provider launch environment. */
   labDynamicToolHost?: CodexLabDynamicToolHostPort
+  /** Non-secret exact binding used to re-attest the opaque host at the pre-spawn boundary. */
+  labDynamicToolHostAttestationExpected?: CodexLabDynamicToolHostAttestation
 }
 
 export type CodexStructuredSessionEvent =

@@ -6,9 +6,14 @@ import {
 import type { AgentSessionJournalIdentity } from '../../shared/agent-session-journal-types'
 import {
   installTestCodexLabStructuredLaunchBinding,
+  TEST_LAB_GATEWAY_CREDENTIAL,
+  TEST_LAB_GATEWAY_ENDPOINT,
   TEST_LAB_WORKTREE_PATH,
+  testCodexLabDynamicToolHostAttestation,
+  testCodexLabDynamicToolHostFactory,
   testCodexLabStructuredLaunchBinding
 } from '../runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-test-support'
+import { CodexLabDynamicToolHost } from './codex-lab-dynamic-tool-host'
 import { createCodexStructuredLaunchResolver } from './codex-structured-launch-resolution'
 
 const SESSION_ID = 'session_lab_structured'
@@ -77,31 +82,38 @@ describe('structured Codex lab launch resolution', () => {
         resolvePermissionPolicy
       })
 
-      await expect(resolve({ identity: IDENTITY })).resolves.toEqual({
-        command: binding.plan.executable,
-        args: [...binding.plan.argv],
-        cwd: TEST_LAB_WORKTREE_PATH,
-        codexHome: binding.plan.runtimePaths.codexHome,
-        resumeThreadId: null,
-        env: {
-          CODEX_HOME: binding.plan.runtimePaths.codexHome,
-          HOME: binding.plan.runtimePaths.fakeHome
-        },
-        environmentMode: 'exact',
-        workerAccessMode: 'lab-gateway',
-        labAppServerAttestationExpected: {
+      const launch = await resolve({ identity: IDENTITY })
+      try {
+        expect(launch).toEqual({
+          command: binding.plan.executable,
+          args: [...binding.plan.argv],
           cwd: TEST_LAB_WORKTREE_PATH,
           codexHome: binding.plan.runtimePaths.codexHome,
-          fakeHome: binding.plan.runtimePaths.fakeHome,
-          workspaceId: binding.plan.enforcedWorkspaceId,
-          permissionProfileId: 'orca-lab-readonly-v1'
-        },
-        permissionPolicy: {
-          approvalPolicy: 'never',
-          permissions: 'orca-lab-readonly-v1',
-          runtimeWorkspaceRoots: [TEST_LAB_WORKTREE_PATH]
-        }
-      })
+          resumeThreadId: null,
+          env: {
+            CODEX_HOME: binding.plan.runtimePaths.codexHome,
+            HOME: binding.plan.runtimePaths.fakeHome
+          },
+          environmentMode: 'exact',
+          workerAccessMode: 'lab-gateway',
+          labDynamicToolHost: expect.any(CodexLabDynamicToolHost),
+          labDynamicToolHostAttestationExpected: testCodexLabDynamicToolHostAttestation(),
+          labAppServerAttestationExpected: {
+            cwd: TEST_LAB_WORKTREE_PATH,
+            codexHome: binding.plan.runtimePaths.codexHome,
+            fakeHome: binding.plan.runtimePaths.fakeHome,
+            workspaceId: binding.plan.enforcedWorkspaceId,
+            permissionProfileId: 'orca-lab-readonly-v1'
+          },
+          permissionPolicy: {
+            approvalPolicy: 'never',
+            permissions: 'orca-lab-readonly-v1',
+            runtimeWorkspaceRoots: [TEST_LAB_WORKTREE_PATH]
+          }
+        })
+      } finally {
+        launch.labDynamicToolHost?.dispose()
+      }
       expect(resolveEnvironment).not.toHaveBeenCalled()
       expect(resolveCommand).not.toHaveBeenCalled()
       expect(resolvePermissionPolicy).not.toHaveBeenCalled()
@@ -119,6 +131,118 @@ describe('structured Codex lab launch resolution', () => {
         resolveWorkspacePath: async () => TEST_LAB_WORKTREE_PATH
       })
       await expect(resolve({ identity: IDENTITY })).rejects.toThrow(/lab launch binding/i)
+    } finally {
+      cleanup()
+    }
+  })
+
+  it.each([
+    ['missing', undefined],
+    ['foreign Dispatch', testCodexLabDynamicToolHostFactory({ dispatchId: 'dispatch-foreign' })],
+    [
+      'foreign endpoint',
+      testCodexLabDynamicToolHostFactory({
+        endpoint: '/private/tmp/orca-lab/runtime/dispatches/dispatch-foreign/gateway.sock'
+      })
+    ],
+    [
+      'foreign credential',
+      testCodexLabDynamicToolHostFactory({ credential: `lgw1_${'x'.repeat(43)}` })
+    ]
+  ])(
+    'refuses a %s dynamic-tool factory before publishing a binding',
+    (_case, dynamicHostFactory) => {
+      const binding = testCodexLabStructuredLaunchBinding()
+      const candidate = { ...binding }
+      if (dynamicHostFactory) {
+        candidate.labDynamicToolHostFactory = dynamicHostFactory
+      } else {
+        Reflect.deleteProperty(candidate, 'labDynamicToolHostFactory')
+      }
+
+      expect(() =>
+        installTestCodexLabStructuredLaunchBinding(`session_lab_invalid_host_${_case}`, candidate)
+      ).toThrow(expect.objectContaining({ reason: 'binding_invalid' }))
+    }
+  )
+
+  it('mints fresh acquisition custody and revokes only future hosts on binding release', async () => {
+    const binding = testCodexLabStructuredLaunchBinding()
+    const cleanup = installTestCodexLabStructuredLaunchBinding(SESSION_ID, binding)
+    const resolve = createCodexStructuredLaunchResolver({
+      store: { getRecord: () => record(binding.plan.runtimePaths.codexHome) },
+      resolveWorkspacePath: async () => TEST_LAB_WORKTREE_PATH
+    })
+    const invalidInvocation = {
+      callId: '../invalid',
+      namespace: null,
+      tool: 'orca_worker_status',
+      arguments: {}
+    }
+    const first = await resolve({ identity: IDENTITY })
+    const firstHost = first.labDynamicToolHost
+    if (!firstHost) {
+      throw new Error('first laboratory launch did not receive a dynamic-tool host')
+    }
+    firstHost.dispose()
+    const second = await resolve({ identity: IDENTITY })
+    const secondHost = second.labDynamicToolHost
+    if (!secondHost) {
+      throw new Error('second laboratory launch did not receive a dynamic-tool host')
+    }
+
+    try {
+      expect(firstHost).not.toBe(secondHost)
+      await expect(firstHost.invoke(invalidInvocation)).resolves.toMatchObject({
+        success: false,
+        contentItems: [{ text: expect.stringContaining('host_disposed') }]
+      })
+      await expect(secondHost.invoke(invalidInvocation)).resolves.toMatchObject({
+        success: false,
+        contentItems: [{ text: expect.stringContaining('call_id_invalid') }]
+      })
+
+      cleanup()
+      expect(() => binding.labDynamicToolHostFactory()).toThrow(/factory is revoked/i)
+      await expect(secondHost.invoke(invalidInvocation)).resolves.toMatchObject({
+        contentItems: [{ text: expect.stringContaining('call_id_invalid') }]
+      })
+    } finally {
+      secondHost.dispose()
+      cleanup()
+    }
+  })
+
+  it('transfers a dynamic-tool factory into only one live binding', () => {
+    const binding = testCodexLabStructuredLaunchBinding()
+    const cleanup = installTestCodexLabStructuredLaunchBinding('session_lab_factory_owner', binding)
+    try {
+      expect(() =>
+        installTestCodexLabStructuredLaunchBinding('session_lab_factory_reuse', binding)
+      ).toThrow(expect.objectContaining({ reason: 'binding_conflict' }))
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('snapshots factory custody once before validation and claim', () => {
+    const binding = testCodexLabStructuredLaunchBinding()
+    const foreignFactory = testCodexLabDynamicToolHostFactory({ dispatchId: 'dispatch-foreign' })
+    let reads = 0
+    const accessorBinding = {
+      ...binding,
+      get labDynamicToolHostFactory() {
+        reads += 1
+        return reads > 2 ? foreignFactory : binding.labDynamicToolHostFactory
+      }
+    }
+
+    const cleanup = installTestCodexLabStructuredLaunchBinding(
+      'session_lab_factory_snapshot',
+      accessorBinding
+    )
+    try {
+      expect(reads).toBe(1)
     } finally {
       cleanup()
     }
@@ -185,7 +309,8 @@ describe('structured Codex lab launch resolution', () => {
       })
     })
 
-    await expect(resolve({ identity: IDENTITY })).resolves.toEqual({
+    const launch = await resolve({ identity: IDENTITY })
+    expect(launch).toEqual({
       command: '/normal/bin/codex',
       args: ['app-server'],
       cwd: '/repos/normal',
@@ -194,5 +319,8 @@ describe('structured Codex lab launch resolution', () => {
       resumeThreadId: null,
       permissionPolicy: { approvalPolicy: 'on-request', sandbox: 'workspace-write' }
     })
+    expect(launch).not.toHaveProperty('labDynamicToolHost')
+    expect(JSON.stringify(launch)).not.toContain(TEST_LAB_GATEWAY_ENDPOINT)
+    expect(JSON.stringify(launch)).not.toContain(TEST_LAB_GATEWAY_CREDENTIAL)
   })
 })
