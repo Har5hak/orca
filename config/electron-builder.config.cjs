@@ -538,6 +538,10 @@ module.exports = {
       {
         from: 'native/keyboard-layout-macos/.build/release/orca-keyboard-layout',
         to: 'MacOS/orca-keyboard-layout'
+      },
+      {
+        from: 'native/codex-lab-keychain-writer-macos/.build/release/orca-codex-lab-keychain-writer',
+        to: 'MacOS/orca-codex-lab-keychain-writer'
       }
     ],
     target: [

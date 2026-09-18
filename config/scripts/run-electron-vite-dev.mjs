@@ -24,6 +24,7 @@ import {
   selectStaleDevBundleDirs
 } from './dev-electron-bundle-cache.mjs'
 import { copyPrivateTree } from './space-sharing-copy.mjs'
+import { buildCodexLabKeychainWriterForDev } from './build-codex-lab-keychain-writer-dev.mjs'
 import {
   DEV_BUNDLE_ID,
   getDevBundlePlistPatches,
@@ -177,9 +178,10 @@ function prepareMacDevElectronApp() {
 
   const title = process.env.ORCA_DEV_DOCK_TITLE || 'Orca: dev'
   const identityKey = process.env.ORCA_DEV_INSTANCE_KEY || repoRoot
+  // v12: require the signed Codex lab Keychain writer in reusable development bundles.
   // v11: stop patching the branch title into Info.plist so every dev bundle signs to one cdhash.
   // A stale copy only emits extra fields the parser ignores, so narrowing its schema needs no bump.
-  const bundleLayoutVersion = 'stable-cdhash-dock-name-from-bundle-dir-v11'
+  const bundleLayoutVersion = 'stable-cdhash-dock-name-from-bundle-dir-v12'
   const hash = createHash('sha1')
     .update(
       `${sourceAppPath}\0${electronVersion ?? ''}\0${title}\0${identityKey}\0${bundleLayoutVersion}`
@@ -221,9 +223,9 @@ function prepareMacDevElectronApp() {
     2
   )
   const executablePath = path.join(appPath, 'Contents', 'MacOS', 'Electron')
-  // Split by consequence: without this Chromium blank-crashes, so it gates whether the bundle can
-  // run at all. The keyboard-layout helper below is optional -- swiftc builds it non-fatally, so on
-  // a Mac without full Xcode it is simply absent and only a keyboard feature degrades.
+  // Split by consequence: without Chromium the bundle blank-crashes. Native helpers are included
+  // in the reusable-bundle marker so a failed or interrupted build is retried on the next launch;
+  // the Keychain writer remains unavailable rather than falling back to a less safe transport.
   const chromiumResourcePath = path.join(
     appPath,
     'Contents',
@@ -234,7 +236,8 @@ function prepareMacDevElectronApp() {
   )
   const requiredResourcePaths = [
     chromiumResourcePath,
-    path.join(appPath, 'Contents', 'MacOS', 'orca-keyboard-layout')
+    path.join(appPath, 'Contents', 'MacOS', 'orca-keyboard-layout'),
+    path.join(appPath, 'Contents', 'MacOS', 'orca-codex-lab-keychain-writer')
   ]
 
   function copiedAppIsUsable() {
@@ -311,6 +314,15 @@ function prepareMacDevElectronApp() {
   }
   for (const { key, value } of getDevHelperPlistPatches()) {
     setPlistValue(helperPlistPath, key, value)
+  }
+
+  // The writer must live beside the Electron executable because production resolves only that
+  // fixed packaged path. The deep signing pass below gives the helper the same stable bundle
+  // signing context; without a built and signed helper the laboratory profile stays unavailable.
+  try {
+    buildCodexLabKeychainWriterForDev({ repoRoot, appPath, processExecPath: process.execPath })
+  } catch (error) {
+    console.warn('[orca-dev] Codex lab Keychain writer unavailable:', error)
   }
 
   // Why: the notification-status helper reads the app's real macOS

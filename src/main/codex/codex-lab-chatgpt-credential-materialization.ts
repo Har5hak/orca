@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { isAbsolute, join, normalize, parse } from 'node:path'
 import { readCodexAuthIdentity } from '../codex-accounts/codex-auth-identity'
 import { CODEX_LAB_RUNTIME_ROOT } from '../runtime/orchestration/lab-profile/codex-lab-launch-contract'
@@ -18,8 +18,6 @@ export type CodexLabCredentialMaterializationRefusalReason =
   | 'source_read_failed'
   | 'target_cleanup_failed'
   | 'target_home_invalid'
-  | 'target_read_failed'
-  | 'target_readback_mismatch'
   | 'target_write_failed'
   | 'workspace_mismatch'
 
@@ -42,8 +40,9 @@ export type CodexLabCredentialMaterializationPorts = Readonly<{
     readCredential(): Promise<string | null>
   }>
   targetKeyring: Readonly<{
-    writeCredential(entry: CodexAuthKeyringLocator & Readonly<{ secret: string }>): Promise<void>
-    readCredential(locator: CodexAuthKeyringLocator): Promise<string | null>
+    replaceAndVerifyCredential(
+      entry: CodexAuthKeyringLocator & Readonly<{ secret: string }>
+    ): Promise<void>
     deleteCredential(locator: CodexAuthKeyringLocator): Promise<void>
   }>
 }>
@@ -64,7 +63,8 @@ export type CodexLabCredentialMaterializationReceipt = Readonly<{
   loginMethod: 'chatgpt'
   workspaceVerified: true
   planVerified: true
-  readbackVerified: true
+  /** The target port accepted the operation; this is not a Codex cross-process read proof. */
+  targetInstallAccepted: true
 }>
 
 const CHATGPT_AUTH_MODES = new Set(['chatgpt', 'chatgptAuthTokens'])
@@ -103,11 +103,7 @@ export async function materializeCodexLabChatGptCredential(
 
     const sourceCredential = await readSourceCredential(ports)
     assertChatGptCredential(sourceCredential, expectedWorkspaceId, expectedPlanType)
-    await writeTargetCredential(ports, locator, sourceCredential)
-    const readback = await readTargetCredential(ports, locator)
-    if (!readback || !secretsMatch(sourceCredential, readback)) {
-      throw refusal('target_readback_mismatch')
-    }
+    await replaceAndVerifyTargetCredential(ports, locator, sourceCredential)
 
     return Object.freeze({
       schemaVersion: 1,
@@ -118,7 +114,7 @@ export async function materializeCodexLabChatGptCredential(
       loginMethod: 'chatgpt',
       workspaceVerified: true,
       planVerified: true,
-      readbackVerified: true
+      targetInstallAccepted: true
     })
   } catch (error) {
     try {
@@ -200,35 +196,16 @@ function assertChatGptCredential(
   }
 }
 
-async function writeTargetCredential(
+async function replaceAndVerifyTargetCredential(
   ports: CodexLabCredentialMaterializationPorts,
   locator: CodexAuthKeyringLocator,
   credential: string
 ): Promise<void> {
   try {
-    await ports.targetKeyring.writeCredential({ ...locator, secret: credential })
+    await ports.targetKeyring.replaceAndVerifyCredential({ ...locator, secret: credential })
   } catch {
     throw refusal('target_write_failed')
   }
-}
-
-async function readTargetCredential(
-  ports: CodexLabCredentialMaterializationPorts,
-  locator: CodexAuthKeyringLocator
-): Promise<string | null> {
-  try {
-    return await ports.targetKeyring.readCredential(locator)
-  } catch {
-    throw refusal('target_read_failed')
-  }
-}
-
-function secretsMatch(expected: string, observed: string): boolean {
-  const expectedBytes = Buffer.from(expected, 'utf8')
-  const observedBytes = Buffer.from(observed, 'utf8')
-  return (
-    expectedBytes.length === observedBytes.length && timingSafeEqual(expectedBytes, observedBytes)
-  )
 }
 
 function isCanonicalTargetHome(value: string): boolean {

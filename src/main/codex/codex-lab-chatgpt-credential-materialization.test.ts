@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  CODEX_AUTH_KEYRING_SERVICE,
   CODEX_LAB_CREDENTIAL_MATERIALIZATION_REFUSAL_CODE,
   codexAuthKeyringAccount,
   materializeCodexLabChatGptCredential,
@@ -49,16 +48,13 @@ type PortHarness = {
 function portHarness(
   source: string | null,
   options: {
-    readback?: string | null
     writeError?: boolean
-    readError?: boolean
     deleteError?: boolean
   } = {}
 ): PortHarness {
   const events: string[] = []
   const writes: PortHarness['writes'] = []
   const deletes: PortHarness['deletes'] = []
-  let stored: string | null = null
   return {
     events,
     writes,
@@ -71,24 +67,12 @@ function portHarness(
         }
       },
       targetKeyring: {
-        async writeCredential(entry) {
-          events.push('target:write')
+        async replaceAndVerifyCredential(entry) {
+          events.push('target:replace-and-verify')
           writes.push(entry)
           if (options.writeError) {
             throw new Error('write failed with access-secret')
           }
-          stored = entry.secret
-        },
-        async readCredential(locator) {
-          events.push('target:read')
-          if (options.readError) {
-            throw new Error('read failed with refresh-secret')
-          }
-          expect(locator).toEqual({
-            service: CODEX_AUTH_KEYRING_SERVICE,
-            account: writes[0].account
-          })
-          return options.readback === undefined ? stored : options.readback
         },
         async deleteCredential(locator) {
           events.push('target:delete')
@@ -96,7 +80,6 @@ function portHarness(
           if (options.deleteError) {
             throw new Error('delete failed with access-secret')
           }
-          stored = null
         }
       }
     }
@@ -144,7 +127,7 @@ describe('Codex laboratory ChatGPT credential materialization', () => {
 
     const receipt = await materializeCodexLabChatGptCredential(request(), harness.ports)
 
-    expect(harness.events).toEqual(['source:read', 'target:write', 'target:read'])
+    expect(harness.events).toEqual(['source:read', 'target:replace-and-verify'])
     expect(harness.writes).toEqual([
       {
         service: 'Codex Auth',
@@ -209,19 +192,20 @@ describe('Codex laboratory ChatGPT credential materialization', () => {
     }
   )
 
-  it('deletes the target credential when readback does not match', async () => {
-    const harness = portHarness(chatGptCredential(), { readback: chatGptCredential({ marker: 2 }) })
+  it('deletes the target when native replacement or internal verification fails', async () => {
+    const harness = portHarness(chatGptCredential(), { writeError: true })
 
     await expect(
       materializeCodexLabChatGptCredential(request(), harness.ports)
     ).rejects.toMatchObject({
       code: CODEX_LAB_CREDENTIAL_MATERIALIZATION_REFUSAL_CODE,
-      data: { reason: 'target_readback_mismatch' }
+      data: { reason: 'target_write_failed' }
     })
-    expect(harness.events).toEqual(['source:read', 'target:write', 'target:read', 'target:delete'])
+    expect(harness.events).toEqual(['source:read', 'target:replace-and-verify', 'target:delete'])
+    expect(harness.deletes).toEqual([{ service: 'Codex Auth', account: 'cli|22d31d54a74f31bf' }])
   })
 
-  it('sanitizes port failures and reports failed cleanup explicitly', async () => {
+  it('sanitizes combined replacement/verification failures and reports failed cleanup', async () => {
     const harness = portHarness(chatGptCredential(), { writeError: true, deleteError: true })
 
     const failure = materializeCodexLabChatGptCredential(request(), harness.ports)
@@ -230,6 +214,6 @@ describe('Codex laboratory ChatGPT credential materialization', () => {
       data: { reason: 'target_cleanup_failed' }
     })
     await expect(failure).rejects.not.toThrow(/access-secret|refresh-secret/)
-    expect(harness.events).toEqual(['source:read', 'target:write', 'target:delete'])
+    expect(harness.events).toEqual(['source:read', 'target:replace-and-verify', 'target:delete'])
   })
 })

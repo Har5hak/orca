@@ -4,6 +4,10 @@ import type { GlobalSettings } from '../../shared/global-settings-types'
 import { isDefinitiveAbsence } from '../../shared/definitive-filesystem-absence'
 import { assertOwnedHostCodexManagedHomePath } from '../codex-accounts/host-codex-managed-home-ownership'
 import { getSelectedCodexAccountIdForTarget } from '../codex-accounts/runtime-selection'
+import {
+  CODEX_LAB_RUNTIME_ROOT,
+  type SealedCodexLabLaunchPlan
+} from '../runtime/orchestration/lab-profile/codex-lab-launch-contract'
 import { getOrcaUserDataPath, getSystemCodexHomePath } from './codex-home-paths'
 import {
   CODEX_AUTH_KEYRING_SERVICE,
@@ -12,19 +16,20 @@ import {
   type CodexLabCredentialMaterializationPorts
 } from './codex-lab-chatgpt-credential-materialization'
 import {
-  deleteKeyringCredential,
-  executeSecurityCommand,
+  deleteKeyringCredentialWithWriter,
+  executeCodexLabKeychainWriter,
+  installKeyringCredentialWithWriter,
   observeTargetAuthJsonPath,
   readCredentialFileSecurely,
-  readKeyringCredential,
-  type CodexLabSecurityCommandExecutor,
+  resolveCodexLabKeychainWriterPath,
+  type CodexLabKeychainWriterExecutor,
   type TargetAuthJsonObservation
 } from './codex-lab-chatgpt-credential-host-storage'
 
 export type {
-  CodexLabSecurityCommandExecutor,
-  CodexLabSecurityCommandRequest,
-  CodexLabSecurityCommandResult
+  CodexLabKeychainWriterExecutor,
+  CodexLabKeychainWriterRequest,
+  CodexLabKeychainWriterResult
 } from './codex-lab-chatgpt-credential-host-storage'
 
 export const CODEX_LAB_CREDENTIAL_HOST_PORT_REFUSAL_CODE =
@@ -34,17 +39,19 @@ export type CodexLabCredentialHostPortOperation =
   | 'source_selection'
   | 'source_read'
   | 'target_delete'
-  | 'target_read'
   | 'target_write'
 
 export type CodexLabCredentialHostPortRefusalReason =
   | 'credential_file_invalid'
   | 'credential_file_read_failed'
-  | 'keyring_command_failed'
   | 'keyring_locator_mismatch'
+  | 'keyring_writer_failed'
   | 'platform_unsupported'
+  | 'sealed_executable_identity_missing'
+  | 'sealed_launch_plan_mismatch'
   | 'secure_keyring_write_unavailable'
   | 'selected_account_invalid'
+  | 'source_keyring_unproven'
   | 'source_home_invalid'
   | 'target_auth_json_observation_failed'
   | 'target_auth_json_present'
@@ -141,15 +148,23 @@ export function resolveSelectedHostCodexCredentialSource(
 
 type HostPortDependencies = Readonly<{
   platform?: NodeJS.Platform
-  executeSecurityCommand?: CodexLabSecurityCommandExecutor
+  executeKeychainWriter?: CodexLabKeychainWriterExecutor
+  keychainWriterPath?: string | null
   readCredentialFile?: (filePath: string) => Promise<string | null>
   observeTargetAuthJson?: (filePath: string) => Promise<TargetAuthJsonObservation>
 }>
 
+export type CodexLabCredentialLaunchPlan = Pick<
+  SealedCodexLabLaunchPlan,
+  'codexExecutableSha256' | 'dispatchId' | 'executable' | 'runtimePaths'
+>
+
 export function createCodexLabChatGptCredentialHostPorts(
   args: Readonly<{
     source: SelectedHostCodexCredentialSource
+    dispatchId: string
     canonicalTargetCodexHome: string
+    launchPlan: CodexLabCredentialLaunchPlan
   }>,
   dependencies: HostPortDependencies = {}
 ): CodexLabCredentialMaterializationPorts {
@@ -158,8 +173,14 @@ export function createCodexLabChatGptCredentialHostPorts(
   }
   assertCanonicalHome(args.source.canonicalCodexHome, 'source_home_invalid', 'source_selection')
   assertCanonicalHome(args.canonicalTargetCodexHome, 'target_home_invalid', 'source_selection')
+  assertDispatchBoundTarget(args.dispatchId, args.canonicalTargetCodexHome)
+  assertLaunchPlanMatches(args.launchPlan, args.dispatchId, args.canonicalTargetCodexHome)
 
-  const execute = dependencies.executeSecurityCommand ?? executeSecurityCommand
+  const executeWriter = dependencies.executeKeychainWriter ?? executeCodexLabKeychainWriter
+  const keychainWriterPath =
+    dependencies.keychainWriterPath === undefined
+      ? resolveCodexLabKeychainWriterPath()
+      : dependencies.keychainWriterPath
   const readCredentialFile =
     dependencies.readCredentialFile ?? ((filePath) => readCredentialFileSecurely(filePath, refusal))
   const observeTargetAuthJson = dependencies.observeTargetAuthJson ?? observeTargetAuthJsonPath
@@ -167,20 +188,18 @@ export function createCodexLabChatGptCredentialHostPorts(
     service: CODEX_AUTH_KEYRING_SERVICE,
     account: codexAuthKeyringAccount(args.canonicalTargetCodexHome)
   })
-  const sourceLocator = Object.freeze({
-    service: CODEX_AUTH_KEYRING_SERVICE,
-    account: codexAuthKeyringAccount(args.source.canonicalCodexHome)
-  })
   const targetAuthJsonPath = join(args.canonicalTargetCodexHome, 'auth.json')
 
   return Object.freeze({
     source: Object.freeze({
       async readCredential(): Promise<string | null> {
         try {
-          const credential =
-            args.source.storage === 'file'
-              ? await readCredentialFile(join(args.source.canonicalCodexHome, 'auth.json'))
-              : await readKeyringCredential(execute, sourceLocator, 'source_read', refusal)
+          if (args.source.storage !== 'file') {
+            throw refusal('source_read', 'source_keyring_unproven')
+          }
+          const credential = await readCredentialFile(
+            join(args.source.canonicalCodexHome, 'auth.json')
+          )
           return credential === null ? null : compactJsonCredential(credential)
         } catch (error) {
           if (error instanceof CodexLabCredentialHostPortRefusal) {
@@ -191,38 +210,96 @@ export function createCodexLabChatGptCredentialHostPorts(
       }
     }),
     targetKeyring: Object.freeze({
-      async writeCredential(entry): Promise<void> {
+      async replaceAndVerifyCredential(entry): Promise<void> {
         assertExactLocator(entry, targetLocator, 'target_write')
         await assertTargetAuthJsonAbsent(targetAuthJsonPath, observeTargetAuthJson, 'target_write')
-        // `security -w <secret>` leaks through argv, while prompted `-w` truncates at 128 bytes.
-        // Codex's chatgptAuthTokens RPC installs process-local external auth and does not persist.
-        throw refusal('target_write', 'secure_keyring_write_unavailable')
-      },
-      async readCredential(locator): Promise<string | null> {
-        assertExactLocator(locator, targetLocator, 'target_read')
-        await assertTargetAuthJsonAbsent(targetAuthJsonPath, observeTargetAuthJson, 'target_read')
-        const credential = await readKeyringCredential(
-          execute,
-          targetLocator,
-          'target_read',
+        const executableIdentity = requireSealedExecutableIdentity(args.launchPlan, 'target_write')
+        if (keychainWriterPath === null) {
+          throw refusal('target_write', 'secure_keyring_write_unavailable')
+        }
+        await installKeyringCredentialWithWriter(
+          executeWriter,
+          keychainWriterPath,
+          args.dispatchId,
+          executableIdentity.canonicalPath,
+          entry.secret,
           refusal
         )
-        await assertTargetAuthJsonAbsent(targetAuthJsonPath, observeTargetAuthJson, 'target_read')
-        return credential
+        await assertTargetAuthJsonAbsent(targetAuthJsonPath, observeTargetAuthJson, 'target_write')
       },
       async deleteCredential(locator): Promise<void> {
         assertExactLocator(locator, targetLocator, 'target_delete')
-        await deleteKeyringCredential(execute, targetLocator, refusal)
+        requireSealedExecutableIdentity(args.launchPlan, 'target_delete')
+        if (keychainWriterPath === null) {
+          throw refusal('target_delete', 'secure_keyring_write_unavailable')
+        }
+        await deleteKeyringCredentialWithWriter(
+          executeWriter,
+          keychainWriterPath,
+          args.dispatchId,
+          refusal
+        )
         await assertTargetAuthJsonAbsent(targetAuthJsonPath, observeTargetAuthJson, 'target_delete')
       }
     })
   })
 }
 
+const DISPATCH_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u
+const SHA256_PATTERN = /^[a-f0-9]{64}$/u
+
+type SealedExecutableIdentity = Readonly<{
+  canonicalPath: string
+  sha256: string
+  device: string
+  inode: string
+}>
+
+function assertLaunchPlanMatches(
+  plan: CodexLabCredentialLaunchPlan,
+  dispatchId: string,
+  targetHome: string
+): void {
+  if (
+    plan.dispatchId !== dispatchId ||
+    plan.runtimePaths.codexHome !== targetHome ||
+    !isAbsolute(plan.executable) ||
+    normalize(plan.executable) !== plan.executable ||
+    parse(plan.executable).root === plan.executable ||
+    !SHA256_PATTERN.test(plan.codexExecutableSha256)
+  ) {
+    throw refusal('source_selection', 'sealed_launch_plan_mismatch')
+  }
+}
+
+/**
+ * Deliberately fail closed. `SealedCodexLabLaunchPlan` currently carries only canonical path and
+ * SHA-256. TASK-757 must not invent device/inode as ambient caller data. The upstream contract must
+ * add values observed while sealing and the materializer must re-observe the same identity before
+ * this function may return a value.
+ */
+function requireSealedExecutableIdentity(
+  _plan: CodexLabCredentialLaunchPlan,
+  operation: 'target_delete' | 'target_write'
+): SealedExecutableIdentity {
+  throw refusal(operation, 'sealed_executable_identity_missing')
+}
+
+function assertDispatchBoundTarget(dispatchId: string, targetHome: string): void {
+  if (
+    !DISPATCH_ID_PATTERN.test(dispatchId) ||
+    dispatchId === '.' ||
+    dispatchId === '..' ||
+    targetHome !== join(CODEX_LAB_RUNTIME_ROOT, 'dispatches', dispatchId, 'codex-home')
+  ) {
+    throw refusal('source_selection', 'target_home_invalid')
+  }
+}
+
 function assertExactLocator(
   observed: CodexAuthKeyringLocator,
   expected: CodexAuthKeyringLocator,
-  operation: 'target_delete' | 'target_read' | 'target_write'
+  operation: 'target_delete' | 'target_write'
 ): void {
   if (observed.service !== expected.service || observed.account !== expected.account) {
     throw refusal(operation, 'keyring_locator_mismatch')
@@ -232,7 +309,7 @@ function assertExactLocator(
 async function assertTargetAuthJsonAbsent(
   authJsonPath: string,
   observe: NonNullable<HostPortDependencies['observeTargetAuthJson']>,
-  operation: 'target_delete' | 'target_read' | 'target_write'
+  operation: 'target_delete' | 'target_write'
 ): Promise<void> {
   let observation: TargetAuthJsonObservation
   try {

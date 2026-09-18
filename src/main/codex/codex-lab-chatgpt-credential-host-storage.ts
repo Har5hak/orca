@@ -1,21 +1,33 @@
-import { constants } from 'node:fs'
+import { constants, existsSync } from 'node:fs'
 import { lstat, open } from 'node:fs/promises'
+import { dirname, isAbsolute, join } from 'node:path'
 import { isDefinitiveAbsence } from '../../shared/definitive-filesystem-absence'
 import { runProcess } from '../../shared/child-process/run-process'
-import type { CodexAuthKeyringLocator } from './codex-lab-chatgpt-credential-materialization'
 
-const SECURITY_PROGRAM = '/usr/bin/security' as const
-const SECURITY_TIMEOUT_MS = 3_000
-const SECURITY_MAX_OUTPUT_BYTES = 64 * 1024
 const MAX_CREDENTIAL_BYTES = 2 * 1024 * 1024
-const KEYRING_NOT_FOUND_EXIT_CODE = 44
+const KEYCHAIN_WRITER_EXECUTABLE = 'orca-codex-lab-keychain-writer' as const
+const KEYCHAIN_WRITER_TIMEOUT_MS = 5_000
+const KEYCHAIN_WRITER_MAX_OUTPUT_BYTES = 256
+const KEYCHAIN_WRITER_INSTALL_SUCCESS = 'installed\n'
+const KEYCHAIN_WRITER_DELETE_SUCCESS = 'deleted\n'
 
-export type CodexLabSecurityCommandRequest = Readonly<{
-  program: typeof SECURITY_PROGRAM
-  args: readonly string[]
+export type CodexLabKeychainWriterInstallRequest = Readonly<{
+  program: string
+  args: readonly [operation: 'install', dispatchId: string, canonicalCodexExecutable: string]
+  input: string
 }>
 
-export type CodexLabSecurityCommandResult = Readonly<{
+export type CodexLabKeychainWriterDeleteRequest = Readonly<{
+  program: string
+  args: readonly [operation: 'delete', dispatchId: string]
+  input?: never
+}>
+
+export type CodexLabKeychainWriterRequest =
+  | CodexLabKeychainWriterInstallRequest
+  | CodexLabKeychainWriterDeleteRequest
+
+export type CodexLabKeychainWriterResult = Readonly<{
   code: number | null
   timedOut: boolean
   outputTruncated?: boolean
@@ -23,64 +35,90 @@ export type CodexLabSecurityCommandResult = Readonly<{
   stderr: string
 }>
 
-export type CodexLabSecurityCommandExecutor = (
-  request: CodexLabSecurityCommandRequest
-) => Promise<CodexLabSecurityCommandResult>
+export type CodexLabKeychainWriterExecutor = (
+  request: CodexLabKeychainWriterRequest
+) => Promise<CodexLabKeychainWriterResult>
 
 export type TargetAuthJsonObservation = 'absent' | 'indeterminate' | 'present'
 
-type StorageOperation = 'source_read' | 'target_delete' | 'target_read' | 'target_write'
+type StorageOperation = 'source_read' | 'target_delete' | 'target_write'
 type StorageRefusalReason =
   | 'credential_file_invalid'
   | 'credential_file_read_failed'
-  | 'keyring_command_failed'
+  | 'keyring_writer_failed'
 type Refuse = (operation: StorageOperation, reason: StorageRefusalReason) => Error
 
-export async function executeSecurityCommand(
-  request: CodexLabSecurityCommandRequest
-): Promise<CodexLabSecurityCommandResult> {
+export async function executeCodexLabKeychainWriter(
+  request: CodexLabKeychainWriterRequest
+): Promise<CodexLabKeychainWriterResult> {
   return runProcess({
     program: request.program,
     args: request.args,
-    env: { LANG: 'C', LC_ALL: 'C', PATH: '/usr/bin:/bin' },
-    timeoutMs: SECURITY_TIMEOUT_MS,
-    maxOutputBytes: SECURITY_MAX_OUTPUT_BYTES
+    ...('input' in request ? { input: request.input } : {}),
+    env: { LANG: 'C', LC_ALL: 'C' },
+    timeoutMs: KEYCHAIN_WRITER_TIMEOUT_MS,
+    maxOutputBytes: KEYCHAIN_WRITER_MAX_OUTPUT_BYTES
   })
 }
 
-export async function readKeyringCredential(
-  execute: CodexLabSecurityCommandExecutor,
-  locator: CodexAuthKeyringLocator,
-  operation: 'source_read' | 'target_read',
-  refuse: Refuse
-): Promise<string | null> {
-  const result = await runSecurityCommand(
-    execute,
-    operation,
-    ['find-generic-password', '-s', locator.service, '-a', locator.account, '-w'],
-    refuse
-  )
-  if (result.code === KEYRING_NOT_FOUND_EXIT_CODE && !result.timedOut && !result.outputTruncated) {
-    return null
-  }
-  assertSecuritySuccess(result, operation, refuse)
-  return stripCommandLineEnding(result.stdout)
+export function resolveCodexLabKeychainWriterPath(
+  execPath: string = process.execPath,
+  pathExists: (candidatePath: string) => boolean = existsSync
+): string | null {
+  const candidate = join(dirname(execPath), KEYCHAIN_WRITER_EXECUTABLE)
+  return isAbsolute(candidate) && pathExists(candidate) ? candidate : null
 }
 
-export async function deleteKeyringCredential(
-  execute: CodexLabSecurityCommandExecutor,
-  locator: CodexAuthKeyringLocator,
+/**
+ * Helper-only install boundary. Production currently refuses before reaching this function because
+ * the sealed launch plan does not carry device/inode executable identity.
+ */
+export async function installKeyringCredentialWithWriter(
+  execute: CodexLabKeychainWriterExecutor,
+  writerPath: string,
+  dispatchId: string,
+  canonicalCodexExecutable: string,
+  credential: string,
   refuse: Refuse
 ): Promise<void> {
-  const result = await runSecurityCommand(
+  if (
+    !isAbsolute(writerPath) ||
+    !isAbsolute(canonicalCodexExecutable) ||
+    Buffer.byteLength(credential, 'utf8') === 0 ||
+    Buffer.byteLength(credential, 'utf8') > MAX_CREDENTIAL_BYTES
+  ) {
+    throw refuse('target_write', 'keyring_writer_failed')
+  }
+  const result = await runWriter(
     execute,
-    'target_delete',
-    ['delete-generic-password', '-s', locator.service, '-a', locator.account],
+    {
+      program: writerPath,
+      args: ['install', dispatchId, canonicalCodexExecutable],
+      input: credential
+    },
+    'target_write',
     refuse
   )
-  if (result.code !== KEYRING_NOT_FOUND_EXIT_CODE || result.timedOut || result.outputTruncated) {
-    assertSecuritySuccess(result, 'target_delete', refuse)
+  assertWriterSuccess(result, KEYCHAIN_WRITER_INSTALL_SUCCESS, 'target_write', refuse)
+}
+
+/** Delete is never delegated to `/usr/bin/security`; only the fixed native helper may own it. */
+export async function deleteKeyringCredentialWithWriter(
+  execute: CodexLabKeychainWriterExecutor,
+  writerPath: string,
+  dispatchId: string,
+  refuse: Refuse
+): Promise<void> {
+  if (!isAbsolute(writerPath)) {
+    throw refuse('target_delete', 'keyring_writer_failed')
   }
+  const result = await runWriter(
+    execute,
+    { program: writerPath, args: ['delete', dispatchId] },
+    'target_delete',
+    refuse
+  )
+  assertWriterSuccess(result, KEYCHAIN_WRITER_DELETE_SUCCESS, 'target_delete', refuse)
 }
 
 export async function observeTargetAuthJsonPath(
@@ -127,34 +165,34 @@ export async function readCredentialFileSecurely(
   }
 }
 
-async function runSecurityCommand(
-  execute: CodexLabSecurityCommandExecutor,
-  operation: StorageOperation,
-  args: readonly string[],
+async function runWriter(
+  execute: CodexLabKeychainWriterExecutor,
+  request: CodexLabKeychainWriterRequest,
+  operation: 'target_delete' | 'target_write',
   refuse: Refuse
-): Promise<CodexLabSecurityCommandResult> {
+): Promise<CodexLabKeychainWriterResult> {
   try {
-    return await execute({ program: SECURITY_PROGRAM, args })
+    return await execute(request)
   } catch {
-    throw refuse(operation, 'keyring_command_failed')
+    throw refuse(operation, 'keyring_writer_failed')
   }
 }
 
-function assertSecuritySuccess(
-  result: CodexLabSecurityCommandResult,
-  operation: StorageOperation,
+function assertWriterSuccess(
+  result: CodexLabKeychainWriterResult,
+  expectedStdout: string,
+  operation: 'target_delete' | 'target_write',
   refuse: Refuse
 ): void {
-  if (result.code !== 0 || result.timedOut || result.outputTruncated) {
-    throw refuse(operation, 'keyring_command_failed')
+  if (
+    result.code !== 0 ||
+    result.timedOut ||
+    result.outputTruncated ||
+    result.stdout !== expectedStdout ||
+    result.stderr !== ''
+  ) {
+    throw refuse(operation, 'keyring_writer_failed')
   }
-}
-
-function stripCommandLineEnding(value: string): string {
-  if (value.endsWith('\r\n')) {
-    return value.slice(0, -2)
-  }
-  return value.endsWith('\n') ? value.slice(0, -1) : value
 }
 
 function isStorageRefusal(error: unknown): error is Error {

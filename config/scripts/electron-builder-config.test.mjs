@@ -208,6 +208,20 @@ describe('electron-builder config', () => {
     )
   })
 
+  it('ships the signed Codex lab Keychain writer beside the macOS executable', () => {
+    expect(electronBuilderConfig.mac.extraFiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from: 'native/codex-lab-keychain-writer-macos/.build/release/orca-codex-lab-keychain-writer',
+          to: 'MacOS/orca-codex-lab-keychain-writer'
+        })
+      ])
+    )
+    expect(electronBuilderConfig.mac.extraResources).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ to: 'orca-codex-lab-keychain-writer' })])
+    )
+  })
+
   it('unpacks the compiled CommonJS boundary with CLI runtime files', () => {
     expect(electronBuilderConfig.asarUnpack).toEqual(
       expect.arrayContaining([
