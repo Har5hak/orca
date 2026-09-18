@@ -1,4 +1,4 @@
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { FakeCodexLabHost, sealedHostPlan } from './codex-lab-host-fake.test-support'
 import {
@@ -48,6 +48,8 @@ describe('Codex laboratory runtime layout core', () => {
     expect(host.effectiveProbeRequests).toEqual([])
     expect(host.spawnRequests).toEqual([])
     expect(host.runtimeProbeRequests).toEqual([])
+    expect([...host.fileContents.keys()]).toEqual([host.configPath()])
+    expect(host.fileContents.has(join(plan.runtimePaths.codexHome, 'auth.json'))).toBe(false)
   })
 
   it('rejects a relocated home before any host filesystem access', async () => {

@@ -65,7 +65,7 @@ const RECEIPT = recordShape(
   {
     schemaVersion: N,
     ...strings(
-      'dispatchId profile adapter platform worktreeIdentity worktreePath codexExecutablePath codexExecutableSha256 keyringBackend loginMethod subscriptionStatus gatewaySocketPathSha256 gatewayAccessSha256 configSha256 argvSha256'
+      'dispatchId profile adapter platform worktreeIdentity worktreePath codexExecutablePath codexExecutableSha256 loginMethod subscriptionStatus gatewaySocketPathSha256 gatewayAccessSha256 configSha256 argvSha256'
     )
   },
   true

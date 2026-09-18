@@ -57,8 +57,6 @@ export function sealedHostPlan(): SealedCodexLabLaunchPlan {
       observedSha256: SHA256_A
     },
     authentication: {
-      keyringAvailable: true,
-      keyringBackend: 'macos-keychain',
       loginMethod: 'chatgpt',
       expectedWorkspaceId: WORKSPACE_ID,
       observedWorkspaceId: WORKSPACE_ID,

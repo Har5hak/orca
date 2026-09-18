@@ -137,7 +137,6 @@ export function assertSealedCodexLabLaunchPlan(plan: SealedCodexLabLaunchPlan): 
     worktreePath: plan.cwd,
     codexExecutablePath: plan.executable,
     codexExecutableSha256: plan.codexExecutableSha256,
-    keyringBackend: 'macos-keychain',
     loginMethod: 'chatgpt',
     subscriptionStatus: 'active-workspace',
     gatewaySocketPathSha256: sha256(plan.gatewaySocketPath),
@@ -229,9 +228,6 @@ function validateBinary(facts: CodexLabLaunchFacts): void {
 
 function validateAuthentication(facts: CodexLabLaunchFacts): void {
   const authentication = facts.authentication
-  if (!authentication.keyringAvailable || authentication.keyringBackend !== 'macos-keychain') {
-    refuse('keyring_unavailable', 'authentication.keyringAvailable')
-  }
   if (authentication.loginMethod !== 'chatgpt') {
     refuse('login_method_unsupported', 'authentication.loginMethod')
   }
@@ -284,7 +280,6 @@ function buildReceiptInputs(
     worktreePath: facts.worktree.expectedPath,
     codexExecutablePath: facts.binary.path,
     codexExecutableSha256: facts.binary.observedSha256,
-    keyringBackend: 'macos-keychain',
     loginMethod: 'chatgpt',
     subscriptionStatus: 'active-workspace',
     gatewaySocketPathSha256: sha256(facts.gateway.socketPath),

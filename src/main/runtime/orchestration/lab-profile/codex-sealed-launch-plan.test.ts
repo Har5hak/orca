@@ -41,8 +41,6 @@ function facts(): CodexLabLaunchFacts {
       observedSha256: SHA256_A
     },
     authentication: {
-      keyringAvailable: true,
-      keyringBackend: 'macos-keychain',
       loginMethod: 'chatgpt',
       expectedWorkspaceId: '018f47a2-9d72-7cc1-b046-7a2868411f42',
       observedWorkspaceId: '018f47a2-9d72-7cc1-b046-7a2868411f42',
@@ -58,7 +56,7 @@ function facts(): CodexLabLaunchFacts {
 }
 
 describe('sealed Codex laboratory launch plan', () => {
-  it('builds a literal, isolated macOS launch from admitted and observed facts', () => {
+  it('builds a literal, isolated macOS launch without target Keychain observations', () => {
     const plan = buildSealedCodexLabLaunchPlan(facts())
 
     expect(plan.executable).toBe('/Applications/ChatGPT.app/Contents/Resources/codex')
@@ -154,7 +152,6 @@ describe('sealed Codex laboratory launch plan', () => {
       adapter: 'codex-workspace-chatgpt-v1',
       platform: 'darwin',
       codexExecutableSha256: SHA256_A,
-      keyringBackend: 'macos-keychain',
       loginMethod: 'chatgpt',
       subscriptionStatus: 'active-workspace'
     })
@@ -162,6 +159,7 @@ describe('sealed Codex laboratory launch plan', () => {
     expect(first.receiptInputs.gatewayAccessSha256).toMatch(/^[a-f0-9]{64}$/)
     expect(first.receiptInputs.configSha256).toMatch(/^[a-f0-9]{64}$/)
     expect(first.receiptInputs.argvSha256).toMatch(/^[a-f0-9]{64}$/)
+    expect(first.receiptInputs).not.toHaveProperty('keyringBackend')
     expect(JSON.stringify(first.receiptInputs)).not.toContain(
       '018f47a2-9d72-7cc1-b046-7a2868411f42'
     )
@@ -223,10 +221,6 @@ describe('sealed Codex laboratory launch plan', () => {
     ['relative binary', { binary: { ...facts().binary, path: 'bin/codex' } }],
     ['unpinned binary', { binary: { ...facts().binary, observedSha256: 'b'.repeat(64) } }],
     ['invalid gateway credential', { gateway: { ...facts().gateway, credential: 'guessable' } }],
-    [
-      'unavailable keyring',
-      { authentication: { ...facts().authentication, keyringAvailable: false } }
-    ],
     ['API login', { authentication: { ...facts().authentication, loginMethod: 'api' } }],
     [
       'ambiguous subscription',
@@ -356,6 +350,23 @@ describe('sealed Codex laboratory launch plan', () => {
     ).toThrowError(
       expect.objectContaining({
         data: expect.objectContaining({ reason: 'launch_plan_policy_broadened' })
+      })
+    )
+  })
+
+  it('rejects a legacy target-Keychain receipt field as a broadened launch plan', () => {
+    const plan = buildSealedCodexLabLaunchPlan(facts())
+    const legacyReceiptInputs = {
+      ...plan.receiptInputs,
+      keyringBackend: 'macos-keychain' as const
+    }
+
+    expect(() =>
+      assertSealedCodexLabLaunchPlan({ ...plan, receiptInputs: legacyReceiptInputs })
+    ).toThrowError(
+      expect.objectContaining({
+        code: CODEX_LAB_LAUNCH_REFUSAL_CODE,
+        data: { reason: 'launch_plan_policy_broadened', field: 'receiptInputs' }
       })
     )
   })

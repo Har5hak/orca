@@ -139,8 +139,6 @@ export function testCodexLabStructuredLaunchBinding(): CodexLabStructuredLaunchB
       observedSha256: 'a'.repeat(64)
     },
     authentication: {
-      keyringAvailable: true,
-      keyringBackend: 'macos-keychain',
       loginMethod: 'chatgpt',
       expectedWorkspaceId: '018f47a2-9d72-7cc1-b046-7a2868411f42',
       observedWorkspaceId: '018f47a2-9d72-7cc1-b046-7a2868411f42',

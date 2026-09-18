@@ -13,7 +13,6 @@ export type CodexLabLaunchRefusalReason =
   | 'dispatch_invalid'
   | 'forbidden_ambient_env'
   | 'gateway_invalid'
-  | 'keyring_unavailable'
   | 'launch_plan_policy_broadened'
   | 'login_method_unsupported'
   | 'platform_unsupported'
@@ -67,8 +66,6 @@ export type CodexLabLaunchFacts = Readonly<{
     observedSha256: string
   }>
   authentication: Readonly<{
-    keyringAvailable: boolean
-    keyringBackend: string
     loginMethod: string
     expectedWorkspaceId: string
     observedWorkspaceId: string
@@ -96,7 +93,6 @@ export type CodexLabReceiptInputs = Readonly<{
   worktreePath: string
   codexExecutablePath: string
   codexExecutableSha256: string
-  keyringBackend: 'macos-keychain'
   loginMethod: 'chatgpt'
   subscriptionStatus: 'active-workspace'
   gatewaySocketPathSha256: string
