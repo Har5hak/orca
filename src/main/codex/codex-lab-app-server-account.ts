@@ -15,6 +15,10 @@ const CODEX_LAB_WORKSPACE_PLAN_TYPES = new Set([
   'edu_pro'
 ])
 
+export function isCodexLabWorkspacePlanType(value: unknown): value is string {
+  return typeof value === 'string' && CODEX_LAB_WORKSPACE_PLAN_TYPES.has(value)
+}
+
 export function validateCodexLabAccount(
   value: unknown,
   expected: CodexLabAppServerAttestationExpected
@@ -32,7 +36,7 @@ export function validateCodexLabAccount(
   if (response.requiresOpenaiAuth !== true) {
     return invalid('account/read.requiresOpenaiAuth')
   }
-  if (!CODEX_LAB_WORKSPACE_PLAN_TYPES.has(String(account.planType))) {
+  if (!isCodexLabWorkspacePlanType(account.planType)) {
     return invalid('account/read.account.planType')
   }
   if (!isAbsent(account.email) && typeof account.email !== 'string') {
