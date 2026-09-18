@@ -154,7 +154,7 @@ function stubCustodyTransitions(db: OrchestrationDb, events: string[]): void {
 
 function preparedAuthority(
   binding: CodexLabStructuredLaunchBinding,
-  rollbackIfUnclaimed = vi.fn(async () => true)
+  rollbackIfUnclaimed: () => Promise<boolean> = vi.fn(async () => true)
 ) {
   return {
     labLaunchBinding: binding,
