@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY } from '../../../../orchestration/lab-profile/codex-lab-launch-contract'
 import {
   CODEX_WORKSPACE_CHATGPT_ADAPTER_ID,
   LAB_READONLY_SUPERVISED_PROFILE_ID,
@@ -28,7 +29,7 @@ describe('worker-start lab profile registry', () => {
         profile: 'lab-readonly-supervised-v1',
         adapter: 'codex-workspace-chatgpt-v1',
         agent: 'codex',
-        maxConcurrency: 1
+        maxConcurrency: LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY
       }
     ])
     expect(Object.isFrozen(registry)).toBe(true)
@@ -56,7 +57,7 @@ describe('worker-start lab profile admission', () => {
       profile: 'lab-readonly-supervised-v1',
       adapter: 'codex-workspace-chatgpt-v1',
       agent: 'codex',
-      maxConcurrency: 1,
+      maxConcurrency: LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY,
       worktreeIdentity: 'wt2:local:disposable-instance',
       worktreeInstanceId: 'disposable-instance',
       expectedWorktreePath: '/private/tmp/orca-lab/disposable-worktree'

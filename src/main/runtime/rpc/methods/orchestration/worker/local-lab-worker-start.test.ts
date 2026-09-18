@@ -5,6 +5,7 @@ import type { Worktree } from '../../../../../../shared/worktree/types'
 import { OrcaRuntimeService } from '../../../../orca-runtime'
 import { OrchestrationDb } from '../../../../orchestration/db'
 import { testCodexLabStructuredLaunchBinding } from '../../../../orchestration/lab-profile/codex-lab-structured-launch-binding-test-support'
+import { LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY } from '../../../../orchestration/lab-profile/codex-lab-launch-contract'
 import {
   startLocalLabWorker,
   type LocalLabWorkerStartDeps,
@@ -26,7 +27,7 @@ const ADMISSION: LabWorkerStartAdmission = Object.freeze({
   profile: PROFILE_ID,
   adapter: 'codex-workspace-chatgpt-v1',
   agent: 'codex',
-  maxConcurrency: 1,
+  maxConcurrency: LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY,
   worktreeIdentity: WORKTREE_IDENTITY,
   worktreeInstanceId: 'disposable-structured',
   expectedWorktreePath: WORKTREE_PATH
@@ -209,7 +210,11 @@ describe('local lab worker start', () => {
       .get()
     expect(worker).toMatchObject({ state: 'starting', stage: 'lab_runtime_planned' })
     expect(JSON.parse(String(worker?.start_options))).toMatchObject({
-      profile: { id: PROFILE_ID, adapter: ADMISSION.adapter, maxConcurrency: 1 },
+      profile: {
+        id: PROFILE_ID,
+        adapter: ADMISSION.adapter,
+        maxConcurrency: LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY
+      },
       worktree: {
         id: WORKTREE.id,
         selector: `identity:${WORKTREE_IDENTITY}`,
@@ -493,10 +498,10 @@ describe('local lab worker start', () => {
     expect(countRows(harness.db, 'worker_dispatches')).toEqual({ count: 0 })
   })
 
-  it('rolls back a competing lease before its inline Task or continuation', async () => {
+  it('rolls back a third competing lease before its inline Task or continuation', async () => {
     const harness = createHarness()
-    const winnerDeps = createDeps()
-    await start({ harness, spec: 'winning lab task', deps: winnerDeps })
+    await start({ harness, spec: 'first winning lab task', deps: createDeps() })
+    await start({ harness, spec: 'second winning lab task', deps: createDeps() })
 
     const loserContinuation = vi.fn(async (_prepared: PreparedLocalLabWorkerStart) => ({
       state: 'impossible'
@@ -513,6 +518,8 @@ describe('local lab worker start', () => {
     expect(
       harness.db.db.prepare("SELECT id FROM tasks WHERE spec = 'losing lab task'").get()
     ).toBeUndefined()
-    expect(countRows(harness.db, 'worker_dispatches')).toEqual({ count: 1 })
+    expect(countRows(harness.db, 'worker_dispatches')).toEqual({
+      count: LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY
+    })
   })
 })

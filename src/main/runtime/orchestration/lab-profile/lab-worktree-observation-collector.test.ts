@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY } from './codex-lab-launch-contract'
 import {
   LAB_DISPOSABLE_WORKTREE_ROOT,
   collectVerifiedLabWorktreeObservation,
@@ -19,7 +20,7 @@ const ADMISSION = Object.freeze({
   profile: 'lab-readonly-supervised-v1',
   adapter: 'codex-workspace-chatgpt-v1',
   agent: 'codex',
-  maxConcurrency: 1,
+  maxConcurrency: LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY,
   worktreeIdentity: IDENTITY,
   worktreeInstanceId: 'disposable-instance',
   expectedWorktreePath: WORKTREE_PATH

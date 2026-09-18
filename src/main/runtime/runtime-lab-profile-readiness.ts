@@ -3,7 +3,10 @@ import {
   isValidCodexLabHostPrerequisiteReceipt,
   type CodexLabHostPrerequisiteReceipt
 } from './orchestration/lab-profile/codex-lab-host-prerequisites'
-import { LAB_READONLY_SUPERVISED_PROFILE_ID } from './orchestration/lab-profile/codex-lab-launch-contract'
+import {
+  LAB_READONLY_SUPERVISED_PROFILE_ID,
+  LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY
+} from './orchestration/lab-profile/codex-lab-launch-contract'
 import { findWorkerProfileLeaseBlocker } from './orchestration/db/worker-dispatch/worker-dispatch-profile-lease'
 
 export type RuntimeLabProfileReadiness =
@@ -56,7 +59,11 @@ export class RuntimeLabProfileReadinessGate {
       return ORCHESTRATION_STATE_UNAVAILABLE
     }
     try {
-      const blocker = findWorkerProfileLeaseBlocker(db.db, LAB_READONLY_SUPERVISED_PROFILE_ID)
+      const blocker = findWorkerProfileLeaseBlocker(
+        db.db,
+        LAB_READONLY_SUPERVISED_PROFILE_ID,
+        LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY
+      )
       if (!blocker) {
         return READY
       }
