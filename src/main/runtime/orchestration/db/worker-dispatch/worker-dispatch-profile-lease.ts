@@ -9,13 +9,19 @@ export type WorkerProfileLeaseBlocker = {
 
 export function findWorkerProfileLeaseBlocker(
   db: Database.Database,
-  profileId: string
+  profileId: string,
+  maxConcurrency = 1
 ): WorkerProfileLeaseBlocker | undefined {
+  if (!isValidCapacity(maxConcurrency)) {
+    throw new Error('Worker profile lease capacity must be a positive safe integer.')
+  }
   const settledPlaceholders = WORKER_SETTLED_STATES.map(() => '?').join(', ')
-  const row = db
+  const rows = db
     .prepare(
       `SELECT worker.dispatch_id,
               worker.state,
+              json_extract(worker.start_options, '$.profile.maxConcurrency') AS max_concurrency,
+              json_type(worker.start_options, '$.profile.maxConcurrency') AS max_concurrency_type,
               worker.residual_resources,
               EXISTS (
                 SELECT 1
@@ -46,27 +52,42 @@ export function findWorkerProfileLeaseBlocker(
                )
            )
          )
-       ORDER BY worker.created_at, worker.dispatch_id
-       LIMIT 1`
+       ORDER BY worker.created_at, worker.dispatch_id`
     )
-    .get(profileId, ...WORKER_SETTLED_STATES)
-  if (!row) {
+    .all(profileId, ...WORKER_SETTLED_STATES)
+  if (rows.length === 0) {
     return undefined
   }
-  const dispatchId = row.dispatch_id
-  const state = row.state
-  if (typeof dispatchId !== 'string' || typeof state !== 'string') {
-    throw new Error('Worker profile lease query returned an invalid row.')
+  const occupied: WorkerProfileLeaseBlocker[] = []
+  for (const row of rows) {
+    const dispatchId = row.dispatch_id
+    const state = row.state
+    if (typeof dispatchId !== 'string' || typeof state !== 'string') {
+      throw new Error('Worker profile lease query returned an invalid row.')
+    }
+    const cleanupPending =
+      state === 'start_unknown' ||
+      state === 'stop_unknown' ||
+      WORKER_SETTLED_STATES.some((settledState) => settledState === state) ||
+      row.terminal_cleanup_pending === 1
+    if (cleanupPending) {
+      return { dispatchId, reason: 'cleanup_pending' }
+    }
+    const storedCapacity = row.max_concurrency_type === null ? 1 : row.max_concurrency
+    if (
+      (row.max_concurrency_type !== null && row.max_concurrency_type !== 'integer') ||
+      !isValidCapacity(storedCapacity) ||
+      storedCapacity !== maxConcurrency
+    ) {
+      throw new OrchestrationError(
+        'lab_profile_refused',
+        `Execution profile ${profileId} has a conflicting active capacity receipt.`,
+        { profileId, reason: 'profile_contract_invalid' }
+      )
+    }
+    occupied.push({ dispatchId, reason: 'occupied' })
   }
-  const cleanupPending =
-    state === 'start_unknown' ||
-    state === 'stop_unknown' ||
-    WORKER_SETTLED_STATES.some((settledState) => settledState === state) ||
-    row.terminal_cleanup_pending === 1
-  return {
-    dispatchId,
-    reason: cleanupPending ? 'cleanup_pending' : 'occupied'
-  }
+  return occupied.length >= maxConcurrency ? occupied[0] : undefined
 }
 
 export function reserveStartingWorkerProfileLease(args: {
@@ -82,14 +103,20 @@ export function reserveStartingWorkerProfileLease(args: {
       : undefined
   const observedProfileId =
     typeof profile === 'object' && profile !== null ? Reflect.get(profile, 'id') : undefined
-  if (observedProfileId !== args.profileId) {
+  const observedMaxConcurrency =
+    typeof profile === 'object' && profile !== null
+      ? Reflect.has(profile, 'maxConcurrency')
+        ? Reflect.get(profile, 'maxConcurrency')
+        : 1
+      : undefined
+  if (observedProfileId !== args.profileId || !isValidCapacity(observedMaxConcurrency)) {
     throw new OrchestrationError(
       'lab_profile_refused',
       'The reserved execution profile must match the host-authored start receipt.',
       { profileId: args.profileId, reason: 'profile_contract_invalid' }
     )
   }
-  const blocker = findWorkerProfileLeaseBlocker(args.db, args.profileId)
+  const blocker = findWorkerProfileLeaseBlocker(args.db, args.profileId, observedMaxConcurrency)
   if (blocker) {
     throw new OrchestrationError(
       'lab_profile_refused',
@@ -113,4 +140,8 @@ export function reserveStartingWorkerProfileLease(args: {
        ) VALUES (?, ?, 'starting', 'accepted', ?)`
     )
     .run(args.dispatchId, args.runtimeEpoch, JSON.stringify(args.startOptions))
+}
+
+function isValidCapacity(value: unknown): value is number {
+  return Number.isSafeInteger(value) && typeof value === 'number' && value > 0
 }

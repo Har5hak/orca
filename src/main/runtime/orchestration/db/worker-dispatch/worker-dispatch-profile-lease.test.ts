@@ -3,8 +3,8 @@ import { OrchestrationDb } from '../../db'
 
 const PROFILE_ID = 'lab-readonly-supervised-v1'
 
-function profileStartOptions(): unknown {
-  return { profile: { id: PROFILE_ID } }
+function profileStartOptions(maxConcurrency: unknown = 1): unknown {
+  return { profile: { id: PROFILE_ID, maxConcurrency } }
 }
 
 describe('worker execution-profile lease', () => {
@@ -95,6 +95,209 @@ describe('worker execution-profile lease', () => {
         .get(PROFILE_ID)
     ).toEqual({ count: 1 })
   })
+
+  it('atomically admits two capacity-two starts and refuses the third without residue', () => {
+    const d = createDb()
+    const start = (spec: string) =>
+      d.createStartingWorkerDispatch({
+        creator: { kind: 'system' },
+        maxDepth: Number.MAX_SAFE_INTEGER,
+        taskSpec: spec,
+        taskRunId: 'run_legacy_local',
+        startOptions: profileStartOptions(2),
+        profileLease: { profileId: PROFILE_ID }
+      })
+
+    const first = start('capacity two first')
+    const second = start('capacity two second')
+    expect(first.dispatch.id).not.toBe(second.dispatch.id)
+    expect(
+      d.db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM worker_dispatches WHERE json_extract(start_options, '$.profile.id') = ?"
+        )
+        .get(PROFILE_ID)
+    ).toEqual({ count: 2 })
+
+    expect(() => start('capacity two refused third')).toThrowError(
+      expect.objectContaining({
+        code: 'lab_profile_refused',
+        data: expect.objectContaining({
+          reason: 'profile_capacity_exhausted',
+          blocker: {
+            dispatchId: expect.stringMatching(/^ctx_/),
+            reason: 'occupied'
+          }
+        })
+      })
+    )
+    expect(
+      d.db.prepare("SELECT id FROM tasks WHERE spec = 'capacity two refused third'").get()
+    ).toBeUndefined()
+    expect(
+      d.db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM worker_dispatches WHERE json_extract(start_options, '$.profile.id') = ?"
+        )
+        .get(PROFILE_ID)
+    ).toEqual({ count: 2 })
+  })
+
+  it('fails closed on cleanup pending even when bounded capacity has a free slot', () => {
+    const d = createDb()
+    const first = d.createStartingWorkerDispatch({
+      creator: { kind: 'system' },
+      maxDepth: Number.MAX_SAFE_INTEGER,
+      taskSpec: 'capacity two cleanup owner',
+      taskRunId: 'run_legacy_local',
+      startOptions: profileStartOptions(2),
+      profileLease: { profileId: PROFILE_ID }
+    })
+    d.recordWorkerStage({
+      dispatchId: first.dispatch.id,
+      stage: 'profile_terminal_created',
+      effects: [{ kind: 'terminal', action: 'created', id: 'profile-terminal' }],
+      residualResources: [{ kind: 'terminal', id: 'profile-terminal' }]
+    })
+    d.failWorkerStart(first.dispatch.id, 'profile_terminal_created', 'injected failure')
+
+    expect(() =>
+      d.createStartingWorkerDispatch({
+        creator: { kind: 'system' },
+        maxDepth: Number.MAX_SAFE_INTEGER,
+        taskSpec: 'must not consume free capacity during cleanup',
+        taskRunId: 'run_legacy_local',
+        startOptions: profileStartOptions(2),
+        profileLease: { profileId: PROFILE_ID }
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'lab_profile_refused',
+        data: expect.objectContaining({
+          reason: 'profile_cleanup_pending',
+          blocker: { dispatchId: first.dispatch.id, reason: 'cleanup_pending' }
+        })
+      })
+    )
+  })
+
+  it('refuses a capacity change while the same profile has an active lease', () => {
+    const d = createDb()
+    d.createStartingWorkerDispatch({
+      creator: { kind: 'system' },
+      maxDepth: Number.MAX_SAFE_INTEGER,
+      taskSpec: 'capacity one owner',
+      taskRunId: 'run_legacy_local',
+      startOptions: profileStartOptions(1),
+      profileLease: { profileId: PROFILE_ID }
+    })
+
+    expect(() =>
+      d.createStartingWorkerDispatch({
+        creator: { kind: 'system' },
+        maxDepth: Number.MAX_SAFE_INTEGER,
+        taskSpec: 'capacity broadening attempt',
+        taskRunId: 'run_legacy_local',
+        startOptions: profileStartOptions(2),
+        profileLease: { profileId: PROFILE_ID }
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'lab_profile_refused',
+        data: expect.objectContaining({ reason: 'profile_contract_invalid' })
+      })
+    )
+    expect(
+      d.db.prepare("SELECT id FROM tasks WHERE spec = 'capacity broadening attempt'").get()
+    ).toBeUndefined()
+  })
+
+  it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, null, '2', true])(
+    'rejects invalid host-authored capacity %s before lifecycle rows are written',
+    (maxConcurrency) => {
+      const d = createDb()
+      expect(() =>
+        d.createStartingWorkerDispatch({
+          creator: { kind: 'system' },
+          maxDepth: Number.MAX_SAFE_INTEGER,
+          taskSpec: 'invalid capacity task',
+          taskRunId: 'run_legacy_local',
+          startOptions: profileStartOptions(maxConcurrency),
+          profileLease: { profileId: PROFILE_ID }
+        })
+      ).toThrowError(
+        expect.objectContaining({
+          code: 'lab_profile_refused',
+          data: expect.objectContaining({ reason: 'profile_contract_invalid' })
+        })
+      )
+      expect(d.db.prepare('SELECT COUNT(*) AS count FROM worker_dispatches').get()).toEqual({
+        count: 0
+      })
+      expect(d.db.prepare('SELECT COUNT(*) AS count FROM tasks').get()).toEqual({ count: 0 })
+    }
+  )
+
+  it('treats only a genuinely missing stored capacity as the legacy capacity one contract', () => {
+    const d = createDb()
+    d.createStartingWorkerDispatch({
+      creator: { kind: 'system' },
+      maxDepth: Number.MAX_SAFE_INTEGER,
+      taskSpec: 'legacy capacity owner',
+      taskRunId: 'run_legacy_local',
+      startOptions: { profile: { id: PROFILE_ID } },
+      profileLease: { profileId: PROFILE_ID }
+    })
+
+    expect(() =>
+      d.createStartingWorkerDispatch({
+        creator: { kind: 'system' },
+        maxDepth: Number.MAX_SAFE_INTEGER,
+        taskSpec: 'legacy capacity competitor',
+        taskRunId: 'run_legacy_local',
+        startOptions: profileStartOptions(1),
+        profileLease: { profileId: PROFILE_ID }
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'lab_profile_refused',
+        data: expect.objectContaining({ reason: 'profile_capacity_exhausted' })
+      })
+    )
+  })
+
+  it.each([null, '2', true])(
+    'rejects invalid stored capacity %s instead of treating it as a legacy omission',
+    (maxConcurrency) => {
+      const d = createDb()
+      d.db
+        .prepare(
+          `INSERT INTO worker_dispatches (
+             dispatch_id, runtime_epoch, state, stage, start_options
+           ) VALUES (?, NULL, 'starting', 'accepted', ?)`
+        )
+        .run(
+          `ctx_invalid_stored_${String(maxConcurrency)}`,
+          JSON.stringify({ profile: { id: PROFILE_ID, maxConcurrency } })
+        )
+
+      expect(() =>
+        d.createStartingWorkerDispatch({
+          creator: { kind: 'system' },
+          maxDepth: Number.MAX_SAFE_INTEGER,
+          taskSpec: 'stored invalid capacity competitor',
+          taskRunId: 'run_legacy_local',
+          startOptions: profileStartOptions(1),
+          profileLease: { profileId: PROFILE_ID }
+        })
+      ).toThrowError(
+        expect.objectContaining({
+          code: 'lab_profile_refused',
+          data: expect.objectContaining({ reason: 'profile_contract_invalid' })
+        })
+      )
+    }
+  )
 
   it('keeps failed profile cleanup fenced until residual resources are reconciled', () => {
     const d = createDb()
