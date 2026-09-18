@@ -30,6 +30,8 @@ const RESTRICTED_TASK_PATTERNS = [
   /\bdcap_[A-Za-z0-9_-]+\b/u,
   /\blgw1_[A-Za-z0-9_-]+\b/u,
   /\bterm_[A-Za-z0-9_-]+\b/u,
+  /\bstructworker_[A-Za-z0-9_-]+\b/u,
+  /\b(?:run|task|dispatch|ctx)_[A-Za-z0-9_-]+\b/u,
   /\b(?:orca|orca-dev|orca-ide)\s+orchestration\b/iu,
   /\bORCA_(?:TERMINAL_HANDLE|CLI_COMMAND|LAB_GATEWAY_(?:SOCKET|CREDENTIAL))\b/u,
   /\b(?:authToken|runtimeToken|sharedToken|dispatchCapability|orchestrationCapability)\b/u,
@@ -38,7 +40,7 @@ const RESTRICTED_TASK_PATTERNS = [
   /\bescalation\b/iu,
   /--operation\b/iu,
   /--worktree(?:=|\s+)(?:current|active)\b/iu,
-  /\b(?:run-create|task-create|worker-start|worker-stop|handoff)\b/iu,
+  /\b(?:run-create|task-create|worker-(?:start|stop|abandon|retry|retain|release)|handoff)\b/iu,
   /\borca_worker_[a-z_]+\b/iu
 ] as const
 
