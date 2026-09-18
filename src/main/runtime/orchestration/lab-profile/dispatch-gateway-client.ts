@@ -173,6 +173,9 @@ function assertClientRequest(args: {
     args.expectedReceipt.transport !== 'unix' ||
     args.expectedReceipt.socketMode !== '0600' ||
     args.expectedReceipt.endpointSha256 !== sha256(args.endpoint) ||
+    !isEndpointIdentity(args.expectedReceipt.endpointIdentity) ||
+    args.expectedReceipt.endpointIdentitySha256 !==
+      endpointIdentitySha256(args.expectedReceipt.endpointIdentity) ||
     JSON.stringify(args.expectedReceipt.allowedOperations) !==
       JSON.stringify(LAB_GATEWAY_ALLOWED_OPERATIONS) ||
     args.expectedReceipt.receiptSha256 !== receiptSha256(args.expectedReceipt) ||
@@ -242,12 +245,53 @@ function sameReceipt(
     candidate.transport === expected.transport &&
     candidate.socketMode === expected.socketMode &&
     candidate.endpointSha256 === expected.endpointSha256 &&
+    candidate.endpointIdentitySha256 === expected.endpointIdentitySha256 &&
+    isRecord(candidate.endpointIdentity) &&
+    sameEndpointIdentity(candidate.endpointIdentity, expected.endpointIdentity) &&
     candidate.processIncarnationSha256 === expected.processIncarnationSha256 &&
     candidate.lifecycleSource === expected.lifecycleSource &&
     candidate.dcapCustody === expected.dcapCustody &&
     candidate.receiptSha256 === expected.receiptSha256 &&
     Array.isArray(candidate.allowedOperations) &&
     JSON.stringify(candidate.allowedOperations) === JSON.stringify(expected.allowedOperations)
+  )
+}
+
+function isEndpointIdentity(value: unknown): value is LabGatewayServerReceipt['endpointIdentity'] {
+  return (
+    isRecord(value) &&
+    Object.keys(value).length === 5 &&
+    typeof value.device === 'string' &&
+    typeof value.inode === 'string' &&
+    typeof value.uid === 'string' &&
+    value.mode === '0600' &&
+    value.type === 'socket'
+  )
+}
+
+function sameEndpointIdentity(
+  candidate: Readonly<Record<string, unknown>>,
+  expected: LabGatewayServerReceipt['endpointIdentity']
+): boolean {
+  return (
+    Object.keys(candidate).length === 5 &&
+    candidate.device === expected.device &&
+    candidate.inode === expected.inode &&
+    candidate.uid === expected.uid &&
+    candidate.mode === expected.mode &&
+    candidate.type === expected.type
+  )
+}
+
+function endpointIdentitySha256(identity: LabGatewayServerReceipt['endpointIdentity']): string {
+  return sha256(
+    JSON.stringify({
+      device: identity.device,
+      inode: identity.inode,
+      uid: identity.uid,
+      mode: identity.mode,
+      type: identity.type
+    })
   )
 }
 

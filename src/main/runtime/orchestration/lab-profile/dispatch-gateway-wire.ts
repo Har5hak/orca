@@ -4,6 +4,7 @@ import type {
   LabGatewayRequest
 } from './dispatch-gateway-policy'
 import { findCallerIdentityRefusal } from './dispatch-gateway-request-validation'
+import type { LabGatewayServerReceipt } from './dispatch-gateway-server-receipt'
 
 const REQUEST_FIELDS = new Set(['id', 'credential', 'operation', 'params'])
 const SERVER_CREDENTIAL_FIELDS = new Set([
@@ -21,6 +22,7 @@ export type LabGatewayWireRefusalReason =
   | 'dispatch_capability_invalid'
   | 'dispatch_invalid'
   | 'dispatch_settled'
+  | 'gateway_not_ready'
   | 'invalid_request'
   | 'lifecycle_binding_mismatch'
   | 'lifecycle_unavailable'
@@ -45,6 +47,28 @@ export type LabGatewayWireParseResult =
       reason: LabGatewayWireRefusalReason
       field?: string
     }>
+
+export type LabGatewayWireResponse = Readonly<{
+  id: string
+  ok: boolean
+  result?: unknown
+  error?: Readonly<{
+    code: 'lab_gateway_refused'
+    message: string
+    data: Readonly<{ reason: LabGatewayWireRefusalReason; field?: string }>
+  }>
+  receipt?: LabGatewayServerReceipt
+}>
+
+export function sameLabGatewayBinding(left: LabGatewayBinding, right: LabGatewayBinding): boolean {
+  return (
+    left.runId === right.runId &&
+    left.taskId === right.taskId &&
+    left.dispatchId === right.dispatchId &&
+    left.terminalHandle === right.terminalHandle &&
+    left.terminalPaneKey === right.terminalPaneKey
+  )
+}
 
 export function parseLabGatewayWireRequest(
   raw: string,

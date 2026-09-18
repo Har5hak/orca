@@ -8,6 +8,13 @@ const ENDPOINT = '/private/tmp/orca-lab/runtime/dispatches/dispatch-757/gateway.
 const CREDENTIAL = `lgw1_${'A'.repeat(43)}`
 
 function receipt(): LabGatewayServerReceipt {
+  const endpointIdentity = Object.freeze({
+    device: '1',
+    inode: '757',
+    uid: '501',
+    mode: '0600' as const,
+    type: 'socket' as const
+  })
   const stable = Object.freeze({
     schema: 'orca.lab-dispatch-gateway.v1' as const,
     policyId: 'policy_757',
@@ -15,6 +22,8 @@ function receipt(): LabGatewayServerReceipt {
     transport: 'unix' as const,
     socketMode: '0600' as const,
     endpointSha256: sha256(ENDPOINT),
+    endpointIdentity,
+    endpointIdentitySha256: sha256(JSON.stringify(endpointIdentity)),
     processIncarnationSha256: '1'.repeat(64),
     allowedOperations: Object.freeze([
       'worker.status',

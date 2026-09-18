@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { lstat, mkdtemp, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -72,6 +72,15 @@ afterEach(async () => {
 describe.skipIf(process.platform === 'win32')('per-Dispatch laboratory gateway server', () => {
   it('binds an actual mode-0600 Unix socket and invokes all six allowlisted operations', async () => {
     expect((await stat(endpoint)).mode & 0o777).toBe(0o600)
+    const endpointIdentity = await lstat(endpoint, { bigint: true })
+    expect(receipt.endpointIdentity).toEqual({
+      device: endpointIdentity.dev.toString(10),
+      inode: endpointIdentity.ino.toString(10),
+      uid: endpointIdentity.uid.toString(10),
+      mode: '0600',
+      type: 'socket'
+    })
+    expect(receipt.endpointIdentitySha256).toBe(sha256(JSON.stringify(receipt.endpointIdentity)))
     const requests = [
       request('worker.status'),
       request('worker.check', { wait: false }),
@@ -98,6 +107,34 @@ describe.skipIf(process.platform === 'win32')('per-Dispatch laboratory gateway s
         }
       })
     )
+  })
+
+  it('retains the exact socket identity when the gateway stops', async () => {
+    const before = await lstat(endpoint, { bigint: true })
+
+    await server?.stop()
+
+    const after = await lstat(endpoint, { bigint: true })
+    expect(after.isSocket()).toBe(true)
+    expect(after.dev).toBe(before.dev)
+    expect(after.ino).toBe(before.ino)
+    expect(after.uid).toBe(before.uid)
+    expect(after.mode & 0o7777n).toBe(0o600n)
+  })
+
+  it('does not delete a replacement inserted before gateway stop', async () => {
+    await unlink(endpoint)
+    await writeFile(endpoint, 'replacement', { mode: 0o600 })
+    const replacement = await lstat(endpoint, { bigint: true })
+
+    await expect(server?.stop()).rejects.toThrow('public endpoint identity was replaced')
+
+    const after = await lstat(endpoint, { bigint: true })
+    expect(after.dev).toBe(replacement.dev)
+    expect(after.ino).toBe(replacement.ino)
+    expect(await readFile(endpoint, 'utf8')).toBe('replacement')
+    await expect(server?.stop()).rejects.toThrow('public endpoint identity was replaced')
+    server = null
   })
 
   it('keeps the Dispatch capability server-side and omits both secrets from receipts and logs', async () => {
@@ -207,6 +244,12 @@ function activeLifecycle(): LabGatewayCanonicalLifecycle {
 function canonicalRefusalCases(): [string, LabGatewayCanonicalLifecycle | null, string][] {
   return [
     ['invalid', null, 'dispatch_invalid'],
+    [
+      'unknown authority',
+      { ...activeLifecycle(), authorityState: 'future-state' },
+      'dispatch_invalid'
+    ],
+    ['missing authority', { ...activeLifecycle(), authorityState: undefined }, 'dispatch_invalid'],
     ['settled', { ...activeLifecycle(), authorityState: 'settled' }, 'dispatch_settled'],
     [
       'process replacement',

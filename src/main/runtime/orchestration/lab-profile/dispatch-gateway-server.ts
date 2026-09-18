@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
+import type { LabUnixSocketLifecycleHooks } from '../../rpc/lab-unix-socket-lifecycle'
 import type { RpcMessageContext } from '../../rpc/transport'
 import { UnixSocketTransport } from '../../rpc/unix-socket-transport'
 import {
@@ -14,8 +14,17 @@ import {
 } from './dispatch-gateway-policy'
 import {
   parseLabGatewayWireRequest,
+  sameLabGatewayBinding,
+  type LabGatewayWireResponse,
   type LabGatewayWireRefusalReason
 } from './dispatch-gateway-wire'
+import { LabGatewayServerLifecycle } from './dispatch-gateway-server-lifecycle'
+import {
+  buildLabGatewayServerReceipt,
+  type LabGatewayServerReceipt
+} from './dispatch-gateway-server-receipt'
+
+export type { LabGatewayServerReceipt } from './dispatch-gateway-server-receipt'
 
 const DISPATCH_CAPABILITY_PATTERN = /^dcap_[A-Za-z0-9_-]{43}$/u
 
@@ -23,21 +32,7 @@ export type LabGatewayCanonicalLifecycle = Readonly<{
   binding: LabGatewayBinding
   processIncarnation: string
   dispatchCapabilitySha256: string
-  authorityState: 'active' | 'invalid' | 'revoked' | 'settled'
-}>
-
-export type LabGatewayServerReceipt = Readonly<{
-  schema: 'orca.lab-dispatch-gateway.v1'
-  policyId: string
-  dispatchId: string
-  transport: 'unix'
-  socketMode: '0600'
-  endpointSha256: string
-  processIncarnationSha256: string
-  allowedOperations: readonly LabGatewayOperation[]
-  lifecycleSource: 'injected-per-request'
-  dcapCustody: 'server-only'
-  receiptSha256: string
+  authorityState: unknown
 }>
 
 export type LabGatewayAuditEvent = Readonly<{
@@ -69,20 +64,30 @@ export type LabDispatchGatewayServerOptions = Readonly<{
   audit?: (event: LabGatewayAuditEvent) => void
 }>
 
+export type LabDispatchGatewayServerTestHooks = Readonly<{
+  socketLifecycle?: LabUnixSocketLifecycleHooks
+}>
+
 export class LabDispatchGatewayServer {
   private readonly transport: UnixSocketTransport
   private readonly options: LabDispatchGatewayServerOptions
+  private readonly lifecycle = new LabGatewayServerLifecycle<LabGatewayServerReceipt>()
   private policy: LabGatewayPolicy
-  private receipt: LabGatewayServerReceipt | null = null
 
-  constructor(options: LabDispatchGatewayServerOptions) {
+  constructor(
+    options: LabDispatchGatewayServerOptions,
+    testHooks: LabDispatchGatewayServerTestHooks = {}
+  ) {
     validateServerOptions(options)
     this.policy = Object.freeze({
       ...options.policy,
       binding: Object.freeze({ ...options.policy.binding })
     })
     this.options = Object.freeze({ ...options, policy: this.policy })
-    this.transport = new UnixSocketTransport({ endpoint: options.endpoint, kind: 'unix' })
+    this.transport = UnixSocketTransport.forLaboratoryGateway(
+      options.endpoint,
+      testHooks.socketLifecycle
+    )
     this.transport.onMessage((raw, reply, context) => {
       void this.handleMessage(raw, context)
         .then((response) => reply(JSON.stringify(response)))
@@ -90,37 +95,44 @@ export class LabDispatchGatewayServer {
     })
   }
 
-  async start(): Promise<LabGatewayServerReceipt> {
-    if (this.receipt) {
-      return this.receipt
-    }
-    if (existsSync(this.options.endpoint)) {
-      throw new Error('Laboratory gateway endpoint must not already exist')
-    }
-    await this.transport.start()
-    try {
-      const mode = (await stat(this.options.endpoint)).mode & 0o777
-      if (mode !== 0o600) {
-        throw new Error('Laboratory gateway socket mode is not 0600')
-      }
-      this.receipt = buildServerReceipt(this.options, this.policy)
-      return this.receipt
-    } catch (error) {
-      await this.transport.stop()
-      throw error
-    }
+  start(): Promise<LabGatewayServerReceipt> {
+    return this.lifecycle.start({
+      startTransport: async () => {
+        if (existsSync(this.options.endpoint)) {
+          throw new Error('Laboratory gateway endpoint must not already exist')
+        }
+        await this.transport.start()
+      },
+      buildReceipt: async () => {
+        const endpointAttestation = await this.transport.attestLaboratoryEndpoint()
+        return buildLabGatewayServerReceipt(
+          this.options.endpoint,
+          this.options.processIncarnation,
+          this.policy.policyId,
+          this.policy.binding.dispatchId,
+          endpointAttestation
+        )
+      },
+      stopTransport: async () => await this.transport.stop()
+    })
   }
 
-  async stop(): Promise<void> {
-    this.receipt = null
-    await this.transport.stop()
+  stop(): Promise<void> {
+    return this.lifecycle.stop(async () => await this.transport.stop())
   }
 
-  private async handleMessage(raw: string, context?: RpcMessageContext): Promise<WireResponse> {
+  private async handleMessage(
+    raw: string,
+    context?: RpcMessageContext
+  ): Promise<LabGatewayWireResponse> {
     const parsed = parseLabGatewayWireRequest(raw, this.policy.binding)
     if (!parsed.ok) {
       this.recordAudit(parsed.id, 'rejected', 'refused', parsed.reason)
       return this.failure(parsed.id, parsed.reason, parsed.field)
+    }
+    const localRefusal = this.localAuthorityRefusal()
+    if (localRefusal) {
+      return this.failure(parsed.parsed.id, localRefusal)
     }
 
     let admission = admitLabGatewayRequest(this.policy, parsed.parsed.request)
@@ -144,6 +156,10 @@ export class LabDispatchGatewayServer {
       )
       return this.failure(parsed.parsed.id, lifecycleRefusal)
     }
+    const postResolutionLocalRefusal = this.localAuthorityRefusal()
+    if (postResolutionLocalRefusal) {
+      return this.failure(parsed.parsed.id, postResolutionLocalRefusal)
+    }
 
     // A blocking lifecycle lookup lets another request advance the one-shot policy. Re-admit
     // against the current state, then consume worker.done before invoking upstream.
@@ -155,7 +171,9 @@ export class LabDispatchGatewayServer {
     this.policy = admission.nextPolicy
 
     startKeepaliveForBlockingRpc(admission.rpc, context)
-    const signal = context?.signal ?? new AbortController().signal
+    const signal = context?.signal
+      ? AbortSignal.any([context.signal, this.lifecycle.authoritySignal])
+      : this.lifecycle.authoritySignal
     try {
       const result = await this.options.invokeRpc({
         rpc: admission.rpc,
@@ -164,6 +182,15 @@ export class LabDispatchGatewayServer {
         terminalPaneKey: this.policy.binding.terminalPaneKey,
         signal
       })
+      if (!this.lifecycle.isAuthorityActive) {
+        this.recordAudit(
+          parsed.parsed.id,
+          parsed.parsed.request.operation,
+          'refused',
+          'credential_revoked'
+        )
+        return this.failure(parsed.parsed.id, 'credential_revoked')
+      }
       this.recordAudit(parsed.parsed.id, parsed.parsed.request.operation, 'accepted')
       return {
         id: parsed.parsed.id,
@@ -172,13 +199,9 @@ export class LabDispatchGatewayServer {
         receipt: this.requireReceipt()
       }
     } catch {
-      this.recordAudit(
-        parsed.parsed.id,
-        parsed.parsed.request.operation,
-        'refused',
-        'upstream_failed'
-      )
-      return this.failure(parsed.parsed.id, 'upstream_failed')
+      const reason = this.lifecycle.isAuthorityActive ? 'upstream_failed' : 'credential_revoked'
+      this.recordAudit(parsed.parsed.id, parsed.parsed.request.operation, 'refused', reason)
+      return this.failure(parsed.parsed.id, reason)
     }
   }
 
@@ -196,7 +219,7 @@ export class LabDispatchGatewayServer {
     if (lifecycle.binding.dispatchId !== expected.dispatchId) {
       return 'cross_dispatch_identity'
     }
-    if (!sameBinding(lifecycle.binding, expected)) {
+    if (!sameLabGatewayBinding(lifecycle.binding, expected)) {
       return 'lifecycle_binding_mismatch'
     }
     if (lifecycle.dispatchCapabilitySha256 !== sha256(this.options.dispatchCapability)) {
@@ -208,10 +231,24 @@ export class LabDispatchGatewayServer {
     if (lifecycle.authorityState === 'revoked') {
       return 'credential_revoked'
     }
-    return lifecycle.authorityState === 'settled' ? 'dispatch_settled' : null
+    if (lifecycle.authorityState === 'settled') {
+      return 'dispatch_settled'
+    }
+    return lifecycle.authorityState === 'active' ? null : 'dispatch_invalid'
   }
 
-  private failure(id: string, reason: LabGatewayWireRefusalReason, field?: string): WireResponse {
+  private localAuthorityRefusal(): LabGatewayWireRefusalReason | null {
+    if (this.lifecycle.authorityState === 'starting') {
+      return 'gateway_not_ready'
+    }
+    return this.lifecycle.authorityState === 'active' ? null : 'credential_revoked'
+  }
+
+  private failure(
+    id: string,
+    reason: LabGatewayWireRefusalReason,
+    field?: string
+  ): LabGatewayWireResponse {
     return {
       id,
       ok: false,
@@ -220,7 +257,7 @@ export class LabDispatchGatewayServer {
         message: 'Laboratory gateway request was refused.',
         data: field ? { reason, field } : { reason }
       },
-      receipt: this.receipt ?? undefined
+      receipt: this.lifecycle.receipt ?? undefined
     }
   }
 
@@ -230,7 +267,7 @@ export class LabDispatchGatewayServer {
     outcome: LabGatewayAuditEvent['outcome'],
     reason?: LabGatewayWireRefusalReason
   ): void {
-    const receipt = this.receipt
+    const receipt = this.lifecycle.receipt
     if (!receipt || !this.options.audit) {
       return
     }
@@ -253,24 +290,12 @@ export class LabDispatchGatewayServer {
   }
 
   private requireReceipt(): LabGatewayServerReceipt {
-    if (!this.receipt) {
+    if (!this.lifecycle.receipt) {
       throw new Error('Laboratory gateway is not started')
     }
-    return this.receipt
+    return this.lifecycle.receipt
   }
 }
-
-type WireResponse = Readonly<{
-  id: string
-  ok: boolean
-  result?: unknown
-  error?: Readonly<{
-    code: 'lab_gateway_refused'
-    message: string
-    data: Readonly<{ reason: LabGatewayWireRefusalReason; field?: string }>
-  }>
-  receipt?: LabGatewayServerReceipt
-}>
 
 function validateServerOptions(options: LabDispatchGatewayServerOptions): void {
   if (!isAbsolute(options.endpoint) || options.endpoint.includes('\u0000')) {
@@ -287,35 +312,6 @@ function validateServerOptions(options: LabDispatchGatewayServerOptions): void {
   }
 }
 
-function buildServerReceipt(
-  options: LabDispatchGatewayServerOptions,
-  policy: LabGatewayPolicy
-): LabGatewayServerReceipt {
-  const stable = Object.freeze({
-    schema: 'orca.lab-dispatch-gateway.v1' as const,
-    policyId: policy.policyId,
-    dispatchId: policy.binding.dispatchId,
-    transport: 'unix' as const,
-    socketMode: '0600' as const,
-    endpointSha256: sha256(options.endpoint),
-    processIncarnationSha256: sha256(options.processIncarnation),
-    allowedOperations: Object.freeze([...LAB_GATEWAY_ALLOWED_OPERATIONS]),
-    lifecycleSource: 'injected-per-request' as const,
-    dcapCustody: 'server-only' as const
-  })
-  return Object.freeze({ ...stable, receiptSha256: sha256(JSON.stringify(stable)) })
-}
-
-function sameBinding(left: LabGatewayBinding, right: LabGatewayBinding): boolean {
-  return (
-    left.runId === right.runId &&
-    left.taskId === right.taskId &&
-    left.dispatchId === right.dispatchId &&
-    left.terminalHandle === right.terminalHandle &&
-    left.terminalPaneKey === right.terminalPaneKey
-  )
-}
-
 function startKeepaliveForBlockingRpc(rpc: LabGatewayRpc, context?: RpcMessageContext): void {
   if (
     rpc.method === 'orchestration.ask' ||
@@ -325,6 +321,4 @@ function startKeepaliveForBlockingRpc(rpc: LabGatewayRpc, context?: RpcMessageCo
   }
 }
 
-function sha256(value: string): string {
-  return createHash('sha256').update(value).digest('hex')
-}
+const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex')

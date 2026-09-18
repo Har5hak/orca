@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { link, mkdtemp, readdir, rm, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -147,6 +147,32 @@ describe.skipIf(process.platform === 'win32')('laboratory Dispatch gateway host 
     expect(first).toMatchObject({ ok: false, reason: 'upstream_failed' })
     expect(second).toMatchObject({ ok: false, reason: 'worker_done_already_accepted' })
     expect(invokeRpc).toHaveBeenCalledOnce()
+  })
+
+  it('returns credential_revoked after local authority is revoked even when cleanup fails', async () => {
+    const backingName = (await readdir(directory)).find((name) => name !== 'gateway.sock')
+    if (!backingName) {
+      throw new Error('Private laboratory socket binding was not created')
+    }
+    const backingEndpoint = join(directory, backingName)
+    await unlink(backingEndpoint)
+    await writeFile(backingEndpoint, 'replacement', { mode: 0o600 })
+    await expect(server?.stop()).rejects.toThrow('backing identity changed')
+
+    await expect(
+      callLabDispatchGateway({
+        endpoint,
+        credential,
+        operation: 'worker.status',
+        expectedReceipt: receipt,
+        requestId: 'revoked_1'
+      })
+    ).resolves.toMatchObject({ ok: false, reason: 'credential_revoked' })
+    expect(invokeRpc).not.toHaveBeenCalled()
+
+    await unlink(backingEndpoint)
+    await link(endpoint, backingEndpoint)
+    await expect(server?.stop()).resolves.toBeUndefined()
   })
 })
 

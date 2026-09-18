@@ -4,51 +4,129 @@
 // It also owns the keepalive timer and per-connection abort signal so the
 // server-side handler can cancel long-poll dispatches when the client goes
 // away. See design doc §3.1.
-import { createServer, type Server, type Socket } from 'node:net'
 import { chmodSync, existsSync, rmSync } from 'node:fs'
-import type { RpcMessageContext, RpcTransport } from './transport'
-
-const MAX_RUNTIME_RPC_MESSAGE_BYTES = 1024 * 1024
-const RUNTIME_RPC_SOCKET_IDLE_TIMEOUT_MS = 30_000
-const MAX_RUNTIME_RPC_CONNECTIONS = 32
-const DEFAULT_KEEPALIVE_INTERVAL_MS = 10_000
-
-export type UnixSocketTransportOptions = {
-  endpoint: string
-  kind: 'unix' | 'named-pipe'
-  // Why: how often to write `{"_keepalive":true}\n` frames while a dispatch
-  // is pending. Each write resets both the server-side idle timer and, once
-  // the client honours them, the client-side idle timer. Tests override this
-  // to avoid waiting 10 s for a frame.
-  keepaliveIntervalMs?: number
-}
-
-type MessageHandler = (
-  msg: string,
-  reply: (response: string) => void,
-  context?: RpcMessageContext
-) => void
+import { createServer, type Server, type Socket } from 'node:net'
+import {
+  LabUnixSocketLifecycle,
+  type LabUnixSocketEndpointAttestation,
+  type LabUnixSocketLifecycleHooks
+} from './lab-unix-socket-lifecycle'
+import type { RpcTransport } from './transport'
+import {
+  UNIX_SOCKET_TRANSPORT_LIMITS,
+  type UnixSocketMessageHandler,
+  type UnixSocketTransportOptions
+} from './unix-socket-transport-contract'
+export type { UnixSocketTransportOptions } from './unix-socket-transport-contract'
 
 export class UnixSocketTransport implements RpcTransport {
   private readonly endpoint: string
   private readonly kind: 'unix' | 'named-pipe'
+  private readonly labUnixSocketLifecycle: LabUnixSocketLifecycle | null
   private readonly keepaliveIntervalMs: number
   private server: Server | null = null
-  private messageHandler: MessageHandler | null = null
+  private listeningReady = false
+  private startOperation: Promise<void> | null = null
+  private stopOperation: Promise<void> | null = null
+  private messageHandler: UnixSocketMessageHandler | null = null
   private readonly activeSockets = new Set<Socket>()
 
-  constructor({ endpoint, kind, keepaliveIntervalMs }: UnixSocketTransportOptions) {
+  constructor(
+    {
+      endpoint,
+      kind,
+      keepaliveIntervalMs,
+      unixSocketLifecycle = 'legacy'
+    }: UnixSocketTransportOptions,
+    labHooks: LabUnixSocketLifecycleHooks = {}
+  ) {
+    if (kind !== 'unix' && unixSocketLifecycle !== 'legacy') {
+      throw new Error('Attested Unix socket lifecycle requires a Unix endpoint')
+    }
     this.endpoint = endpoint
     this.kind = kind
-    this.keepaliveIntervalMs = keepaliveIntervalMs ?? DEFAULT_KEEPALIVE_INTERVAL_MS
+    this.labUnixSocketLifecycle =
+      unixSocketLifecycle === 'lab-refuse-existing-retain'
+        ? new LabUnixSocketLifecycle(endpoint, labHooks)
+        : null
+    this.keepaliveIntervalMs =
+      keepaliveIntervalMs ?? UNIX_SOCKET_TRANSPORT_LIMITS.keepaliveIntervalMs
   }
 
-  onMessage(handler: MessageHandler): void {
+  static forLaboratoryGateway(
+    endpoint: string,
+    hooks: LabUnixSocketLifecycleHooks = {}
+  ): UnixSocketTransport {
+    return new UnixSocketTransport(
+      { endpoint, kind: 'unix', unixSocketLifecycle: 'lab-refuse-existing-retain' },
+      hooks
+    )
+  }
+
+  onMessage(handler: UnixSocketMessageHandler): void {
     this.messageHandler = handler
   }
 
-  async start(): Promise<void> {
+  async attestLaboratoryEndpoint(): Promise<LabUnixSocketEndpointAttestation> {
+    if (!this.labUnixSocketLifecycle || !this.listeningReady) {
+      throw new Error('Laboratory Unix socket transport is not ready for attestation')
+    }
+    return await this.labUnixSocketLifecycle.attestPublishedEndpoint()
+  }
+
+  start(): Promise<void> {
+    if (this.stopOperation) {
+      return this.stopOperation.then(() => this.start())
+    }
+    if (this.startOperation) {
+      return this.startOperation
+    }
+    if (this.listeningReady) {
+      return Promise.resolve()
+    }
     if (this.server) {
+      return Promise.reject(new Error('Unix socket transport cleanup is still pending'))
+    }
+
+    const operation = this.startOnce()
+    this.startOperation = operation
+    operation.then(
+      () => this.clearStartOperation(operation),
+      () => this.clearStartOperation(operation)
+    )
+    return operation
+  }
+
+  stop(): Promise<void> {
+    if (this.stopOperation) {
+      return this.stopOperation
+    }
+
+    const operation = this.stopOnce()
+    this.stopOperation = operation
+    operation.then(
+      () => this.clearStopOperation(operation),
+      () => this.clearStopOperation(operation)
+    )
+    return operation
+  }
+
+  private async startOnce(): Promise<void> {
+    if (this.labUnixSocketLifecycle) {
+      const server = this.createServer()
+      try {
+        await this.labUnixSocketLifecycle.start(server, async () => await this.closeServer(server))
+      } catch (error) {
+        if (
+          this.labUnixSocketLifecycle.hasCleanupCustody &&
+          !this.labUnixSocketLifecycle.isDefinitivelyClosed
+        ) {
+          this.server = server
+        }
+        throw error
+      }
+      this.server = server
+      this.listeningReady = true
       return
     }
 
@@ -56,32 +134,59 @@ export class UnixSocketTransport implements RpcTransport {
       rmSync(this.endpoint, { force: true })
     }
 
-    const server = createServer((socket) => {
-      this.handleConnection(socket)
-    })
-    server.maxConnections = MAX_RUNTIME_RPC_CONNECTIONS
-
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject)
-      server.listen(this.endpoint, () => {
-        server.off('error', reject)
-        resolve()
-      })
-    })
+    const server = this.createServer()
+    await listen(server, this.endpoint)
 
     if (this.kind === 'unix') {
       chmodSync(this.endpoint, 0o600)
     }
 
     this.server = server
+    this.listeningReady = true
   }
 
-  async stop(): Promise<void> {
+  private async stopOnce(): Promise<void> {
+    const starting = this.startOperation
+    if (starting) {
+      await starting.catch(() => undefined)
+    }
     const server = this.server
-    this.server = null
     if (!server) {
+      if (this.labUnixSocketLifecycle?.isDefinitivelyClosed) {
+        await this.labUnixSocketLifecycle.stop(async () => undefined)
+      }
       return
     }
+
+    if (this.labUnixSocketLifecycle) {
+      try {
+        await this.labUnixSocketLifecycle.stop(async () => await this.closeServer(server))
+      } finally {
+        if (this.labUnixSocketLifecycle.isDefinitivelyClosed) {
+          this.server = null
+          this.listeningReady = false
+        }
+      }
+      return
+    }
+
+    await this.closeServer(server)
+    this.server = null
+    this.listeningReady = false
+    if (this.kind === 'unix' && existsSync(this.endpoint)) {
+      rmSync(this.endpoint, { force: true })
+    }
+  }
+
+  private createServer(): Server {
+    const server = createServer((socket) => {
+      this.handleConnection(socket)
+    })
+    server.maxConnections = UNIX_SOCKET_TRANSPORT_LIMITS.maxConnections
+    return server
+  }
+
+  private async closeServer(server: Server): Promise<void> {
     const closePromise = new Promise<void>((resolve, reject) => {
       server.close((error) => {
         if (error) {
@@ -97,8 +202,17 @@ export class UnixSocketTransport implements RpcTransport {
       socket.destroy()
     }
     await closePromise
-    if (this.kind === 'unix' && existsSync(this.endpoint)) {
-      rmSync(this.endpoint, { force: true })
+  }
+
+  private clearStartOperation(operation: Promise<void>): void {
+    if (this.startOperation === operation) {
+      this.startOperation = null
+    }
+  }
+
+  private clearStopOperation(operation: Promise<void>): void {
+    if (this.stopOperation === operation) {
+      this.stopOperation = null
     }
   }
 
@@ -117,7 +231,7 @@ export class UnixSocketTransport implements RpcTransport {
 
     socket.setEncoding('utf8')
     socket.setNoDelay(true)
-    socket.setTimeout(RUNTIME_RPC_SOCKET_IDLE_TIMEOUT_MS, () => {
+    socket.setTimeout(UNIX_SOCKET_TRANSPORT_LIMITS.idleTimeoutMs, () => {
       socket.destroy()
     })
     socket.on('error', () => {
@@ -140,7 +254,7 @@ export class UnixSocketTransport implements RpcTransport {
       // Why: the Orca runtime lives in Electron main, so it must reject
       // oversized local RPC frames instead of letting a local client grow an
       // unbounded buffer and stall the app.
-      if (retainedBytes > MAX_RUNTIME_RPC_MESSAGE_BYTES) {
+      if (retainedBytes > UNIX_SOCKET_TRANSPORT_LIMITS.maxMessageBytes) {
         oversized = true
         this.messageHandler?.('', (response) => {
           socket.write(`${response}\n`)
@@ -225,4 +339,14 @@ export class UnixSocketTransport implements RpcTransport {
       startKeepalive
     })
   }
+}
+
+function listen(server: Server, endpoint: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(endpoint, () => {
+      server.off('error', reject)
+      resolve()
+    })
+  })
 }
