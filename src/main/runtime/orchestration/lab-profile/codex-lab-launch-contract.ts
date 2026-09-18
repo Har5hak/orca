@@ -16,6 +16,7 @@ export type CodexLabLaunchRefusalReason =
   | 'launch_plan_policy_broadened'
   | 'login_method_unsupported'
   | 'platform_unsupported'
+  | 'paid_usage_forbidden'
   | 'profile_unsupported'
   | 'subscription_status_ambiguous'
   | 'workspace_identity_invalid'

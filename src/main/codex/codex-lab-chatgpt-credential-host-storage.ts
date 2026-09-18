@@ -1,5 +1,5 @@
-import { constants } from 'node:fs'
-import { lstat, open } from 'node:fs/promises'
+import { constants, type Stats } from 'node:fs'
+import { lstat, open, type FileHandle } from 'node:fs/promises'
 import { isDefinitiveAbsence } from '../../shared/definitive-filesystem-absence'
 import { runProcess } from '../../shared/child-process/run-process'
 import type { CodexAuthKeyringLocator } from './codex-lab-chatgpt-credential-materialization'
@@ -9,6 +9,7 @@ const SECURITY_TIMEOUT_MS = 3_000
 const SECURITY_MAX_OUTPUT_BYTES = 64 * 1024
 const MAX_CREDENTIAL_BYTES = 2 * 1024 * 1024
 const KEYRING_NOT_FOUND_EXIT_CODE = 44
+const PRIVATE_CREDENTIAL_FILE_MODE = 0o600
 
 export type CodexLabSecurityCommandRequest = Readonly<{
   program: typeof SECURITY_PROGRAM
@@ -28,6 +29,7 @@ export type CodexLabSecurityCommandExecutor = (
 ) => Promise<CodexLabSecurityCommandResult>
 
 export type TargetAuthJsonObservation = 'absent' | 'indeterminate' | 'present'
+export type CodexLabCredentialSourceObservation = 'absent' | 'present'
 
 type StorageOperation = 'source_read' | 'target_delete' | 'target_read' | 'target_write'
 type StorageRefusalReason =
@@ -67,6 +69,24 @@ export async function readKeyringCredential(
   return stripCommandLineEnding(result.stdout)
 }
 
+export async function observeKeyringCredential(
+  execute: CodexLabSecurityCommandExecutor,
+  locator: CodexAuthKeyringLocator,
+  refuse: Refuse
+): Promise<CodexLabCredentialSourceObservation> {
+  const result = await runSecurityCommand(
+    execute,
+    'source_read',
+    ['find-generic-password', '-s', locator.service, '-a', locator.account],
+    refuse
+  )
+  if (result.code === KEYRING_NOT_FOUND_EXIT_CODE && !result.timedOut && !result.outputTruncated) {
+    return 'absent'
+  }
+  assertSecuritySuccess(result, 'source_read', refuse)
+  return 'present'
+}
+
 export async function deleteKeyringCredential(
   execute: CodexLabSecurityCommandExecutor,
   locator: CodexAuthKeyringLocator,
@@ -96,27 +116,43 @@ export async function observeTargetAuthJsonPath(
 
 export async function readCredentialFileSecurely(
   filePath: string,
-  refuse: Refuse
+  refuse: Refuse,
+  expectedUid = requireProcessUid(refuse)
 ): Promise<string | null> {
-  let handle
-  try {
-    handle = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW)
-  } catch (error) {
-    if (isDefinitiveAbsence(error)) {
-      return null
-    }
-    throw refuse('source_read', 'credential_file_read_failed')
+  const handle = await openCredentialFileSecurely(filePath, refuse)
+  if (!handle) {
+    return null
   }
   try {
     const stat = await handle.stat()
-    if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_CREDENTIAL_BYTES) {
-      throw refuse('source_read', 'credential_file_invalid')
-    }
+    assertSecureCredentialFile(stat, expectedUid, refuse)
     const contents = await handle.readFile({ encoding: 'utf8' })
     if (Buffer.byteLength(contents, 'utf8') > MAX_CREDENTIAL_BYTES) {
       throw refuse('source_read', 'credential_file_invalid')
     }
     return contents
+  } catch (error) {
+    if (isStorageRefusal(error)) {
+      throw error
+    }
+    throw refuse('source_read', 'credential_file_read_failed')
+  } finally {
+    await handle.close().catch(() => {})
+  }
+}
+
+export async function observeCredentialFileSecurely(
+  filePath: string,
+  refuse: Refuse,
+  expectedUid = requireProcessUid(refuse)
+): Promise<CodexLabCredentialSourceObservation> {
+  const handle = await openCredentialFileSecurely(filePath, refuse)
+  if (!handle) {
+    return 'absent'
+  }
+  try {
+    assertSecureCredentialFile(await handle.stat(), expectedUid, refuse)
+    return 'present'
   } catch (error) {
     if (isStorageRefusal(error)) {
       throw error
@@ -155,6 +191,47 @@ function stripCommandLineEnding(value: string): string {
     return value.slice(0, -2)
   }
   return value.endsWith('\n') ? value.slice(0, -1) : value
+}
+
+async function openCredentialFileSecurely(
+  filePath: string,
+  refuse: Refuse
+): Promise<FileHandle | null> {
+  try {
+    return await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW)
+  } catch (error) {
+    if (isDefinitiveAbsence(error)) {
+      return null
+    }
+    if (isErrnoCode(error, 'ELOOP')) {
+      throw refuse('source_read', 'credential_file_invalid')
+    }
+    throw refuse('source_read', 'credential_file_read_failed')
+  }
+}
+
+function assertSecureCredentialFile(stat: Stats, expectedUid: number, refuse: Refuse): void {
+  if (
+    !stat.isFile() ||
+    stat.uid !== expectedUid ||
+    (stat.mode & 0o777) !== PRIVATE_CREDENTIAL_FILE_MODE ||
+    stat.size <= 0 ||
+    stat.size > MAX_CREDENTIAL_BYTES
+  ) {
+    throw refuse('source_read', 'credential_file_invalid')
+  }
+}
+
+function requireProcessUid(refuse: Refuse): number {
+  const uid = process.getuid?.()
+  if (uid === undefined || !Number.isSafeInteger(uid) || uid < 0) {
+    throw refuse('source_read', 'credential_file_read_failed')
+  }
+  return uid
+}
+
+function isErrnoCode(error: unknown, code: string): boolean {
+  return error instanceof Error && 'code' in error && error.code === code
 }
 
 function isStorageRefusal(error: unknown): error is Error {

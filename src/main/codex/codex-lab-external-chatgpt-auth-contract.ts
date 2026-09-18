@@ -15,6 +15,12 @@ export type CodexLabExternalChatGptLoginParams = Readonly<{
   chatgptPlanType: string
 }>
 
+export type CodexLabExternalChatGptLoginReceipt = Readonly<{
+  type: 'chatgptAuthTokens'
+  chatgptAccountId: string
+  chatgptPlanType: string
+}>
+
 export type CodexLabExternalChatGptRefreshRequest = Readonly<{
   reason: 'unauthorized'
   previousAccountId: string

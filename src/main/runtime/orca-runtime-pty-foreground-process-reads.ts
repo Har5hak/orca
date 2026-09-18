@@ -21,6 +21,8 @@ import type { TerminalQuickCommand } from '../../shared/terminal-quick-command-t
 import type { TerminalQuickCommandMutation } from '../../shared/terminal-quick-commands'
 import type { NativeChatSessionOptionSettingsMutation } from '../../shared/native-chat-session-options'
 import type { Automation } from '../../shared/automations-types'
+import type { CodexLabCredentialSelectionSettings } from '../codex/codex-lab-chatgpt-credential-host-ports'
+import { snapshotCodexLabCredentialSelectionSettings } from './codex-lab-credential-selection-settings'
 
 export class OrcaRuntimeWithPtyForegroundProcessReads extends OrcaRuntimeWithStateFields {
   get ptyForegroundProcessReads() {
@@ -199,6 +201,10 @@ export class OrcaRuntimeWithPtyForegroundProcessReads extends OrcaRuntimeWithSta
 
   getClientSettings() {
     return this.clientSettings.get()
+  }
+
+  getCodexLabCredentialSelectionSettings(): CodexLabCredentialSelectionSettings {
+    return snapshotCodexLabCredentialSelectionSettings(this.requireStore().getSettings())
   }
 
   async updateClientSettings(updates: RuntimeClientSettingsUpdate) {

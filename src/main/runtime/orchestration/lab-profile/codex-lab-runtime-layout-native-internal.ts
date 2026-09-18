@@ -8,27 +8,24 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
-  renameSync,
   writeFileSync
 } from 'node:fs'
 import type { BigIntStats } from 'node:fs'
 import { basename, dirname, isAbsolute, join, normalize, relative } from 'node:path'
-import {
-  CodexLabRuntimeCleanupIncomplete,
-  type CodexLabExistingPathObservation,
-  type CodexLabPathIdentity,
-  type CodexLabPathObservation,
-  type CodexLabRuntimeLayoutHost
+import type {
+  CodexLabExistingPathObservation,
+  CodexLabPathIdentity,
+  CodexLabPathObservation,
+  CodexLabRuntimeLayoutHost
 } from './codex-lab-runtime-layout'
-
-type NativeLayoutHostHooks = Readonly<{
-  afterQuarantineAttested?: (quarantinePath: string) => void
-}>
+import {
+  revokeNativeCodexLabActiveLayout,
+  type NativeLayoutRevocationHooks
+} from './codex-lab-runtime-layout-native-revocation'
 
 export function createNativeCodexLabRuntimeLayoutHostAtRoot(
   runtimeRootInput: string,
-  randomId: () => string,
-  hooks: NativeLayoutHostHooks = {}
+  hooks: NativeLayoutRevocationHooks = {}
 ): CodexLabRuntimeLayoutHost {
   const runtimeRoot = requireCanonicalAbsolutePath(runtimeRootInput)
   const currentUid = requireCurrentUid()
@@ -94,38 +91,14 @@ export function createNativeCodexLabRuntimeLayoutHostAtRoot(
     },
     removeTree: async (path, expectedRoot, expectedParent) => {
       assertDispatchRootPath(path, runtimeRoot)
-      assertParentIdentity(path, expectedParent, currentUid)
-      const before = requireExisting(observeNativePath(path, currentUid))
-      if (
-        before.kind !== 'directory' ||
-        !before.ownedByCurrentUser ||
-        !sameIdentity(before.identity, expectedRoot)
-      ) {
-        throw new Error('The laboratory Dispatch root no longer has its captured identity.')
-      }
-      const quarantineId = randomId()
-      if (!/^[A-Za-z0-9-]+$/u.test(quarantineId)) {
-        throw new Error('The laboratory cleanup quarantine identity is invalid.')
-      }
-      const quarantine = join(
-        dirname(path),
-        `.${basename(path)}.cleanup-${process.pid}-${quarantineId}`
-      )
-      assertInsideRuntimeRoot(quarantine, runtimeRoot)
-      renameSync(path, quarantine)
-      const captured = requireExisting(observeNativePath(quarantine, currentUid))
-      if (
-        captured.kind !== 'directory' ||
-        !captured.ownedByCurrentUser ||
-        !sameIdentity(captured.identity, expectedRoot)
-      ) {
-        throw new Error(`A replaced laboratory root was retained at ${quarantine}.`)
-      }
-      assertParentIdentity(quarantine, expectedParent, currentUid)
-      hooks.afterQuarantineAttested?.(quarantine)
-      // Node exposes no identity-bound recursive deletion. Retain the quarantined generation and
-      // keep cleanup pending instead of resolving this path again and risking replacement loss.
-      throw new CodexLabRuntimeCleanupIncomplete(quarantine)
+      return revokeNativeCodexLabActiveLayout({
+        path,
+        expectedRoot,
+        observePath: (candidate) => observeNativePath(candidate, currentUid),
+        assertParentIdentity: (candidate) =>
+          assertParentIdentity(candidate, expectedParent, currentUid),
+        hooks
+      })
     }
   })
 }

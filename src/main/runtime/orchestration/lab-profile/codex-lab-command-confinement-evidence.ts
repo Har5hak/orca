@@ -40,6 +40,7 @@ type Targets = Readonly<
     | 'fakeHomeWrite'
     | 'privateTmpWrite'
     | 'outsideRootWrite'
+    | 'unixConnectDenied'
     | 'unixBind',
     string
   >
@@ -151,7 +152,7 @@ export function validateCodexLabCommandConfinementControls(args: {
     [writes.privateTmp, targets.privateTmpWrite, PRIVATE_TMP],
     [writes.outsideRoot, targets.outsideRootWrite, writes.outsideRoot.parent.path]
   ]
-  const { tcpConnect, unixConnect, unixBind } = controls.network
+  const { tcpConnect, unixConnect, unixConnectDenied, unixBind } = controls.network
   requireControl(validRead(controls, plan.cwd), 'worktreeRead')
   requireControl(
     writeChecks.every((write) => validWrite(...write)) &&
@@ -169,6 +170,10 @@ export function validateCodexLabCommandConfinementControls(args: {
   requireControl(
     unixConnect.path === plan.gatewaySocketPath && live(unixConnect),
     'network.unixConnect'
+  )
+  requireControl(
+    unixConnectDenied.path === targets.unixConnectDenied && live(unixConnectDenied),
+    'network.unixConnectDenied'
   )
   requireControl(
     unixBind.path === targets.unixBind &&

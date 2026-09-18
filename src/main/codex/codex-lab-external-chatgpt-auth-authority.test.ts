@@ -167,11 +167,11 @@ describe('Codex laboratory external ChatGPT auth authority', () => {
 
   it('rejects accessors, inherited records, symbols, and non-enumerable credential data', () => {
     const accessTokenGetter = vi.fn(() => jwt('getter'))
-    const accessorCredential = {
+    const accessorCredential: Record<string, unknown> = {
       type: 'chatgptAuthTokens',
       chatgptAccountId: WORKSPACE_ID,
       chatgptPlanType: 'business'
-    } as Record<string, unknown>
+    }
     Object.defineProperty(accessorCredential, 'accessToken', {
       enumerable: true,
       get: accessTokenGetter
@@ -180,9 +180,12 @@ describe('Codex laboratory external ChatGPT auth authority', () => {
       Object.create({ inherited: true }),
       initialCredential(jwt('inherited'))
     )
-    const symbolCredential = initialCredential(jwt('symbol')) as Record<PropertyKey, unknown>
-    symbolCredential[Symbol('secret')] = 'forbidden'
-    const hiddenCredential = initialCredential(jwt('hidden')) as Record<string, unknown>
+    const symbolCredential = initialCredential(jwt('symbol'))
+    Object.defineProperty(symbolCredential, Symbol('secret'), {
+      value: 'forbidden',
+      enumerable: true
+    })
+    const hiddenCredential = initialCredential(jwt('hidden'))
     Object.defineProperty(hiddenCredential, 'hidden', { value: 'forbidden' })
 
     for (const credential of [
@@ -220,9 +223,13 @@ describe('Codex laboratory external ChatGPT auth authority', () => {
 
   it('rejects forged, foreign, and replayed mint authority before a spawn can run', () => {
     const forgedBinding = nextBinding()
-    const forgedFactory = Object.freeze(() =>
-      Object.freeze({ takeInitialLoginParams() {}, refresh() {}, dispose() {} })
-    ) as unknown as CodexLabExternalChatGptAuthHostFactory
+    const forgedFactory: CodexLabExternalChatGptAuthHostFactory = Object.freeze(() =>
+      Object.freeze({
+        takeInitialLoginParams: () => initialCredential(jwt('forged-initial')),
+        refresh: async () => refreshCredential(jwt('forged-refresh')),
+        dispose() {}
+      })
+    )
     expect(() =>
       registerCodexLabExternalChatGptAuthAuthority({
         ...forgedBinding,
@@ -554,7 +561,7 @@ describe('Codex laboratory external ChatGPT auth authority', () => {
     const refresh = vi.fn(async () => refreshCredential(jwt('unused')))
     const setup = registerAuthority(refresh)
     const host = claimAndTake(setup)
-    const accessor = { reason: 'unauthorized' } as Record<string, unknown>
+    const accessor: Record<string, unknown> = { reason: 'unauthorized' }
     const accountGetter = vi.fn(() => WORKSPACE_ID)
     Object.defineProperty(accessor, 'previousAccountId', {
       enumerable: true,

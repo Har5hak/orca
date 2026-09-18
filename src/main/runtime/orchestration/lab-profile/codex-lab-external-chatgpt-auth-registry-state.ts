@@ -11,8 +11,10 @@ import {
   revokeFreshCodexLabExternalChatGptAuthHostFactory,
   revokeCodexLabExternalChatGptAuthHostFactory
 } from '../../../codex/codex-lab-external-chatgpt-auth-authority-internal'
-import { snapshotCodexLabExternalChatGptAuthBinding } from '../../../codex/codex-lab-external-chatgpt-auth-validation'
-import { exactCodexLabExternalChatGptOwnDataRecord } from '../../../codex/codex-lab-external-chatgpt-auth-validation'
+import {
+  exactCodexLabExternalChatGptOwnDataRecord,
+  snapshotCodexLabExternalChatGptAuthBinding
+} from '../../../codex/codex-lab-external-chatgpt-auth-validation'
 
 export const CODEX_LAB_EXTERNAL_CHATGPT_AUTH_REGISTRY_REFUSAL_CODE =
   'ORCA_CODEX_LAB_EXTERNAL_CHATGPT_AUTH_REGISTRY_REFUSED' as const
@@ -152,7 +154,7 @@ function snapshotBinding(candidate: CodexLabExternalChatGptAuthBinding) {
 
 function snapshotRegistration(candidate: unknown): Readonly<{
   binding: CodexLabExternalChatGptAuthBinding
-  factory: CodexLabExternalChatGptAuthHostFactory
+  factory: unknown
 }> {
   if (nodeUtilTypes.isProxy(candidate)) {
     throw refusal('authority_invalid')
@@ -178,7 +180,7 @@ function snapshotRegistration(candidate: unknown): Readonly<{
   }
   return Object.freeze({
     binding,
-    factory: fields.factory as CodexLabExternalChatGptAuthHostFactory
+    factory: fields.factory
   })
 }
 

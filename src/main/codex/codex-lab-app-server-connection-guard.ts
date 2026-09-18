@@ -8,6 +8,7 @@ import { CodexLabAppServerMethodRefusedError } from './codex-lab-app-server-atte
  */
 export const CODEX_LAB_ALLOWED_APP_SERVER_REQUEST_METHODS = Object.freeze([
   'account/read',
+  'account/rateLimits/read',
   'config/read',
   'configRequirements/read',
   'permissionProfile/list',

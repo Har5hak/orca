@@ -1,193 +1,63 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { OrcaRuntimeService } from '../../../../orca-runtime'
-import { OrchestrationDb } from '../../../../orchestration/db'
+import { join } from 'node:path'
 import { testCodexLabStructuredLaunchBinding } from '../../../../orchestration/lab-profile/codex-lab-structured-launch-binding-test-support'
-import type { CodexLabStructuredLaunchBinding } from '../../../../orchestration/lab-profile/codex-lab-structured-launch-binding-registry'
-import type { StructuredWorkerIdentity } from '../../../../structured-worker-identity'
+import { buildLabGatewayServerReceipt } from '../../../../orchestration/lab-profile/dispatch-gateway-server-receipt'
 import {
-  continuePreparedLocalLabWorkerStart,
-  type LocalLabWorkerContinuationDeps
-} from './local-lab-worker-start-continuation'
-import type { PreparedLocalLabWorkerStart } from './local-lab-worker-start'
-import type { LabWorkerStartAdmission } from './worker-start-profile-admission'
-
-const PROFILE = 'lab-readonly-supervised-v1'
-const WORKTREE_PATH = '/private/tmp/orca-lab/disposable-structured'
-const IDENTITY: StructuredWorkerIdentity = Object.freeze({
-  handle: 'structworker_11111111-1111-4111-8111-111111111111',
-  sessionId: '11111111-1111-4111-8111-111111111111',
-  agent: 'codex',
-  paneKey:
-    'agent-session-11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222',
-  processIncarnation: 'structured:11111111-1111-4111-8111-111111111111',
-  worktreeId: 'repo::disposable-structured',
-  hostScope: Object.freeze({ kind: 'local', hostId: 'local' })
-})
-
-const databases: OrchestrationDb[] = []
-
-afterEach(() => {
-  for (const db of databases.splice(0)) {
-    db.close()
-  }
-})
+  expectedCodexLabDispatchRuntimeRoot,
+  sha256
+} from '../../../../orchestration/db/lab-runtime-custody/lab-runtime-custody-validation'
+import { registerCodexLabRuntimeCleanupAuthority } from '../../../../orchestration/lab-profile/codex-lab-runtime-cleanup-authority'
+import { continuePreparedLocalLabWorkerStart } from './local-lab-worker-start-continuation'
+import { LocalLabLaunchAuthorityPreparationRefusal } from './local-lab-launch-authority-contract'
+import type { LocalLabWorkerContinuationDeps } from './local-lab-worker-start-continuation-contract'
+import { publicCodexLabGatewayReceipt } from './local-codex-lab-launch-authority'
+import {
+  closeContinuationDatabases,
+  harness as createHarness,
+  IDENTITY,
+  layoutRemovalEvidence,
+  preparedAuthority,
+  PROFILE,
+  realPhaseAuthority as createRealPhaseAuthority,
+  returningPreparedAuthority,
+  structuredSessionFixture,
+  stubCustodyTransitions
+} from './local-lab-worker-start-continuation.test-support'
 
 function harness() {
-  const db = new OrchestrationDb(':memory:')
-  databases.push(db)
-  const runtime = new OrcaRuntimeService()
-  runtime.setOrchestrationDb(db)
-  vi.spyOn(runtime, 'getRuntimeId').mockReturnValue('runtime_task_757')
-  const run = db.createRun({
-    objective: 'N=1 lab canary',
-    coordinatorHandle: 'term_coord',
-    coordinatorPaneKey: 'tab_coord:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
-  })
-  const started = db.createStartingWorkerDispatch({
-    creator: { kind: 'system' },
-    maxDepth: 1,
-    taskSpec: 'Read the assigned repository and report one finding.',
-    taskRunId: run.id,
-    runtimeEpoch: 'runtime_task_757',
-    startOptions: { profile: { id: PROFILE } },
-    profileLease: { profileId: PROFILE }
-  })
-  const resource = Object.freeze({ kind: 'created_lab_runtime', id: started.dispatch.id })
-  const worker = db.recordWorkerStage({
-    dispatchId: started.dispatch.id,
-    stage: 'lab_runtime_planned',
-    effects: [resource],
-    residualResources: [resource]
-  })
-  const admission: LabWorkerStartAdmission = Object.freeze({
-    profile: PROFILE,
-    adapter: 'codex-workspace-chatgpt-v1',
-    agent: 'codex',
-    maxConcurrency: 1,
-    worktreeIdentity: 'wt2:local:disposable-structured',
-    worktreeInstanceId: 'disposable-structured',
-    expectedWorktreePath: WORKTREE_PATH
-  })
-  const prepared: PreparedLocalLabWorkerStart = Object.freeze({
-    started: Object.freeze({ ...started, worker }),
-    worktree: {
-      id: IDENTITY.worktreeId,
-      instanceId: 'disposable-structured',
-      identity: {
-        key: admission.worktreeIdentity,
-        executionHostId: 'local',
-        instanceId: admission.worktreeInstanceId
-      },
-      repoId: 'repo',
-      path: WORKTREE_PATH,
-      head: '1'.repeat(40),
-      branch: 'task-757',
-      isBare: false,
-      isMainWorktree: false,
-      displayName: 'disposable-structured',
-      comment: '',
-      linkedIssue: null,
-      linkedPR: null,
-      linkedLinearIssue: null,
-      isArchived: false,
-      isUnread: false,
-      isPinned: false,
-      sortOrder: 0,
-      lastActivityAt: 1
-    },
-    observation: testCodexLabStructuredLaunchBinding().worktree,
-    admission
-  })
-  return { db, runtime, run, prepared }
+  return createHarness(testCodexLabStructuredLaunchBinding())
 }
 
-function stubCustodyTransitions(db: OrchestrationDb, events: string[]): void {
-  vi.spyOn(db, 'planCodexLabRuntimeCustody').mockImplementation((input) => {
-    events.push('custody:planned')
-    return { dispatchId: input.dispatchId } as ReturnType<
-      OrchestrationDb['planCodexLabRuntimeCustody']
-    >
-  })
-  vi.spyOn(db, 'recordCodexLabRuntimeAuthorityAttached').mockImplementation((input) => {
-    events.push('custody:authority')
-    return { dispatchId: input.dispatchId } as ReturnType<
-      OrchestrationDb['recordCodexLabRuntimeAuthorityAttached']
-    >
-  })
-  vi.spyOn(db, 'recordCodexLabRuntimeLayoutPrepared').mockImplementation((input) => {
-    events.push('custody:layout')
-    return { dispatchId: input.dispatchId } as ReturnType<
-      OrchestrationDb['recordCodexLabRuntimeLayoutPrepared']
-    >
-  })
-  vi.spyOn(db, 'recordCodexLabRuntimeProviderReserved').mockImplementation((input) => {
-    events.push('custody:provider-reserved')
-    return { dispatchId: input.dispatchId } as ReturnType<
-      OrchestrationDb['recordCodexLabRuntimeProviderReserved']
-    >
-  })
-  vi.spyOn(db, 'recordCodexLabRuntimeGatewayStarted').mockImplementation((input) => {
-    events.push('custody:gateway')
-    return { dispatchId: input.dispatchId } as ReturnType<
-      OrchestrationDb['recordCodexLabRuntimeGatewayStarted']
-    >
-  })
-  vi.spyOn(db, 'recordCodexLabRuntimeExternalAuthInstalled').mockImplementation((input) => {
-    events.push('custody:auth')
-    return { dispatchId: input.dispatchId } as ReturnType<
-      OrchestrationDb['recordCodexLabRuntimeExternalAuthInstalled']
-    >
-  })
-  vi.spyOn(db, 'recordCodexLabRuntimeProviderAttached').mockImplementation((input) => {
-    events.push('custody:provider')
-    return { dispatchId: input.dispatchId } as ReturnType<
-      OrchestrationDb['recordCodexLabRuntimeProviderAttached']
-    >
-  })
-  vi.spyOn(db, 'recordCodexLabRuntimeReady').mockImplementation((input) => {
-    events.push('custody:ready')
-    return { dispatchId: input.dispatchId } as ReturnType<
-      OrchestrationDb['recordCodexLabRuntimeReady']
-    >
-  })
-}
-
-function preparedAuthority(
-  binding: CodexLabStructuredLaunchBinding,
-  rollbackIfUnclaimed: () => Promise<boolean> = vi.fn(async () => true)
+function realPhaseAuthority(
+  prepared: Parameters<typeof createRealPhaseAuthority>[0],
+  rollbackIfUnclaimed?: Parameters<typeof createRealPhaseAuthority>[2],
+  releaseCleanupRegistration?: Parameters<typeof createRealPhaseAuthority>[3]
 ) {
-  return {
-    labLaunchBinding: binding,
-    layoutEvidence: {
-      dispatchId: binding.dispatchId,
-      profileId: PROFILE,
-      runtimeParentIdentity: { device: '1', inode: '2' },
-      runtimeRootIdentity: { device: '1', inode: '3' },
-      configSha256: binding.plan.receiptInputs.configSha256
-    },
-    gatewayReceipt: {
-      schema: 'orca.lab-dispatch-gateway.v1' as const,
-      policyId: 'lgp1_test',
-      dispatchId: binding.dispatchId,
-      transport: 'unix' as const,
-      socketMode: '0600' as const,
-      endpointSha256: binding.plan.receiptInputs.gatewaySocketPathSha256,
-      endpointIdentity: {
-        device: '1',
-        inode: '4',
-        uid: '501',
-        mode: '0600' as const,
-        type: 'socket' as const
-      },
-      endpointIdentitySha256: 'a'.repeat(64),
-      processIncarnationSha256: 'b'.repeat(64),
-      allowedOperations: ['worker.done', 'worker.ask', 'worker.check'] as const,
-      lifecycleSource: 'injected-per-request' as const,
-      dcapCustody: 'server-only' as const,
-      receiptSha256: 'c'.repeat(64)
-    },
-    rollbackIfUnclaimed
+  return createRealPhaseAuthority(
+    prepared,
+    testCodexLabStructuredLaunchBinding(),
+    rollbackIfUnclaimed,
+    releaseCleanupRegistration
+  )
+}
+
+afterEach(() => {
+  closeContinuationDatabases()
+})
+
+function requireEffects(value: unknown): unknown[] {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('Expected a worker continuation result object.')
   }
+  const effects = Reflect.get(value, 'effects')
+  if (!Array.isArray(effects)) {
+    throw new Error('Expected worker continuation effects.')
+  }
+  return effects
+}
+
+function effectKindIs(effect: unknown, kind: string): boolean {
+  return typeof effect === 'object' && effect !== null && Reflect.get(effect, 'kind') === kind
 }
 
 describe('local laboratory worker continuation', () => {
@@ -197,10 +67,14 @@ describe('local laboratory worker continuation', () => {
     stubCustodyTransitions(db, events)
     const binding = testCodexLabStructuredLaunchBinding()
     const deps: LocalLabWorkerContinuationDeps = {
-      prepareLaunchAuthority: vi.fn(async ({ dispatchCapability }) => {
+      prepareLaunchAuthority: vi.fn(async ({ dispatchCapability, lifecycle }) => {
         expect(dispatchCapability).toMatch(/^dcap_/)
         events.push('host:prepared')
-        return preparedAuthority(binding)
+        const authority = preparedAuthority(binding)
+        lifecycle.recordLayoutPrepared(authority.layoutEvidence)
+        lifecycle.recordProviderReserved()
+        lifecycle.recordGatewayStarted(authority.gatewayReceipt)
+        return authority
       }),
       createStructuredSession: vi.fn(async (args) => {
         events.push('session:create')
@@ -209,9 +83,7 @@ describe('local laboratory worker continuation', () => {
         }
         await args.beforeAttach(IDENTITY)
         events.push('session:attached')
-        return { identity: IDENTITY, host: {} } as Awaited<
-          ReturnType<NonNullable<LocalLabWorkerContinuationDeps['createStructuredSession']>>
-        >
+        return structuredSessionFixture()
       }),
       deliverPreamble: vi.fn(async (args) => {
         expect(args).toEqual({
@@ -265,8 +137,10 @@ describe('local laboratory worker continuation', () => {
       events.push('session:released')
     })
     const deps: LocalLabWorkerContinuationDeps = {
-      prepareLaunchAuthority: async () =>
-        preparedAuthority(testCodexLabStructuredLaunchBinding(), rollbackIfUnclaimed),
+      prepareLaunchAuthority: returningPreparedAuthority(
+        testCodexLabStructuredLaunchBinding(),
+        rollbackIfUnclaimed
+      ),
       createStructuredSession: async (args) => {
         if (!args.beforeAttach) {
           throw new Error('laboratory beforeAttach callback missing')
@@ -279,9 +153,7 @@ describe('local laboratory worker continuation', () => {
           id: IDENTITY.handle,
           surface: 'background'
         })
-        return { identity: IDENTITY, host: {} } as Awaited<
-          ReturnType<NonNullable<LocalLabWorkerContinuationDeps['createStructuredSession']>>
-        >
+        return structuredSessionFixture()
       },
       deliverPreamble: async () => {
         throw new Error('injected preamble refusal')
@@ -313,8 +185,10 @@ describe('local laboratory worker continuation', () => {
     stubCustodyTransitions(db, [])
     const rollbackIfUnclaimed = vi.fn(async () => false)
     const deps: LocalLabWorkerContinuationDeps = {
-      prepareLaunchAuthority: async () =>
-        preparedAuthority(testCodexLabStructuredLaunchBinding(), rollbackIfUnclaimed),
+      prepareLaunchAuthority: returningPreparedAuthority(
+        testCodexLabStructuredLaunchBinding(),
+        rollbackIfUnclaimed
+      ),
       createStructuredSession: async (args) => {
         if (!args.beforeAttach) {
           throw new Error('laboratory beforeAttach callback missing')
@@ -344,21 +218,228 @@ describe('local laboratory worker continuation', () => {
     expect(rollbackIfUnclaimed).toHaveResolvedWith(false)
   })
 
+  it('releases the profile lease when provider attach fails before auth is claimed', async () => {
+    const { db, runtime, run, prepared } = harness()
+    const rollbackIfUnclaimed = vi.fn(async () => true)
+    const releaseCleanupRegistration = vi.fn(() => true)
+    const deps: LocalLabWorkerContinuationDeps = {
+      prepareLaunchAuthority: async ({ lifecycle }) => {
+        const authority = realPhaseAuthority(
+          prepared,
+          rollbackIfUnclaimed,
+          releaseCleanupRegistration
+        )
+        lifecycle.recordLayoutPrepared(authority.layoutEvidence)
+        lifecycle.recordProviderReserved()
+        lifecycle.recordGatewayStarted(authority.gatewayReceipt)
+        return authority
+      },
+      createStructuredSession: async (args) => {
+        if (!args.beforeAttach) {
+          throw new Error('laboratory beforeAttach callback missing')
+        }
+        await args.beforeAttach(IDENTITY)
+        throw new Error('injected pre-claim attach refusal')
+      },
+      deliverPreamble: vi.fn(async () => undefined),
+      tearDownFailedStart: vi.fn(async () => undefined)
+    }
+
+    await expect(
+      continuePreparedLocalLabWorkerStart({
+        prepared,
+        runtime,
+        db,
+        run,
+        coordinatorHandle: 'term_coord',
+        deps
+      })
+    ).resolves.toMatchObject({
+      state: 'failed',
+      failedStage: 'provider_attach',
+      lastError: 'injected pre-claim attach refusal'
+    })
+    expect(rollbackIfUnclaimed).toHaveBeenCalledOnce()
+    expect(releaseCleanupRegistration).toHaveBeenCalledOnce()
+    expect(db.getCodexLabRuntimeCustody(prepared.started.dispatch.id)).toMatchObject({
+      state: 'released'
+    })
+    expect(() =>
+      db.createStartingWorkerDispatch({
+        creator: { kind: 'system' },
+        maxDepth: 1,
+        taskSpec: 'Retry after pre-claim attach refusal.',
+        taskRunId: run.id,
+        runtimeEpoch: 'runtime_task_757',
+        startOptions: { profile: { id: PROFILE } },
+        profileLease: { profileId: PROFILE }
+      })
+    ).not.toThrow()
+  })
+
+  it('reconciles a claimed provider only after exact process-exit proof', async () => {
+    const { db, runtime, run, prepared } = harness()
+    const events: string[] = []
+    vi.spyOn(runtime, 'inspectTerminalProcessIncarnationLiveness').mockResolvedValue('exited')
+    const deps: LocalLabWorkerContinuationDeps = {
+      prepareLaunchAuthority: async ({ lifecycle }) => {
+        const unregister = registerCodexLabRuntimeCleanupAuthority({
+          dispatchId: prepared.started.dispatch.id,
+          sessionId: IDENTITY.sessionId,
+          terminalHandle: IDENTITY.handle,
+          terminalPaneKey: IDENTITY.paneKey,
+          processIncarnation: IDENTITY.processIncarnation,
+          stopGateway: async () => {
+            events.push('gateway:released')
+          },
+          removeLayout: async () => {
+            events.push('layout:released')
+            return layoutRemovalEvidence(prepared.started.dispatch.id)
+          }
+        })
+        const authority = realPhaseAuthority(prepared, async () => false, unregister)
+        lifecycle.recordLayoutPrepared(authority.layoutEvidence)
+        lifecycle.recordProviderReserved()
+        lifecycle.recordGatewayStarted(authority.gatewayReceipt)
+        return authority
+      },
+      createStructuredSession: async (args) => {
+        if (!args.beforeAttach) {
+          throw new Error('laboratory beforeAttach callback missing')
+        }
+        await args.beforeAttach(IDENTITY)
+        throw new Error('injected claimed-provider refusal')
+      },
+      deliverPreamble: vi.fn(async () => undefined),
+      tearDownFailedStart: vi.fn(async () => undefined)
+    }
+
+    await expect(
+      continuePreparedLocalLabWorkerStart({
+        prepared,
+        runtime,
+        db,
+        run,
+        coordinatorHandle: 'term_coord',
+        deps
+      })
+    ).resolves.toMatchObject({
+      state: 'failed',
+      failedStage: 'provider_attach',
+      lastError: 'injected claimed-provider refusal',
+      residualResources: []
+    })
+    expect(runtime.inspectTerminalProcessIncarnationLiveness).toHaveBeenCalledWith(
+      IDENTITY.processIncarnation,
+      JSON.stringify(IDENTITY.hostScope)
+    )
+    expect(events).toEqual(['gateway:released', 'layout:released'])
+    expect(db.getCodexLabRuntimeCustody(prepared.started.dispatch.id)).toMatchObject({
+      state: 'released'
+    })
+    expect(() =>
+      db.createStartingWorkerDispatch({
+        creator: { kind: 'system' },
+        maxDepth: 1,
+        taskSpec: 'Retry after claimed provider exit.',
+        taskRunId: run.id,
+        runtimeEpoch: 'runtime_task_757',
+        startOptions: { profile: { id: PROFILE } },
+        profileLease: { profileId: PROFILE }
+      })
+    ).not.toThrow()
+  })
+
+  it('releases full ready-stage custody after preamble failure and proven provider exit', async () => {
+    const { db, runtime, run, prepared } = harness()
+    const events: string[] = []
+    vi.spyOn(runtime, 'inspectTerminalProcessIncarnationLiveness').mockResolvedValue('exited')
+    const deps: LocalLabWorkerContinuationDeps = {
+      prepareLaunchAuthority: async ({ lifecycle }) => {
+        const unregister = registerCodexLabRuntimeCleanupAuthority({
+          dispatchId: prepared.started.dispatch.id,
+          sessionId: IDENTITY.sessionId,
+          terminalHandle: IDENTITY.handle,
+          terminalPaneKey: IDENTITY.paneKey,
+          processIncarnation: IDENTITY.processIncarnation,
+          stopGateway: async () => {
+            events.push('gateway:released')
+          },
+          removeLayout: async () => {
+            events.push('layout:released')
+            return layoutRemovalEvidence(prepared.started.dispatch.id)
+          }
+        })
+        const authority = realPhaseAuthority(prepared, async () => false, unregister)
+        lifecycle.recordLayoutPrepared(authority.layoutEvidence)
+        lifecycle.recordProviderReserved()
+        lifecycle.recordGatewayStarted(authority.gatewayReceipt)
+        return authority
+      },
+      createStructuredSession: async (args) => {
+        if (!args.beforeAttach) {
+          throw new Error('laboratory beforeAttach callback missing')
+        }
+        await args.beforeAttach(IDENTITY)
+        return structuredSessionFixture()
+      },
+      deliverPreamble: async () => {
+        throw new Error('injected preamble refusal after attach')
+      },
+      tearDownFailedStart: vi.fn(async () => undefined)
+    }
+
+    await expect(
+      continuePreparedLocalLabWorkerStart({
+        prepared,
+        runtime,
+        db,
+        run,
+        coordinatorHandle: 'term_coord',
+        deps
+      })
+    ).resolves.toMatchObject({
+      state: 'failed',
+      failedStage: 'dispatch_input',
+      lastError: 'injected preamble refusal after attach',
+      residualResources: []
+    })
+    expect(events).toEqual(['gateway:released', 'layout:released'])
+    expect(db.getCodexLabRuntimeCustody(prepared.started.dispatch.id)).toMatchObject({
+      state: 'released',
+      cleanup: {
+        provider: { state: 'released' },
+        auth: { state: 'released' },
+        gateway: { state: 'released' },
+        layout: { state: 'released' }
+      }
+    })
+    expect(() =>
+      db.createStartingWorkerDispatch({
+        creator: { kind: 'system' },
+        maxDepth: 1,
+        taskSpec: 'Retry after preamble refusal.',
+        taskRunId: run.id,
+        runtimeEpoch: 'runtime_task_757',
+        startOptions: { profile: { id: PROFILE } },
+        profileLease: { profileId: PROFILE }
+      })
+    ).not.toThrow()
+  })
+
   it('preserves worker_done settlement that wins the acknowledged-preamble race', async () => {
     const { db, runtime, run, prepared } = harness()
     const events: string[] = []
     stubCustodyTransitions(db, events)
     const markReady = vi.spyOn(db, 'markWorkerDispatchReady')
     const deps: LocalLabWorkerContinuationDeps = {
-      prepareLaunchAuthority: async () => preparedAuthority(testCodexLabStructuredLaunchBinding()),
+      prepareLaunchAuthority: returningPreparedAuthority(testCodexLabStructuredLaunchBinding()),
       createStructuredSession: async (args) => {
         if (!args.beforeAttach) {
           throw new Error('laboratory beforeAttach callback missing')
         }
         await args.beforeAttach(IDENTITY)
-        return { identity: IDENTITY, host: {} } as Awaited<
-          ReturnType<NonNullable<LocalLabWorkerContinuationDeps['createStructuredSession']>>
-        >
+        return structuredSessionFixture()
       },
       deliverPreamble: async () => {
         db.settleWorkerReport({
@@ -372,14 +453,14 @@ describe('local laboratory worker continuation', () => {
       tearDownFailedStart: vi.fn(async () => undefined)
     }
 
-    const result = (await continuePreparedLocalLabWorkerStart({
+    const result = await continuePreparedLocalLabWorkerStart({
       prepared,
       runtime,
       db,
       run,
       coordinatorHandle: 'term_coord',
       deps
-    })) as { effects: { kind?: string; action?: string; state?: string }[] }
+    })
     expect(result).toMatchObject({
       state: 'ready',
       stage: 'settled',
@@ -389,9 +470,10 @@ describe('local laboratory worker continuation', () => {
         expect.objectContaining({ kind: 'dispatch_input', state: 'accepted' })
       ])
     })
-    expect(result.effects.filter((effect) => effect.kind === 'terminal')).toHaveLength(1)
-    expect(result.effects.filter((effect) => effect.kind === 'dispatch_input')).toHaveLength(1)
-    expect(result.effects.filter((effect) => effect.kind === 'created_lab_runtime')).toHaveLength(1)
+    const effects = requireEffects(result)
+    expect(effects.filter((effect) => effectKindIs(effect, 'terminal'))).toHaveLength(1)
+    expect(effects.filter((effect) => effectKindIs(effect, 'dispatch_input'))).toHaveLength(1)
+    expect(effects.filter((effect) => effectKindIs(effect, 'created_lab_runtime'))).toHaveLength(1)
     expect(markReady).not.toHaveBeenCalled()
     expect(events).not.toContain('custody:ready')
     expect(db.getWorkerDispatch(prepared.started.dispatch.id)).toMatchObject({
@@ -404,15 +486,13 @@ describe('local laboratory worker continuation', () => {
     const { db, runtime, run, prepared } = harness()
     stubCustodyTransitions(db, [])
     const deps: LocalLabWorkerContinuationDeps = {
-      prepareLaunchAuthority: async () => preparedAuthority(testCodexLabStructuredLaunchBinding()),
+      prepareLaunchAuthority: returningPreparedAuthority(testCodexLabStructuredLaunchBinding()),
       createStructuredSession: async (args) => {
         if (!args.beforeAttach) {
           throw new Error('laboratory beforeAttach callback missing')
         }
         await args.beforeAttach(IDENTITY)
-        return { identity: IDENTITY, host: {} } as Awaited<
-          ReturnType<NonNullable<LocalLabWorkerContinuationDeps['createStructuredSession']>>
-        >
+        return structuredSessionFixture()
       },
       deliverPreamble: async () => {
         throw new Error('primary preamble failure')
@@ -443,10 +523,12 @@ describe('local laboratory worker continuation', () => {
     const { db, runtime, run, prepared } = harness()
     stubCustodyTransitions(db, [])
     const deps: LocalLabWorkerContinuationDeps = {
-      prepareLaunchAuthority: async () =>
-        preparedAuthority(testCodexLabStructuredLaunchBinding(), async () => {
+      prepareLaunchAuthority: returningPreparedAuthority(
+        testCodexLabStructuredLaunchBinding(),
+        async () => {
           throw new Error('rollback also failed')
-        }),
+        }
+      ),
       createStructuredSession: async (args) => {
         if (!args.beforeAttach) {
           throw new Error('laboratory beforeAttach callback missing')
@@ -477,12 +559,157 @@ describe('local laboratory worker continuation', () => {
     expect(db.getWorkerDispatch(prepared.started.dispatch.id)).toMatchObject({ state: 'failed' })
   })
 
+  it('releases durable pre-attach custody after cleanup-authority registration refuses', async () => {
+    const { db, runtime, run, prepared } = harness()
+    const deps: LocalLabWorkerContinuationDeps = {
+      prepareLaunchAuthority: async () => {
+        throw new LocalLabLaunchAuthorityPreparationRefusal(
+          'Codex laboratory runtime cleanup authority conflicts or is invalid.',
+          true
+        )
+      },
+      createStructuredSession: async (args) => {
+        if (!args.beforeAttach) {
+          throw new Error('laboratory beforeAttach callback missing')
+        }
+        await args.beforeAttach(IDENTITY)
+        throw new Error('unreachable after host refusal')
+      },
+      deliverPreamble: vi.fn(async () => undefined),
+      tearDownFailedStart: vi.fn(async () => undefined)
+    }
+
+    const outcome = await continuePreparedLocalLabWorkerStart({
+      prepared,
+      runtime,
+      db,
+      run,
+      coordinatorHandle: 'term_coord',
+      deps
+    })
+    expect(outcome).toMatchObject({
+      state: 'failed',
+      failedStage: 'lab_host_prepare',
+      lastError: 'Codex laboratory runtime cleanup authority conflicts or is invalid.'
+    })
+    expect(outcome).not.toHaveProperty('cleanupErrors')
+    expect(db.getCodexLabRuntimeCustody(prepared.started.dispatch.id)).toMatchObject({
+      state: 'released'
+    })
+
+    const next = db.createStartingWorkerDispatch({
+      creator: { kind: 'system' },
+      maxDepth: 1,
+      taskSpec: 'Retry after cleanup-authority registration refused.',
+      taskRunId: run.id,
+      runtimeEpoch: 'runtime_task_757',
+      startOptions: { profile: { id: PROFILE } },
+      profileLease: { profileId: PROFILE }
+    })
+    expect(next.dispatch.id).not.toBe(prepared.started.dispatch.id)
+  })
+
+  it.each(['layout', 'provider', 'gateway'] as const)(
+    'releases phase-aligned %s custody after a proven before-attach rollback',
+    async (failedAfter) => {
+      const { db, runtime, run, prepared } = harness()
+      const deps: LocalLabWorkerContinuationDeps = {
+        prepareLaunchAuthority: async ({ lifecycle }) => {
+          const dispatchId = prepared.started.dispatch.id
+          lifecycle.recordLayoutPrepared({
+            dispatchId,
+            profileId: PROFILE,
+            runtimeParentIdentity: { device: '1', inode: '2' },
+            runtimeRootIdentity: { device: '1', inode: '3' },
+            configSha256: 'd'.repeat(64)
+          })
+          if (failedAfter !== 'layout') {
+            lifecycle.recordProviderReserved()
+          }
+          if (failedAfter === 'gateway') {
+            const socketEvidence = Object.freeze({
+              device: '1',
+              inode: '4',
+              uid: '501',
+              mode: '0600' as const,
+              type: 'socket' as const
+            })
+            lifecycle.recordGatewayStarted(
+              publicCodexLabGatewayReceipt(
+                buildLabGatewayServerReceipt(
+                  join(expectedCodexLabDispatchRuntimeRoot(dispatchId), 'gateway.sock'),
+                  IDENTITY.processIncarnation,
+                  'lgp1_continuation-test',
+                  dispatchId,
+                  {
+                    evidence: socketEvidence,
+                    identitySha256: sha256(JSON.stringify(socketEvidence))
+                  }
+                )
+              )
+            )
+          }
+          throw new LocalLabLaunchAuthorityPreparationRefusal(
+            `injected clean ${failedAfter} refusal`,
+            true
+          )
+        },
+        createStructuredSession: async (args) => {
+          if (!args.beforeAttach) {
+            throw new Error('laboratory beforeAttach callback missing')
+          }
+          await args.beforeAttach(IDENTITY)
+          throw new Error('unreachable after host refusal')
+        },
+        deliverPreamble: vi.fn(async () => undefined),
+        tearDownFailedStart: vi.fn(async () => undefined)
+      }
+
+      const outcome = await continuePreparedLocalLabWorkerStart({
+        prepared,
+        runtime,
+        db,
+        run,
+        coordinatorHandle: 'term_coord',
+        deps
+      })
+
+      expect(outcome).toMatchObject({
+        state: 'failed',
+        failedStage: 'lab_host_prepare',
+        lastError: `injected clean ${failedAfter} refusal`
+      })
+      expect(outcome).not.toHaveProperty('cleanupErrors')
+      expect(db.getCodexLabRuntimeCustody(prepared.started.dispatch.id)).toMatchObject({
+        state: 'released'
+      })
+      expect(db.getWorkerTerminalResourceByOwner(prepared.started.dispatch.id)).toMatchObject({
+        ownership_state: 'released',
+        release_state: 'released'
+      })
+
+      expect(() =>
+        db.createStartingWorkerDispatch({
+          creator: { kind: 'system' },
+          maxDepth: 1,
+          taskSpec: `Retry after ${failedAfter} rollback.`,
+          taskRunId: run.id,
+          runtimeEpoch: 'runtime_task_757',
+          startOptions: { profile: { id: PROFILE } },
+          profileLease: { profileId: PROFILE }
+        })
+      ).not.toThrow()
+    }
+  )
+
   it('re-reads worker_done settlement that lands during awaited cleanup', async () => {
     const { db, runtime, run, prepared } = harness()
     stubCustodyTransitions(db, [])
     const deps: LocalLabWorkerContinuationDeps = {
-      prepareLaunchAuthority: async () =>
-        preparedAuthority(testCodexLabStructuredLaunchBinding(), async () => false),
+      prepareLaunchAuthority: returningPreparedAuthority(
+        testCodexLabStructuredLaunchBinding(),
+        async () => false
+      ),
       createStructuredSession: async (args) => {
         if (!args.beforeAttach) {
           throw new Error('laboratory beforeAttach callback missing')
@@ -525,8 +752,10 @@ describe('local laboratory worker continuation', () => {
     const { db, runtime, run, prepared } = harness()
     stubCustodyTransitions(db, [])
     const deps: LocalLabWorkerContinuationDeps = {
-      prepareLaunchAuthority: async () =>
-        preparedAuthority(testCodexLabStructuredLaunchBinding(), async () => false),
+      prepareLaunchAuthority: returningPreparedAuthority(
+        testCodexLabStructuredLaunchBinding(),
+        async () => false
+      ),
       createStructuredSession: async (args) => {
         if (!args.beforeAttach) {
           throw new Error('laboratory beforeAttach callback missing')

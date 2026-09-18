@@ -22,9 +22,11 @@ import {
   testCodexLabAccount,
   testCodexLabEffectiveConfig,
   testCodexLabOpenedThread,
-  testCodexLabPermissionProfiles
+  testCodexLabPermissionProfiles,
+  testCodexLabRateLimits
 } from './codex-lab-session-attestation-test-support'
 import { adapterFor, fakeCodex, identityFor } from './codex-structured-session-adapter-fixture'
+import { CodexStructuredSessionAdapter } from './codex-structured-session-adapter'
 import type {
   CodexStructuredLaunch,
   CodexStructuredSessionEvent
@@ -132,6 +134,7 @@ function labLaunch(
     cwd: '/private/tmp/orca-lab/worktrees/external-auth',
     codexHome: '/private/tmp/orca-lab/runtime/dispatches/external-auth/codex-home',
     fakeHome: '/private/tmp/orca-lab/runtime/dispatches/external-auth/fake-home',
+    gatewaySocketPath: '/private/tmp/orca-lab/runtime/dispatches/external-auth/gateway.sock',
     workspaceId: overrides.attestedWorkspaceId ?? authBinding.workspaceId,
     permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID
   })
@@ -162,9 +165,15 @@ describe('Codex laboratory external ChatGPT app-server auth', () => {
     const { host } = authHost({ initial: token })
     const transport = connection(Object.assign(Object.create(null), { type: 'chatgptAuthTokens' }))
 
-    await expect(
-      authenticateCodexLabExternalChatGptAppServer(transport.value, host, 757)
-    ).resolves.toBeUndefined()
+    const receipt = await authenticateCodexLabExternalChatGptAppServer(transport.value, host, 757)
+    expect(receipt).toEqual({
+      type: 'chatgptAuthTokens',
+      chatgptAccountId: WORKSPACE_ID,
+      chatgptPlanType: 'business'
+    })
+    expect(Object.isFrozen(receipt)).toBe(true)
+    expect(JSON.stringify(receipt)).not.toContain(token)
+    expect(receipt).not.toHaveProperty('accessToken')
     expect(transport.request).toHaveBeenCalledWith(
       'account/login/start',
       {
@@ -316,8 +325,9 @@ describe('Codex laboratory external ChatGPT app-server auth', () => {
     const events: CodexStructuredSessionEvent[] = []
     const codex = fakeCodex()
     const expected = labLaunch(host).labAppServerAttestationExpected!
-    codex.routes['thread/start'] = () => testCodexLabOpenedThread(expected, false, 'thread-abc')
+    codex.routes['thread/start'] = () => testCodexLabOpenedThread(expected, true, 'thread-abc')
     codex.routes['account/read'] = () => testCodexLabAccount(expected)
+    codex.routes['account/rateLimits/read'] = () => testCodexLabRateLimits(expected)
     codex.routes['config/read'] = () => ({
       config: testCodexLabEffectiveConfig(expected),
       origins: {},
@@ -360,6 +370,7 @@ describe('Codex laboratory external ChatGPT app-server auth', () => {
       'account/login/start',
       'thread/start',
       'account/read',
+      'account/rateLimits/read',
       'config/read',
       'configRequirements/read',
       'permissionProfile/list'
@@ -368,6 +379,94 @@ describe('Codex laboratory external ChatGPT app-server auth', () => {
     expect(JSON.stringify(events)).not.toContain(refreshed)
 
     codex.connections[0].handlers.onExitObserved?.()
+    expect(() => host.refresh({ reason: 'unauthorized', previousAccountId: WORKSPACE_ID })).toThrow(
+      expect.objectContaining({ reason: 'host_disposed' })
+    )
+  })
+
+  it('reaps the exact child and publishes nothing when auth.json appears after login', async () => {
+    const { host } = authHost()
+    const events: CodexStructuredSessionEvent[] = []
+    const codex = fakeCodex()
+    const launch = labLaunch(host)
+    const expected = launch.labAppServerAttestationExpected!
+    codex.routes['account/login/start'] = () => ({ type: 'chatgptAuthTokens' })
+    codex.routes['thread/start'] = () => testCodexLabOpenedThread(expected, true, 'thread-abc')
+    codex.routes['account/read'] = () => testCodexLabAccount(expected)
+    codex.routes['account/rateLimits/read'] = () => testCodexLabRateLimits(expected)
+    codex.routes['config/read'] = () => ({
+      config: testCodexLabEffectiveConfig(expected),
+      origins: {},
+      layers: []
+    })
+    codex.routes['configRequirements/read'] = () => ({ requirements: null })
+    codex.routes['permissionProfile/list'] = () => testCodexLabPermissionProfiles(expected)
+    const openConnection = codex.openConnection
+    codex.openConnection = async (childLaunch, handlers = {}, spawnImpl) => {
+      const opened = await openConnection(childLaunch, handlers, spawnImpl)
+      const close = opened.close
+      opened.close = async () => {
+        const exited = await close()
+        handlers.onExitObserved?.()
+        return exited
+      }
+      return opened
+    }
+    const observeLabAuthJson = vi.fn(() => {
+      expect(codex.connections[0].calls.map(({ method }) => method)).toEqual([
+        'account/login/start',
+        'thread/start',
+        'account/read',
+        'account/rateLimits/read',
+        'config/read',
+        'configRequirements/read',
+        'permissionProfile/list'
+      ])
+      return 'present' as const
+    })
+    const adapter = new CodexStructuredSessionAdapter({
+      resolveLaunch: async () => ({
+        command: 'codex',
+        args: ['app-server'],
+        cwd: '/work/repo',
+        codexHome: null,
+        resumeThreadId: null,
+        ...launch
+      }),
+      openConnection: codex.openConnection,
+      readProcessStartTime: async () => 1_700_000_000_000,
+      observeLabAuthJson,
+      onEvent: (event) => events.push(event)
+    })
+
+    await expect(
+      adapter.acquire({
+        identity: identityFor(SESSION_ID),
+        fence: 7,
+        spawnToken: 'spawn-lab-auth-json-injected'
+      })
+    ).rejects.toThrow('auth.json absence is not verified')
+
+    expect(codex.connections[0].calls.map(({ method }) => method)).toEqual([
+      'account/login/start',
+      'thread/start',
+      'account/read',
+      'account/rateLimits/read',
+      'config/read',
+      'configRequirements/read',
+      'permissionProfile/list'
+    ])
+    expect(observeLabAuthJson).toHaveBeenCalledExactlyOnceWith(`${expected.codexHome}/auth.json`)
+    expect(codex.connections[0].closeCount).toBe(1)
+    expect(events).toEqual([])
+    await expect(
+      adapter.dispatch({
+        sessionId: SESSION_ID,
+        clientMessageId: 'never-published-auth-json',
+        body: { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'must fail' }] },
+        fence: 7
+      })
+    ).rejects.toThrow('no live codex app-server')
     expect(() => host.refresh({ reason: 'unauthorized', previousAccountId: WORKSPACE_ID })).toThrow(
       expect.objectContaining({ reason: 'host_disposed' })
     )

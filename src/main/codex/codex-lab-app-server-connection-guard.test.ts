@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  TEST_LAB_DISPATCH_ID,
   testCodexLabDynamicToolHost,
   testCodexLabDynamicToolHostAttestation
 } from '../runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-test-support'
@@ -12,8 +13,10 @@ import { CodexLabAppServerMethodRefusedError } from './codex-lab-app-server-atte
 import {
   testCodexLabAccount,
   testCodexLabEffectiveConfig,
+  testCodexLabExternalChatGptAuth,
   testCodexLabOpenedThread,
-  testCodexLabPermissionProfiles
+  testCodexLabPermissionProfiles,
+  testCodexLabRateLimits
 } from './codex-lab-session-attestation-test-support'
 import { adapterFor, fakeCodex, identityFor } from './codex-structured-session-adapter-fixture'
 import { CODEX_LAB_READONLY_PERMISSION_PROFILE_ID } from './codex-structured-permission-policy'
@@ -42,6 +45,7 @@ describe('Codex laboratory app-server connection guard', () => {
 
     expect(CODEX_LAB_ALLOWED_APP_SERVER_REQUEST_METHODS).toEqual([
       'account/read',
+      'account/rateLimits/read',
       'config/read',
       'configRequirements/read',
       'permissionProfile/list',
@@ -139,16 +143,25 @@ describe('Codex laboratory app-server connection guard', () => {
   )
 
   it('guards the connection published by a real lab acquisition', async () => {
+    const sessionId = 'session-lab-guard'
     const expected = Object.freeze({
       cwd: '/private/tmp/orca-lab/worktrees/guard',
       codexHome: '/private/tmp/orca-lab/runtime/dispatches/guard/codex-home',
       fakeHome: '/private/tmp/orca-lab/runtime/dispatches/guard/fake-home',
+      gatewaySocketPath: '/private/tmp/orca-lab/runtime/dispatches/guard/gateway.sock',
       workspaceId: '00000000-0000-4000-8000-000000000757',
       permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID
     })
+    const auth = testCodexLabExternalChatGptAuth({
+      dispatchId: TEST_LAB_DISPATCH_ID,
+      sessionId,
+      expected
+    })
     const codex = fakeCodex({
-      'thread/start': () => testCodexLabOpenedThread(expected, false, 'thread-abc'),
+      'account/login/start': () => ({ type: 'chatgptAuthTokens' }),
+      'thread/start': () => testCodexLabOpenedThread(expected, true, 'thread-abc'),
       'account/read': () => testCodexLabAccount(expected),
+      'account/rateLimits/read': () => testCodexLabRateLimits(expected),
       'config/read': () => ({
         config: testCodexLabEffectiveConfig(expected),
         origins: {},
@@ -166,6 +179,8 @@ describe('Codex laboratory app-server connection guard', () => {
       labDynamicToolHost: testCodexLabDynamicToolHost(),
       labDynamicToolHostAttestationExpected: testCodexLabDynamicToolHostAttestation(),
       labAppServerAttestationExpected: expected,
+      labExternalChatGptAuthHost: auth.host,
+      labExternalChatGptAuthBindingExpected: auth.binding,
       permissionPolicy: {
         approvalPolicy: 'never',
         permissions: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID,
@@ -173,7 +188,7 @@ describe('Codex laboratory app-server connection guard', () => {
       }
     })
     await adapter.acquire({
-      identity: identityFor('session-lab-guard'),
+      identity: identityFor(sessionId),
       fence: 7,
       spawnToken: 'spawn-lab-guard'
     })
@@ -182,12 +197,14 @@ describe('Codex laboratory app-server connection guard', () => {
       adapter.compact({ sessionId: 'session-lab-guard', fence: 7, turnId: 'turn-lab-guard' })
     ).rejects.toEqual(new CodexLabAppServerMethodRefusedError('thread/compact/start'))
     expect(codex.connections[0].calls.map(({ method }) => method)).toEqual([
+      'account/login/start',
       'thread/start',
       'account/read',
+      'account/rateLimits/read',
       'config/read',
       'configRequirements/read',
       'permissionProfile/list'
     ])
-    await expect(adapter.closeSession('session-lab-guard')).resolves.toBe(true)
+    await expect(adapter.closeSession(sessionId)).resolves.toBe(true)
   })
 })

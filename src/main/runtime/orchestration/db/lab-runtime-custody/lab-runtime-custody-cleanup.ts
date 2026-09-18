@@ -1,5 +1,6 @@
 import type { OrchestrationDb } from '../orchestration-db'
 import { runLifecycleWriteTransaction } from '../lifecycle-write-transaction-runner'
+import { sessionIdFromStructuredWorkerIncarnation } from '../../../structured-worker-identity'
 import type {
   CodexLabRuntimeCleanupResource,
   CodexLabRuntimeCleanupResult,
@@ -210,9 +211,7 @@ function requireReleasedProviderResource(
     throw new Error('Codex laboratory runtime provider exit is not proven.')
   }
   const resource = db.getWorkerTerminalResource(provider.terminalResourceId)
-  const sessionId = resource?.terminal_handle.startsWith('structworker_')
-    ? resource.terminal_handle.slice('structworker_'.length)
-    : ''
+  const sessionId = sessionIdFromStructuredWorkerIncarnation(resource?.process_incarnation)
   if (
     !resource ||
     resource.id !== provider.terminalResourceId ||
@@ -228,6 +227,7 @@ function requireReleasedProviderResource(
     throw new Error('Codex laboratory runtime provider exit is not proven.')
   }
   if (
+    sessionId === null ||
     sha256(sessionId) !== provider.sessionSha256 ||
     sha256(resource.terminal_handle) !== provider.terminalHandleSha256 ||
     resource.pane_key === null ||

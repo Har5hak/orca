@@ -13,11 +13,15 @@ const BINDING = Object.freeze({
 })
 
 describe('Codex lab production external ChatGPT auth registration', () => {
-  it('registers source-only credentials and cannot roll back after the exact claim', async () => {
-    const readCredential = vi.fn(async () => credential())
+  it('accepts the official null API-key placeholder and cannot roll back after claim', async () => {
+    const readCredential = vi.fn(async () => credential({ extra: { OPENAI_API_KEY: null } }))
     const registration = await prepareCodexLabExternalChatGptAuthRegistration({
       ...BINDING,
       source: { readCredential }
+    })
+    expect(registration.metadata).toEqual({
+      workspaceId: BINDING.workspaceId,
+      planType: 'business'
     })
     const host = claimCodexLabExternalChatGptAuthAuthority(BINDING)
     expect(host.takeInitialLoginParams()).toEqual({
@@ -87,6 +91,23 @@ describe('Codex lab production external ChatGPT auth registration', () => {
     expect(() => claimCodexLabExternalChatGptAuthAuthority(BINDING)).toThrow(
       new CodexLabExternalChatGptAuthRegistryRefusal('authority_missing')
     )
+  })
+
+  it('derives and pins workspace identity from the single initial source read', async () => {
+    const readCredential = vi.fn(async () => credential())
+    const registration = await prepareCodexLabExternalChatGptAuthRegistration({
+      dispatchId: BINDING.dispatchId,
+      sessionId: BINDING.sessionId,
+      source: { readCredential }
+    })
+
+    expect(registration.binding.workspaceId).toBe(BINDING.workspaceId)
+    expect(registration.metadata).toEqual({
+      workspaceId: BINDING.workspaceId,
+      planType: 'business'
+    })
+    expect(readCredential).toHaveBeenCalledTimes(1)
+    expect(registration.rollbackIfUnclaimed()).toBe(true)
   })
 })
 

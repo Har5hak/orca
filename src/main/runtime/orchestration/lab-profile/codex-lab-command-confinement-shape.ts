@@ -44,7 +44,7 @@ const record = (
 const IDENTITY = recordShape(strings('device inode'))
 const DIRECTORY = record('path observedRealPath', {
   kind: literal('directory'),
-  ownedByCurrentUser: literal(true),
+  custody: literal('trusted-local-host'),
   identity: IDENTITY
 })
 const LIVE = {
@@ -108,7 +108,11 @@ export const CODEX_LAB_CONFINEMENT_LAYOUT_SHAPE = record(
 )
 export const CODEX_LAB_CONFINEMENT_PROBE_SHAPE = record(
   'path observedRealPath expectedSha256Candidate observedSha256 device inode',
-  { kind: literal('regular-file'), executable: literal(true) }
+  {
+    argvPrefix: arrayShape(S),
+    kind: literal('regular-file'),
+    executable: literal(true)
+  }
 )
 export const CODEX_LAB_CONFINEMENT_CONTROLS_SHAPE = recordShape({
   phase: literal('completed-before-sandbox'),
@@ -127,6 +131,7 @@ export const CODEX_LAB_CONFINEMENT_CONTROLS_SHAPE = recordShape({
       ...succeeded('bind listen close')
     }),
     unixConnect: recordShape({ path: S, ...LIVE }),
+    unixConnectDenied: recordShape({ path: S, ...LIVE }),
     unixBind: record('path', {
       operation: literal('bind-listen-close-unlink'),
       parent: DIRECTORY,
@@ -146,6 +151,7 @@ type SnapshotArgs = Readonly<{
 
 export function snapshotExactCodexLabValue<T>(args: SnapshotArgs): T {
   try {
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: snapshotNode recursively validates every own key, descriptor, primitive and container against the caller-supplied exact shape before this generic boundary returns.
     return snapshotNode(args, new WeakSet<object>()) as T
   } catch (error) {
     if (error instanceof CodexLabCommandConfinementRefusal) {
@@ -196,12 +202,13 @@ function snapshotNode(args: SnapshotArgs, ancestors: WeakSet<object>): unknown {
         !length ||
         length.enumerable ||
         !('value' in length) ||
+        typeof length.value !== 'number' ||
         !Number.isSafeInteger(length.value) ||
         length.value < 0
       ) {
         throw new CodexLabCommandConfinementRefusal(reason, field)
       }
-      const keys = Array.from({ length: length.value as number }, (_, index) => String(index))
+      const keys = Array.from({ length: length.value }, (_, index) => String(index))
       entries = keys.map((key) => [key, shape.item] as const)
       expectedKeys = [...keys, 'length']
     } else {

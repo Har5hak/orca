@@ -28,7 +28,7 @@ export function isCodexLabBeforeAttachResult(
   if (typeof value !== 'object' || value === null || !Object.hasOwn(value, 'labLaunchBinding')) {
     return false
   }
-  const binding = (value as { labLaunchBinding?: unknown }).labLaunchBinding
+  const binding = Reflect.get(value, 'labLaunchBinding')
   return typeof binding === 'object' && binding !== null
 }
 

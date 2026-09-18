@@ -38,14 +38,16 @@ export function prepareStartingWorkerAuthority(
     const residualResources = params.preserveCreatedLabRuntimeResidual
       ? requireExactCreatedLabRuntimeResidual(worker.residual_resources, params.dispatchId)
       : JSON.stringify(
-          params.effects.filter((effect) =>
-            Boolean(
-              effect &&
-              typeof effect === 'object' &&
-              ((effect as { action?: string }).action?.startsWith('created') ||
-                (effect as { action?: string }).action === 'reused_agent_terminal')
+          params.effects.filter((effect) => {
+            if (!effect || typeof effect !== 'object') {
+              return false
+            }
+            const action = Reflect.get(effect, 'action')
+            return (
+              typeof action === 'string' &&
+              (action.startsWith('created') || action === 'reused_agent_terminal')
             )
-          )
+          })
         )
     if (
       dispatch.launch_token_hash &&
@@ -169,7 +171,7 @@ export function prepareStartingWorkerAuthority(
 function requireExactCreatedLabRuntimeResidual(serialized: string, dispatchId: string): string {
   let residualResources: unknown
   try {
-    residualResources = JSON.parse(serialized) as unknown
+    residualResources = JSON.parse(serialized)
   } catch {
     throwLabRuntimeResidualMismatch(dispatchId)
   }
@@ -185,8 +187,8 @@ function requireExactCreatedLabRuntimeResidual(serialized: string, dispatchId: s
     keys.length !== 2 ||
     !keys.includes('kind') ||
     !keys.includes('id') ||
-    (resource as { kind?: unknown }).kind !== 'created_lab_runtime' ||
-    (resource as { id?: unknown }).id !== dispatchId
+    Reflect.get(resource, 'kind') !== 'created_lab_runtime' ||
+    Reflect.get(resource, 'id') !== dispatchId
   ) {
     throwLabRuntimeResidualMismatch(dispatchId)
   }

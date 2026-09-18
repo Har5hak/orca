@@ -139,7 +139,7 @@ describe('Codex laboratory ChatGPT credential materialization', () => {
   })
 
   it('writes and verifies ChatGPT auth while returning only non-secret receipt metadata', async () => {
-    const source = chatGptCredential()
+    const source = chatGptCredential({ OPENAI_API_KEY: null })
     const harness = portHarness(source)
 
     const receipt = await materializeCodexLabChatGptCredential(request(), harness.ports)

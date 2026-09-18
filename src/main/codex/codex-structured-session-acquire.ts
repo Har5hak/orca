@@ -136,7 +136,8 @@ export async function acquireCodexStructuredSession(input: {
         args: launch.args,
         cwd: launch.cwd,
         env: buildCodexStructuredChildEnvironment(launch, acquireInput.spawnToken, sessionId),
-        ...(launch.environmentMode ? { environmentMode: launch.environmentMode } : {})
+        ...(launch.environmentMode ? { environmentMode: launch.environmentMode } : {}),
+        ...(launch.executableIntegrity ? { executableIntegrity: launch.executableIntegrity } : {})
       },
       createCodexStructuredSessionConnectionHandlers({
         acquisition,
@@ -155,7 +156,10 @@ export async function acquireCodexStructuredSession(input: {
       })
     )
     acquisition.connection = upstreamConnection
-    await labExternalChatGptAuth?.authenticate(upstreamConnection, deps.requestTimeoutMs)
+    const externalAuthReceipt = await labExternalChatGptAuth?.authenticate(
+      upstreamConnection,
+      deps.requestTimeoutMs
+    )
     const connection = guardCodexAppServerConnectionForWorkerAccess(
       upstreamConnection,
       launch.workerAccessMode
@@ -176,7 +180,9 @@ export async function acquireCodexStructuredSession(input: {
     await attestCodexLabOpenedThread({
       connection,
       expected: attestationExpected,
+      externalAuthReceipt: externalAuthReceipt ?? null,
       opened,
+      ...(deps.observeLabAuthJson ? { observeAuthJson: deps.observeLabAuthJson } : {}),
       ...(deps.requestTimeoutMs === undefined ? {} : { timeoutMs: deps.requestTimeoutMs })
     })
     acquisitions.assertCurrent(sessionId, attempt)

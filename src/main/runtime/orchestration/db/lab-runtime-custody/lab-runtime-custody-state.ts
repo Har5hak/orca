@@ -117,7 +117,7 @@ export function throwStateRefusal(
 function profileIdFromStartOptions(serialized: string): string | undefined {
   let parsed: unknown
   try {
-    parsed = JSON.parse(serialized) as unknown
+    parsed = JSON.parse(serialized)
   } catch {
     return undefined
   }

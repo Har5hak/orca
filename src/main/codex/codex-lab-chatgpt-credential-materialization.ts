@@ -177,7 +177,7 @@ function assertChatGptCredential(
   if (
     typeof auth.auth_mode !== 'string' ||
     !CHATGPT_AUTH_MODES.has(auth.auth_mode) ||
-    NON_CHATGPT_CREDENTIAL_FIELDS.some((field) => field in auth)
+    NON_CHATGPT_CREDENTIAL_FIELDS.some((field) => field in auth && auth[field] !== null)
   ) {
     throw refusal('auth_method_unsupported')
   }

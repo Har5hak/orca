@@ -48,7 +48,14 @@ export type CodexAppServerLaunch = {
   environmentMode?: CodexAppServerEnvironmentMode
   /** Keys stripped after the overlay, matching `CodexAppServerInvocation`. */
   envToDelete?: readonly string[]
+  /** Host-sealed executable bytes that the POSIX supervisor must re-attest before spawn. */
+  executableIntegrity?: CodexAppServerExecutableIntegrity
 }
+
+export type CodexAppServerExecutableIntegrity = Readonly<{
+  canonicalPath: string
+  sha256: string
+}>
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 const GRACEFUL_EXIT_MS = 1_500

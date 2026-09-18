@@ -38,6 +38,7 @@ import {
   RuntimeLabProfileReadinessGate,
   type RuntimeLabProfileReadiness
 } from './runtime-lab-profile-readiness'
+import type { CodexLabHostPrerequisiteReceipt } from './orchestration/lab-profile/codex-lab-host-prerequisites'
 
 type RuntimeStatusHost = {
   getAvailableAuthoritativeWindow(): unknown
@@ -144,8 +145,8 @@ export class OrcaRuntimeWithGetStatus extends OrcaRuntimeWithGetRuntimeId {
     }
   }
 
-  setLabProfileVerifiedHostReady(verified: boolean): void {
-    this.labProfileReadiness.setVerifiedHostReady(verified)
+  installLabProfileHostPrerequisites(receipt: CodexLabHostPrerequisiteReceipt): void {
+    this.labProfileReadiness.installHostPrerequisites(receipt)
   }
 
   readLabProfileReadiness(): RuntimeLabProfileReadiness {

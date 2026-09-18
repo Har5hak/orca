@@ -139,12 +139,14 @@ export async function createStructuredWorkerSessionForWorktree(
     )
   }
   const options = narrowStructuredLaunchSeedOptions(args.launchPreferences)
+  const sessionOptions =
+    args.launchMode === 'codex-lab' ? { ...options, fastMode: 'false' } : options
   const common = {
     runtime: args.runtime,
     db: args.db,
     worktreeId: args.worktreeId,
     dispatchId: args.dispatchId,
-    ...(options ? { options } : {}),
+    ...(sessionOptions ? { options: sessionOptions } : {}),
     onJournalActivity: (sessionId) =>
       args.runtime.notifyStructuredSessionJournalActivity?.(sessionId)
   }

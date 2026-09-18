@@ -7,6 +7,7 @@ const { getCodexLabStructuredLaunchBinding } = publicBindingRegistry
 
 const hostRef: { current: unknown } = { current: null }
 const createSpy = vi.fn()
+// oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: session creation reads only these two lifecycle queries, and this fixture returns their exact starting-state fields.
 const startingDb = {
   getDispatchContextById: () => ({ status: 'pending' }),
   getWorkerDispatch: () => ({ state: 'starting' })
@@ -22,6 +23,11 @@ vi.mock('./structured-agent-session-create', () => ({
 const { createStructuredWorkerSession, releaseStructuredWorkerSession } =
   await import('./orchestration-structured-worker-session')
 const { structuredWorkerIdentities } = await import('../../structured-worker-identity')
+
+// oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: these adversarial tests intentionally exercise runtime rejection of caller shapes excluded by the TypeScript union.
+const createStructuredWorkerSessionUnchecked = createStructuredWorkerSession as (
+  args: object
+) => ReturnType<typeof createStructuredWorkerSession>
 
 function installHost() {
   const release = vi.fn()
@@ -136,9 +142,9 @@ describe('structured worker lab binding lifecycle', () => {
       dispatchId: binding.dispatchId,
       labLaunchBinding: binding,
       onJournalActivity: () => {}
-    } as unknown as Parameters<typeof createStructuredWorkerSession>[0]
+    }
 
-    await expect(createStructuredWorkerSession(staleCallerArgs)).rejects.toMatchObject({
+    await expect(createStructuredWorkerSessionUnchecked(staleCallerArgs)).rejects.toMatchObject({
       code: 'ORCA_CODEX_LAB_STRUCTURED_BINDING_REFUSED',
       reason: 'binding_invalid'
     })
@@ -156,10 +162,10 @@ describe('structured worker lab binding lifecycle', () => {
       dispatchId: 'dispatch-unknown-launch-mode',
       launchMode: 'legacy-lab',
       onJournalActivity: () => {}
-    } as unknown as Parameters<typeof createStructuredWorkerSession>[0]
+    }
 
     try {
-      await expect(createStructuredWorkerSession(staleCallerArgs)).rejects.toMatchObject({
+      await expect(createStructuredWorkerSessionUnchecked(staleCallerArgs)).rejects.toMatchObject({
         code: 'worker_launch_mode_invalid'
       })
       expect(registerIdentity).not.toHaveBeenCalled()
@@ -183,9 +189,9 @@ describe('structured worker lab binding lifecycle', () => {
         reservedSessionId = identity.sessionId
       },
       onJournalActivity: () => {}
-    } as unknown as Parameters<typeof createStructuredWorkerSession>[0]
+    }
 
-    await expect(createStructuredWorkerSession(buggyLabArgs)).rejects.toMatchObject({
+    await expect(createStructuredWorkerSessionUnchecked(buggyLabArgs)).rejects.toMatchObject({
       code: 'ORCA_CODEX_LAB_STRUCTURED_BINDING_REFUSED',
       reason: 'binding_missing'
     })
@@ -204,9 +210,9 @@ describe('structured worker lab binding lifecycle', () => {
       dispatchId: binding.dispatchId,
       beforeAttach: async () => ({ labLaunchBinding: binding }),
       onJournalActivity: () => {}
-    } as unknown as Parameters<typeof createStructuredWorkerSession>[0]
+    }
 
-    await expect(createStructuredWorkerSession(accidentalLabArgs)).rejects.toMatchObject({
+    await expect(createStructuredWorkerSessionUnchecked(accidentalLabArgs)).rejects.toMatchObject({
       code: 'ORCA_CODEX_LAB_STRUCTURED_BINDING_REFUSED',
       reason: 'binding_invalid'
     })
@@ -221,7 +227,7 @@ describe('structured worker lab binding lifecycle', () => {
 
     try {
       await expect(
-        createStructuredWorkerSession({
+        createStructuredWorkerSessionUnchecked({
           runtime: new OrcaRuntimeService(),
           db: startingDb,
           worktreeId: 'worktree-id',
@@ -230,7 +236,7 @@ describe('structured worker lab binding lifecycle', () => {
           launchMode: 'codex-lab',
           beforeAttach,
           onJournalActivity: () => {}
-        } as unknown as Parameters<typeof createStructuredWorkerSession>[0])
+        })
       ).rejects.toMatchObject({
         code: 'ORCA_CODEX_LAB_STRUCTURED_BINDING_REFUSED',
         reason: 'agent_mode_mismatch'

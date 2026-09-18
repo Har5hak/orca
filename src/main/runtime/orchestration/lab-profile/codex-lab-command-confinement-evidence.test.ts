@@ -245,7 +245,7 @@ describe('Codex laboratory command-confinement evidence', () => {
           throw new Error('SUPER_SECRET_VALUE')
         }
       })
-    ) as CodexLabCommandConfinementPreflightInput['plan']
+    )
     let called = false
     const refusal = await expectRefusal(
       { ...confinementInput(), plan },
@@ -343,16 +343,15 @@ function malformedPlanGraphCases(): readonly MalformedPlanGraphCase[] {
     value: base.receiptInputs.configSha256,
     enumerable: false
   })
-  const inheritedRuntimePaths = Object.assign(
-    Object.create({ SUPER_SECRET_VALUE: 'inherited' }) as object,
-    base.runtimePaths
+  const inheritedRuntimePaths = Object.setPrototypeOf(
+    { ...base.runtimePaths },
+    { SUPER_SECRET_VALUE: 'inherited' }
   )
-  const cyclicEnvironment = {
-    ambientAllowlist: base.environment.ambientAllowlist,
-    inherited: base.environment.inherited,
-    injected: undefined as unknown
-  }
-  cyclicEnvironment.injected = cyclicEnvironment
+  const cyclicEnvironment = { ...base.environment }
+  Object.defineProperty(cyclicEnvironment, 'injected', {
+    value: cyclicEnvironment,
+    enumerable: true
+  })
 
   return [
     ['a symbolic argv property', Object.freeze({ ...base, argv: Object.freeze(symbolicArgv) })],
@@ -372,35 +371,44 @@ function malformedPlanGraphCases(): readonly MalformedPlanGraphCase[] {
       Object.freeze({
         ...base,
         environment: Object.freeze(cyclicEnvironment)
-      }) as unknown as CodexLabCommandConfinementPreflightInput['plan']
+      })
     ],
     [
       'a Map receipt',
-      Object.freeze({
-        ...base,
-        receiptInputs: Object.freeze(new Map([['schemaVersion', 1]]))
-      }) as unknown as CodexLabCommandConfinementPreflightInput['plan']
+      Object.freeze(
+        Object.defineProperty({ ...base }, 'receiptInputs', {
+          value: Object.freeze(new Map([['schemaVersion', 1]])),
+          enumerable: true
+        })
+      )
     ],
     [
       'a BigInt receipt value',
       Object.freeze({
         ...base,
-        receiptInputs: Object.freeze({ ...base.receiptInputs, schemaVersion: 1n })
-      }) as unknown as CodexLabCommandConfinementPreflightInput['plan']
+        receiptInputs: Object.freeze(
+          Object.defineProperty({ ...base.receiptInputs }, 'schemaVersion', {
+            value: 1n,
+            enumerable: true
+          })
+        )
+      })
     ],
     [
       'a null runtime-path record',
-      Object.freeze({
-        ...base,
-        runtimePaths: null
-      }) as unknown as CodexLabCommandConfinementPreflightInput['plan']
+      Object.freeze(
+        Object.defineProperty({ ...base }, 'runtimePaths', {
+          value: null,
+          enumerable: true
+        })
+      )
     ],
     [
       'an inherited nested record',
       Object.freeze({
         ...base,
         runtimePaths: Object.freeze(inheritedRuntimePaths)
-      }) as unknown as CodexLabCommandConfinementPreflightInput['plan']
+      })
     ]
   ]
 }

@@ -62,6 +62,7 @@ export function buildSealedCodexLabLaunchPlan(
   const configToml = renderCodexLabConfig({
     workspaceId: facts.authentication.expectedWorkspaceId,
     worktreePath: facts.worktree.expectedPath,
+    gatewaySocketPath: facts.gateway.socketPath,
     ...runtimePaths
   })
   const receiptInputs = buildReceiptInputs(facts, argv, configToml)
@@ -119,6 +120,7 @@ export function assertSealedCodexLabLaunchPlan(plan: SealedCodexLabLaunchPlan): 
   const expectedConfig = renderCodexLabConfig({
     workspaceId: plan.enforcedWorkspaceId,
     worktreePath: plan.cwd,
+    gatewaySocketPath: plan.gatewaySocketPath,
     ...plan.runtimePaths
   })
   if (plan.configToml !== expectedConfig) {
@@ -238,6 +240,9 @@ function validateAuthentication(facts: CodexLabLaunchFacts): void {
     refuse('workspace_identity_invalid', 'authentication.observedWorkspaceId')
   }
   const subscription = authentication.subscription
+  if (subscription.status === 'paid-usage') {
+    refuse('paid_usage_forbidden', 'authentication.subscription')
+  }
   if (
     subscription.status !== 'active' ||
     subscription.scope !== 'workspace' ||

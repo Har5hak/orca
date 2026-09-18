@@ -4,6 +4,7 @@ import { OrcaRuntimeService } from './orca-runtime'
 import { OrchestrationDb } from './orchestration/db'
 import { readLocalLabWorkerStartReadiness } from './rpc/methods/orchestration/worker/local-lab-worker-start'
 import type { RuntimeLabProfileReadiness } from './runtime-lab-profile-readiness'
+import { verifiedCodexLabHostPrerequisiteReceipt } from './orchestration/lab-profile/codex-lab-host-prerequisites.test-support'
 
 const PROFILE_ID = 'lab-readonly-supervised-v1'
 const databases: OrchestrationDb[] = []
@@ -32,6 +33,10 @@ function expectReadiness(runtime: OrcaRuntimeService, expected: RuntimeLabProfil
   expect(advertised).toBe(readiness.ready)
 }
 
+function installVerifiedHostPrerequisites(runtime: OrcaRuntimeService): void {
+  runtime.installLabProfileHostPrerequisites(verifiedCodexLabHostPrerequisiteReceipt())
+}
+
 function reserveProfile(db: OrchestrationDb, taskSpec: string) {
   return db.createStartingWorkerDispatch({
     creator: { kind: 'system' },
@@ -44,12 +49,12 @@ function reserveProfile(db: OrchestrationDb, taskSpec: string) {
 }
 
 describe('runtime lab-profile readiness', () => {
-  it('keeps status advertisement and local start default-dark until the host is explicitly verified', () => {
+  it('advertises before any Dispatch only after verified process-wide host prerequisites', () => {
     const { runtime } = createHarness()
 
     expectReadiness(runtime, { ready: false, reason: 'launch_pipeline_incomplete' })
 
-    runtime.setLabProfileVerifiedHostReady(true)
+    installVerifiedHostPrerequisites(runtime)
 
     expectReadiness(runtime, { ready: true })
   })
@@ -57,14 +62,24 @@ describe('runtime lab-profile readiness', () => {
   it('stays dark when host verification cannot consult orchestration state', () => {
     const runtime = new OrcaRuntimeService()
 
-    runtime.setLabProfileVerifiedHostReady(true)
+    installVerifiedHostPrerequisites(runtime)
 
     expectReadiness(runtime, { ready: false, reason: 'orchestration_state_unavailable' })
   })
 
+  it('refuses a structurally copied prerequisite receipt', () => {
+    const { runtime } = createHarness()
+    const receipt = verifiedCodexLabHostPrerequisiteReceipt()
+
+    expect(() => runtime.installLabProfileHostPrerequisites({ ...receipt })).toThrow(
+      'Refusing an unverified Codex laboratory host prerequisite receipt'
+    )
+    expectReadiness(runtime, { ready: false, reason: 'launch_pipeline_incomplete' })
+  })
+
   it('withdraws both surfaces while the profile lease is occupied', () => {
     const { runtime, db } = createHarness()
-    runtime.setLabProfileVerifiedHostReady(true)
+    installVerifiedHostPrerequisites(runtime)
     reserveProfile(db, 'active profile owner')
 
     expectReadiness(runtime, { ready: false, reason: 'profile_capacity_exhausted' })
@@ -72,7 +87,7 @@ describe('runtime lab-profile readiness', () => {
 
   it('withdraws both surfaces while a settled profile has residual resources', () => {
     const { runtime, db } = createHarness()
-    runtime.setLabProfileVerifiedHostReady(true)
+    installVerifiedHostPrerequisites(runtime)
     const started = reserveProfile(db, 'profile residue owner')
     db.recordWorkerStage({
       dispatchId: started.dispatch.id,
@@ -87,7 +102,7 @@ describe('runtime lab-profile readiness', () => {
 
   it('withdraws both surfaces while terminal cleanup is pending', () => {
     const { runtime, db } = createHarness()
-    runtime.setLabProfileVerifiedHostReady(true)
+    installVerifiedHostPrerequisites(runtime)
     const started = reserveProfile(db, 'profile terminal owner')
     db.createWorkerTerminalResourceStatement({
       dispatchId: started.dispatch.id,

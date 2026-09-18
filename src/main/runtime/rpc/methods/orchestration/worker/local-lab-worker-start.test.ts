@@ -10,6 +10,11 @@ import {
   type LocalLabWorkerStartDeps,
   type PreparedLocalLabWorkerStart
 } from './local-lab-worker-start'
+import {
+  continueProductionPreparedLocalLabWorkerStart,
+  type LocalLabWorkerStartProductionCompositionDeps
+} from './local-lab-worker-start-production'
+import { createDefaultLocalLabWorkerStartContinuation } from './local-lab-worker-start-production-loader'
 import type { LabWorkerStartAdmission } from './worker-start-profile-admission'
 
 const PROFILE_ID = 'lab-readonly-supervised-v1'
@@ -253,6 +258,182 @@ describe('local lab worker start', () => {
     expect(JSON.parse(String(worker?.residual_resources))).toEqual([
       { kind: 'created_lab_runtime', id: expect.stringMatching(/^ctx_/) }
     ])
+  })
+
+  it('composes the default production continuation without launching a provider', async () => {
+    const harness = createHarness()
+    let prepared: PreparedLocalLabWorkerStart | undefined
+    await start({
+      harness,
+      spec: 'compose production launch',
+      deps: createDeps(async (value) => {
+        prepared = value
+        return { dispatchId: value.started.dispatch.id }
+      })
+    })
+    if (!prepared) {
+      throw new Error('The test start did not retain its prepared launch.')
+    }
+
+    const credentialSettings = Object.freeze({
+      codexManagedAccounts: Object.freeze([]),
+      activeCodexManagedAccountId: null,
+      activeCodexManagedAccountIdsByRuntime: Object.freeze({
+        host: null,
+        wsl: Object.freeze({})
+      })
+    })
+    const readCredentialSettings = vi
+      .spyOn(harness.runtime, 'getCodexLabCredentialSelectionSettings')
+      .mockReturnValue(credentialSettings)
+    const gateway = Object.freeze({
+      endpoint: '/private/tmp/orca-lab/runtime/dispatches/test/gateway.sock',
+      credential: `lgw1_${'g'.repeat(43)}`,
+      start: vi.fn(async () => {
+        throw new Error('provider launch forbidden in composition test')
+      }),
+      stop: vi.fn(async () => undefined)
+    })
+    const createGateway = vi.fn(() => gateway)
+    const compositionStopped = new Error('composition proved before provider launch')
+    const layoutHost = Object.freeze({
+      observePath: vi.fn(async () => Object.freeze({ kind: 'absent' as const })),
+      makeDirectoryExclusive: vi.fn(async () => {
+        throw new Error('layout mutation forbidden in composition test')
+      }),
+      writeFileExclusive: vi.fn(async () => {
+        throw new Error('layout mutation forbidden in composition test')
+      }),
+      sha256File: vi.fn(async () => {
+        throw new Error('layout read forbidden in composition test')
+      }),
+      removeTree: vi.fn(async () => {
+        throw new Error('layout cleanup forbidden in composition test')
+      })
+    })
+    const launchDeps = Object.freeze({
+      createGateway: vi.fn(() => gateway),
+      prepareCredential: vi.fn(async () => {
+        throw new Error('credential read forbidden in composition test')
+      }),
+      collectLaunchFacts: vi.fn(async () => {
+        throw new Error('fact collection forbidden in composition test')
+      }),
+      layoutHost,
+      prepareLayout: vi.fn(async () => {
+        throw new Error('layout mutation forbidden in composition test')
+      }),
+      verifyLaunch: vi.fn(async () => {
+        throw new Error('live verification forbidden in composition test')
+      }),
+      removeLayout: vi.fn(async () => Object.freeze({ evidence: 'test-only-no-layout' }))
+    })
+    const createLaunchAuthorityDeps = vi.fn((input) =>
+      Object.freeze({ ...launchDeps, createGateway: input.createGateway })
+    )
+    const prepareLaunchAuthority = vi.fn(async (input) => {
+      expect(
+        input.deps.createGateway({
+          prepared: input.prepared,
+          identity: input.identity,
+          dispatchCapability: input.dispatchCapability
+        })
+      ).toBe(gateway)
+      throw compositionStopped
+    })
+    const continuePreparedStart = vi.fn(async (input) => {
+      await input.deps.prepareLaunchAuthority({
+        prepared: input.prepared,
+        identity: Object.freeze({
+          handle: 'structured_test',
+          paneKey: 'pane_test',
+          sessionId: 'session_test',
+          processIncarnation: 'process_test',
+          hostScope: Object.freeze({ executionHostId: 'local' })
+        }),
+        dispatchCapability: 'dispatch-capability-test',
+        lifecycle: Object.freeze({
+          recordLayoutPrepared: vi.fn(),
+          recordProviderReserved: vi.fn(),
+          recordGatewayStarted: vi.fn()
+        })
+      })
+    })
+    const productionDeps: LocalLabWorkerStartProductionCompositionDeps = Object.freeze({
+      continuePreparedStart,
+      createLaunchAuthorityDeps,
+      prepareLaunchAuthority,
+      createGateway
+    })
+
+    await expect(
+      continueProductionPreparedLocalLabWorkerStart(
+        prepared,
+        {
+          runtime: harness.runtime,
+          db: harness.db,
+          run: harness.run,
+          coordinatorHandle: 'term_coord'
+        },
+        productionDeps
+      )
+    ).rejects.toBe(compositionStopped)
+
+    expect(readCredentialSettings).toHaveBeenCalledTimes(1)
+    expect(createLaunchAuthorityDeps).toHaveBeenCalledWith({
+      settings: credentialSettings,
+      createGateway: expect.any(Function)
+    })
+    expect(createGateway).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prepared,
+        runtime: harness.runtime,
+        db: harness.db,
+        dispatchCapability: 'dispatch-capability-test'
+      })
+    )
+    expect(prepareLaunchAuthority).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prepared,
+        deps: expect.objectContaining({ layoutHost })
+      })
+    )
+    expect(gateway.start).not.toHaveBeenCalled()
+  })
+
+  it('selects the lazy production composition as its default continuation', async () => {
+    const harness = createHarness()
+    let prepared: PreparedLocalLabWorkerStart | undefined
+    await start({
+      harness,
+      spec: 'select lazy production continuation',
+      deps: createDeps(async (value) => {
+        prepared = value
+        return { dispatchId: value.started.dispatch.id }
+      })
+    })
+    if (!prepared) {
+      throw new Error('The test start did not retain its prepared launch.')
+    }
+    const expected = Object.freeze({ state: 'composition-selected' })
+    const productionContinuation = vi.fn(async () => expected)
+    const loadProduction = vi.fn(async () =>
+      Object.freeze({
+        continueProductionPreparedLocalLabWorkerStart: productionContinuation
+      })
+    )
+    const continuation = createDefaultLocalLabWorkerStartContinuation(loadProduction)
+    const context = Object.freeze({
+      runtime: harness.runtime,
+      db: harness.db,
+      run: harness.run,
+      coordinatorHandle: 'term_coord'
+    })
+
+    await expect(continuation(prepared, context)).resolves.toBe(expected)
+
+    expect(loadProduction).toHaveBeenCalledTimes(1)
+    expect(productionContinuation).toHaveBeenCalledWith(prepared, context)
   })
 
   it('refuses a nested creator before observation or database mutation', async () => {

@@ -13,30 +13,71 @@ import {
 
 export type CodexLabExternalChatGptAuthRegistrationHandle = Readonly<{
   binding: CodexLabExternalChatGptAuthBinding
+  metadata: Readonly<{ workspaceId: string; planType: string }>
   rollbackIfUnclaimed(): boolean
+}>
+
+export type PreparedCodexLabExternalChatGptCredential = Readonly<{
+  metadata: Readonly<{ workspaceId: string; planType: string }>
+  register(input: {
+    dispatchId: string
+    sessionId: string
+  }): CodexLabExternalChatGptAuthRegistrationHandle
 }>
 
 export async function prepareCodexLabExternalChatGptAuthRegistration(input: {
   dispatchId: string
   sessionId: string
-  workspaceId: string
+  workspaceId?: string
   source: CodexLabChatGptCredentialSource
 }): Promise<CodexLabExternalChatGptAuthRegistrationHandle> {
+  const prepared = await prepareCodexLabExternalChatGptCredential(input)
+  return prepared.register(input)
+}
+
+export async function prepareCodexLabExternalChatGptCredential(input: {
+  workspaceId?: string
+  source: CodexLabChatGptCredentialSource
+}): Promise<PreparedCodexLabExternalChatGptCredential> {
+  const initial = await readCredential(input.source, input.workspaceId)
+  const metadata = Object.freeze({
+    workspaceId: initial.chatgptAccountId,
+    planType: initial.chatgptPlanType
+  })
+  let registered = false
+  return Object.freeze({
+    metadata,
+    register(registrationInput): CodexLabExternalChatGptAuthRegistrationHandle {
+      if (registered) {
+        throw new Error('Codex laboratory source credential registration was replayed.')
+      }
+      registered = true
+      return registerPreparedCredential(registrationInput, input.source, initial, metadata)
+    }
+  })
+}
+
+function registerPreparedCredential(
+  input: { dispatchId: string; sessionId: string },
+  source: CodexLabChatGptCredentialSource,
+  initial: CodexLabExternalChatGptCredentialState,
+  metadata: Readonly<{ workspaceId: string; planType: string }>
+): CodexLabExternalChatGptAuthRegistrationHandle {
   const binding = Object.freeze({
     dispatchId: input.dispatchId,
     sessionId: input.sessionId,
-    workspaceId: input.workspaceId
+    workspaceId: initial.chatgptAccountId
   })
-  const initial = await readCredential(input.source, binding)
   const factory = createCodexLabExternalChatGptAuthHostFactory({
     binding,
     credential: initial,
-    refresh: async () => readCredential(input.source, binding, initial.chatgptPlanType)
+    refresh: async () => readCredential(source, binding.workspaceId, initial.chatgptPlanType)
   })
   registerCodexLabExternalChatGptAuthAuthority({ ...binding, factory })
   let released = false
   return Object.freeze({
     binding,
+    metadata,
     rollbackIfUnclaimed(): boolean {
       if (released) {
         return false
@@ -55,7 +96,7 @@ export async function prepareCodexLabExternalChatGptAuthRegistration(input: {
 
 async function readCredential(
   source: CodexLabChatGptCredentialSource,
-  binding: CodexLabExternalChatGptAuthBinding,
+  expectedWorkspaceId?: string,
   expectedPlanType?: string
 ): Promise<CodexLabExternalChatGptCredentialState> {
   let raw: string | null
@@ -67,16 +108,19 @@ async function readCredential(
   const auth = parseRecord(raw)
   const tokens = parseRecord(auth?.tokens)
   const identity = raw ? readCodexAuthIdentity(raw) : null
+  const workspaceId = identity?.workspaceAccountId
   const planType = readChatGptPlanType(tokens?.id_token)
   if (
     !auth ||
     !['chatgpt', 'chatgptAuthTokens'].includes(String(auth.auth_mode)) ||
     ['OPENAI_API_KEY', 'agent_identity', 'bedrock_api_key', 'personal_access_token'].some(
-      (field) => field in auth
+      (field) => field in auth && auth[field] !== null
     ) ||
     typeof tokens?.access_token !== 'string' ||
     !tokens.access_token ||
-    identity?.workspaceAccountId !== binding.workspaceId ||
+    typeof workspaceId !== 'string' ||
+    !workspaceId ||
+    (expectedWorkspaceId !== undefined && workspaceId !== expectedWorkspaceId) ||
     !isCodexLabWorkspacePlanType(planType) ||
     (expectedPlanType !== undefined && planType !== expectedPlanType)
   ) {
@@ -85,7 +129,7 @@ async function readCredential(
   return Object.freeze({
     type: 'chatgptAuthTokens',
     accessToken: tokens.access_token,
-    chatgptAccountId: binding.workspaceId,
+    chatgptAccountId: workspaceId,
     chatgptPlanType: planType
   })
 }
@@ -116,7 +160,9 @@ function parseRecord(candidate: unknown): Record<string, unknown> | null {
       return null
     }
   }
-  return candidate && typeof candidate === 'object' && !Array.isArray(candidate)
-    ? (candidate as Record<string, unknown>)
-    : null
+  return isUnknownRecord(candidate) ? candidate : null
+}
+
+function isUnknownRecord(candidate: unknown): candidate is Record<string, unknown> {
+  return typeof candidate === 'object' && candidate !== null && !Array.isArray(candidate)
 }

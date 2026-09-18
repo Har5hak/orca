@@ -37,16 +37,38 @@ export async function withHostCompatibilityInput<T>(
   executeFixture: (fixture: CodexLabHostCompatibilityFixture) => Promise<T> | T
 ): Promise<T> {
   const ownership: HostCompatibilityOwnership = {}
+  let outcome: Readonly<{ completed: false }> | Readonly<{ completed: true; value: T }> = {
+    completed: false
+  }
+  let primaryError: unknown
   try {
     const input = materializeHostCompatibilityInput(binaryPath, ownership)
     const dispatchRoot = ownership.cleanupLease?.dispatchRoot
     if (!dispatchRoot) {
       throw new Error('host compatibility dispatch root identity was not captured')
     }
-    return await executeFixture(Object.freeze({ input, dispatchRoot }))
-  } finally {
-    ownership.cleanupLease?.cleanup()
+    outcome = {
+      completed: true,
+      value: await executeFixture(Object.freeze({ input, dispatchRoot }))
+    }
+  } catch (error) {
+    primaryError = error
   }
+  try {
+    ownership.cleanupLease?.cleanup()
+  } catch (cleanupError) {
+    if (primaryError) {
+      throw new AggregateError(
+        [primaryError, cleanupError],
+        'host compatibility fixture execution and exact cleanup both failed'
+      )
+    }
+    throw cleanupError
+  }
+  if (!outcome.completed) {
+    throw primaryError
+  }
+  return outcome.value
 }
 
 function materializeHostCompatibilityInput(
@@ -144,6 +166,7 @@ function materializeHostCompatibilityInput(
     },
     probeIdentityCandidate: {
       path: probePath,
+      argvPrefix: [],
       observedRealPath: probePath,
       kind: 'regular-file',
       executable: true,

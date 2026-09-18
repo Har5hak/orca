@@ -3,16 +3,97 @@ import type { CodexAppServerLaunch } from './codex-app-server-connection'
 /** Inline supervisor source kept dependency-free for the spawned Node child. */
 export const POSIX_PROVIDER_SUPERVISOR_SCRIPT = `
 const { spawn } = require('node:child_process')
+const { createHash } = require('node:crypto')
+const {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  realpathSync
+} = require('node:fs')
+const { isAbsolute } = require('node:path')
 const spec = JSON.parse(Buffer.from(process.env.ORCA_PROVIDER_SUPERVISOR_SPEC, 'base64').toString())
 const childEnv = { ...process.env }
 delete childEnv.ORCA_PROVIDER_SUPERVISOR_SPEC
 delete childEnv.ELECTRON_RUN_AS_NODE
-const child = spawn(spec.command, spec.args, {
-  cwd: spec.cwd,
-  env: childEnv,
-  stdio: ['pipe', 'pipe', 'pipe'],
-  detached: true
-})
+const sameIdentity = (left, right) => left.dev === right.dev && left.ino === right.ino
+const sameSnapshot = (left, right) =>
+  sameIdentity(left, right) &&
+  left.size === right.size &&
+  left.mtimeNs === right.mtimeNs &&
+  left.ctimeNs === right.ctimeNs
+const openVerifiedExecutable = () => {
+  const expected = spec.executableIntegrity
+  if (!expected) return null
+  if (
+    typeof expected.canonicalPath !== 'string' ||
+    expected.canonicalPath !== spec.command ||
+    !isAbsolute(expected.canonicalPath) ||
+    typeof expected.sha256 !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(expected.sha256) ||
+    typeof constants.O_NOFOLLOW !== 'number'
+  ) {
+    throw new Error('invalid executable integrity authority')
+  }
+  const named = lstatSync(spec.command, { bigint: true })
+  if (
+    !named.isFile() ||
+    named.isSymbolicLink() ||
+    (named.mode & 0o111n) === 0n ||
+    realpathSync.native(spec.command) !== spec.command
+  ) {
+    throw new Error('executable integrity path is not a canonical executable file')
+  }
+  const descriptor = openSync(spec.command, constants.O_RDONLY | constants.O_NOFOLLOW)
+  let verified = false
+  try {
+    const before = fstatSync(descriptor, { bigint: true })
+    if (!before.isFile() || !sameIdentity(before, named)) {
+      throw new Error('executable identity changed before verification')
+    }
+    const digest = createHash('sha256')
+    const buffer = Buffer.allocUnsafe(1024 * 1024)
+    let bytesRead
+    while ((bytesRead = readSync(descriptor, buffer, 0, buffer.length, null)) > 0) {
+      digest.update(buffer.subarray(0, bytesRead))
+    }
+    const after = fstatSync(descriptor, { bigint: true })
+    const namedAfter = lstatSync(spec.command, { bigint: true })
+    if (
+      !sameSnapshot(before, after) ||
+      !sameSnapshot(after, namedAfter) ||
+      namedAfter.isSymbolicLink() ||
+      realpathSync.native(spec.command) !== spec.command ||
+      digest.digest('hex') !== expected.sha256
+    ) {
+      throw new Error('executable identity or digest changed before spawn')
+    }
+    verified = true
+    return descriptor
+  } finally {
+    if (!verified) closeSync(descriptor)
+  }
+}
+let verifiedExecutableDescriptor
+try {
+  verifiedExecutableDescriptor = openVerifiedExecutable()
+} catch {
+  process.stderr.write('Orca refused provider executable integrity before spawn.\\n')
+  process.exit(126)
+}
+let child
+try {
+  child = spawn(spec.command, spec.args, {
+    cwd: spec.cwd,
+    env: childEnv,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    detached: true
+  })
+} finally {
+  if (verifiedExecutableDescriptor !== null) closeSync(verifiedExecutableDescriptor)
+}
 const originalParent = process.ppid
 let timer
 let ownerShutdownTimer
@@ -96,7 +177,8 @@ export function supervisedPosixLaunch(
     JSON.stringify({
       command: launch.command,
       args: launch.args,
-      cwd
+      cwd,
+      ...(launch.executableIntegrity ? { executableIntegrity: launch.executableIntegrity } : {})
     })
   ).toString('base64')
   return {
@@ -117,6 +199,9 @@ export function createProviderSpawnSpec(
   childEnv: NodeJS.ProcessEnv,
   platform: NodeJS.Platform
 ): { program: string; args: string[]; env: NodeJS.ProcessEnv; cwd: string; detached: boolean } {
+  if (platform === 'win32' && launch.executableIntegrity) {
+    throw new Error('Codex executable integrity cannot be enforced on a direct-spawn platform')
+  }
   const supervised = platform === 'win32' ? null : supervisedPosixLaunch(launch, childEnv)
   return {
     program: supervised?.command ?? launch.command,

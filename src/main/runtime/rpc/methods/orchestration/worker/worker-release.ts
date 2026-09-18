@@ -10,6 +10,7 @@ import {
 } from './worker-release-completion'
 import { WorkerDispatchParams, WorkerRetainParams } from './worker-release-schemas'
 import { OrchestrationWorkerTerminalUserInputParams } from '../../../../../../shared/rpc-contract/orchestration-worker-release-params'
+import { finishReleasedWorkerCodexLabCleanup } from './worker-release-lab-cleanup'
 
 export const ORCHESTRATION_WORKER_RELEASE_METHODS = [
   defineMethod({
@@ -35,9 +36,15 @@ export const ORCHESTRATION_WORKER_RELEASE_METHODS = [
       }
       const requested = db.requestWorkerTerminalRelease(params.dispatch)
       if (requested.disposition === 'already_released') {
+        const cleanup = await finishReleasedWorkerCodexLabCleanup(
+          db,
+          params.dispatch,
+          requested.resource,
+          'already_released'
+        )
         return {
           dispatchId: params.dispatch,
-          state: 'already_released',
+          ...cleanup,
           processAction: 'none',
           archive: archiveSummary(requested.resource)
         }
@@ -58,10 +65,16 @@ export const ORCHESTRATION_WORKER_RELEASE_METHODS = [
             processIncarnation
           })
           if (reconciled.disposition === 'released') {
+            const cleanup = await finishReleasedWorkerCodexLabCleanup(
+              db,
+              params.dispatch,
+              reconciled.resource,
+              'released'
+            )
             runtime.notifyMessageArrived(`dispatch:${params.dispatch}`, 'status')
             return {
               dispatchId: params.dispatch,
-              state: 'released',
+              ...cleanup,
               processAction: 'none',
               archive: archiveSummary(reconciled.resource)
             }

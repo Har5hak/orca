@@ -16,6 +16,7 @@ import { setAppEnvironment, type AppEnvironment } from '../../shared/app-environ
 import { setSecretStore, type SecretStore } from '../../shared/secret-store'
 import type { ServeReadiness } from '../server/serve-readiness'
 import { setRuntimeBrowserCommandsFactory } from '../runtime/runtime-browser-commands-factory'
+import { bootstrapRuntimeLabProfileReadiness } from '../runtime/runtime-lab-profile-readiness-bootstrap'
 import { resolveOrcadBrowserProvider } from './orcad-browser-provider'
 import { resolveOrcadInstallRoot, resolveOrcadPath, resolveUserDataPath } from './orcad-app-paths'
 import {
@@ -260,6 +261,7 @@ async function startOrcadRuntime(
       }
     }
   })
+  bootstrapRuntimeLabProfileReadiness(runtime)
 
   const { installOrcadSessionSearchService } = await import('./orcad-session-search')
   sessionSearch = await installOrcadSessionSearchService({

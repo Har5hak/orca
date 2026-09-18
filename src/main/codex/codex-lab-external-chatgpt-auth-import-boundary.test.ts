@@ -24,7 +24,9 @@ function consumersOf(moduleBasename: string): string[] {
 }
 
 function productionConsumersOf(moduleBasename: string): string[] {
-  return consumersOf(moduleBasename).filter((path) => !path.endsWith('.test.ts'))
+  return consumersOf(moduleBasename).filter(
+    (path) => !path.endsWith('.test.ts') && !path.endsWith('-test-support.ts')
+  )
 }
 
 describe('Codex lab external ChatGPT auth import boundary', () => {
@@ -46,9 +48,21 @@ describe('Codex lab external ChatGPT auth import boundary', () => {
     ])
   })
 
-  it('has no production consumer until the explicit registration and resolver wiring slice', () => {
-    expect(productionConsumersOf('codex-lab-external-chatgpt-auth-registry-internal')).toEqual([])
-    expect(productionConsumersOf('codex-lab-external-chatgpt-auth-resolver')).toEqual([])
+  it('limits host lifecycle authority to mint state and structured launch custody', () => {
+    expect(productionConsumersOf('codex-lab-external-chatgpt-auth-host-lifecycle')).toEqual([
+      'main/codex/codex-lab-external-chatgpt-auth-authority-state.ts',
+      'main/codex/codex-structured-launch-resolution.ts'
+    ])
+  })
+
+  it('limits production consumers to the explicit registration and resolver wiring', () => {
+    expect(productionConsumersOf('codex-lab-external-chatgpt-auth-registry-internal')).toEqual([
+      'main/codex/codex-lab-external-chatgpt-auth-registration.ts',
+      'main/codex/codex-structured-launch-resolution.ts'
+    ])
+    expect(productionConsumersOf('codex-lab-external-chatgpt-auth-resolver')).toEqual([
+      'main/codex/codex-structured-launch-resolution.ts'
+    ])
   })
 
   it('does not route auth authority into persistence, launch plans, environments, or journals', () => {

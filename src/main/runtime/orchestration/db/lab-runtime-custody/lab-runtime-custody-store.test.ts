@@ -11,7 +11,7 @@ import { expectedCodexLabDispatchRuntimeRoot, sha256 } from './lab-runtime-custo
 const PROFILE_ID = 'lab-readonly-supervised-v1'
 const PROVIDER_ID = 'codex-workspace-chatgpt-v1'
 const SESSION_ID = '11111111-1111-4111-8111-111111111111'
-const TERMINAL_HANDLE = `structworker_${SESSION_ID}`
+const TERMINAL_HANDLE = 'structworker_33333333-3333-4333-8333-333333333333'
 const TERMINAL_PANE_KEY = `agent-session-${SESSION_ID}:22222222-2222-4222-8222-222222222222`
 const PROCESS_INCARNATION = `structured:${SESSION_ID}`
 const CLEANUP_RESOURCES = ['provider', 'gateway', 'auth', 'layout'] as const

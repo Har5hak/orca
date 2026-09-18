@@ -25,10 +25,20 @@ vi.mock('./structured-agent-session-create', () => ({
 }))
 
 type JournalEmit = (event: { type: string }) => void
-const startingLifecycleDb = {
-  getDispatchContextById: () => ({ status: 'pending' }),
-  getWorkerDispatch: () => ({ state: 'starting' })
-} as never
+
+function startingLifecycleDb(db: OrchestrationDb): OrchestrationDb {
+  return new Proxy(db, {
+    get(target, property, receiver) {
+      if (property === 'getDispatchContextById') {
+        return () => ({ status: 'pending' })
+      }
+      if (property === 'getWorkerDispatch') {
+        return () => ({ state: 'starting' })
+      }
+      return Reflect.get(target, property, receiver)
+    }
+  })
+}
 
 /** Captures the redrive subscription so the test can drive journal batches by hand. */
 function installHost(): { emit: (type: string) => void; unsubscribed: () => boolean } {
@@ -90,7 +100,7 @@ describe('the structured redrive edge', () => {
   async function startWorker(onJournalActivity: (sessionId: string) => void) {
     return createStructuredWorkerSession({
       runtime,
-      db: startingLifecycleDb,
+      db: startingLifecycleDb(db),
       worktreeId: 'repo::wt',
       agent: 'claude',
       dispatchId: 'd_redrive',

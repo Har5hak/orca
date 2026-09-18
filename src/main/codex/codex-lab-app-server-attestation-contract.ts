@@ -1,10 +1,12 @@
 import type { CodexAppServerConnection } from './codex-app-server-connection-types'
+import type { CodexLabExternalChatGptLoginReceipt } from './codex-lab-external-chatgpt-auth-contract'
 import { CODEX_LAB_DYNAMIC_TOOL_BINDINGS } from './codex-lab-dynamic-tool-contract'
 
 export const CODEX_LAB_DYNAMIC_TOOL_GATEWAY_MAP = CODEX_LAB_DYNAMIC_TOOL_BINDINGS
 
 export const CODEX_LAB_ATTESTATION_METHODS = Object.freeze([
   'account/read',
+  'account/rateLimits/read',
   'config/read',
   'configRequirements/read',
   'permissionProfile/list'
@@ -31,6 +33,7 @@ export type CodexLabAppServerAttestationExpected = Readonly<{
   cwd: string
   codexHome: string
   fakeHome: string
+  gatewaySocketPath: string
   workspaceId: string
   permissionProfileId: string
 }>
@@ -38,6 +41,7 @@ export type CodexLabAppServerAttestationExpected = Readonly<{
 export type CodexLabAppServerAttestationInput = Readonly<{
   connection: Pick<CodexAppServerConnection, 'request'>
   expected: CodexLabAppServerAttestationExpected
+  externalAuthReceipt: CodexLabExternalChatGptLoginReceipt
   threadStartParams: unknown
   openedThread: unknown
   timeoutMs?: number
@@ -49,6 +53,9 @@ export type CodexLabAppServerAttestationFailureReason =
   | 'rpc_unavailable'
   | 'response_invalid'
   | 'account_unverified'
+  | 'paid_usage_forbidden'
+  | 'ordinary_usage_blocked'
+  | 'ordinary_usage_unavailable'
   | 'effective_config_broadened'
   | 'requirements_broadened'
   | 'permission_profile_unavailable'
@@ -63,6 +70,7 @@ export type CodexLabAppServerAttestationResult =
         permissionProfilePages: number
         managedRequirements: 'absent' | 'compatible'
         accountRoute: 'chatgpt-workspace'
+        capacityRoute: 'ordinary-included'
         dynamicToolGatewayMap: typeof CODEX_LAB_DYNAMIC_TOOL_GATEWAY_MAP
         outOfBandMethods: 'not-requested-by-attestation-probe'
       }>

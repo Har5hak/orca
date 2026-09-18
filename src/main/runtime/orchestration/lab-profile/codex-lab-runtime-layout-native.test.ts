@@ -5,7 +5,6 @@ import {
   mkdir,
   mkdtemp,
   readFile,
-  readdir,
   realpath,
   rename,
   rm,
@@ -163,11 +162,12 @@ describe('native Codex laboratory runtime layout host', () => {
     )
   })
 
-  it('quarantines the captured root and reports cleanup incomplete without deleting nested targets', async () => {
-    const fixture = await createFixture({ randomId: () => 'retained' })
+  it('revokes the captured active root with identity-fenced quarantine evidence without deleting nested targets', async () => {
+    const fixture = await createFixture()
     const sibling = join(fixture.dispatchesRoot, 'sibling')
     const external = join(sandbox, 'external')
     const externalSentinel = join(external, 'sentinel.txt')
+    const quarantine = join(fixture.dispatchesRoot, '.dispatch-native-test.cleanup-quarantine')
     await mkdir(sibling, { mode: 0o700 })
     await mkdir(external, { mode: 0o700 })
     await writeFile(externalSentinel, 'keep')
@@ -179,18 +179,13 @@ describe('native Codex laboratory runtime layout host', () => {
         fixture.root.identity,
         fixture.dispatches.identity
       )
-    ).rejects.toMatchObject({
-      code: CODEX_LAB_RUNTIME_CLEANUP_INCOMPLETE_CODE,
-      reason: 'cleanup_incomplete',
-      message: expect.not.stringContaining('removed')
+    ).resolves.toEqual({
+      evidence: 'identity-fenced-active-layout-revoked',
+      quarantinePath: quarantine,
+      rootIdentity: fixture.root.identity
     })
 
     await expect(lstat(fixture.dispatchRoot)).rejects.toMatchObject({ code: 'ENOENT' })
-    const quarantines = (await readdir(fixture.dispatchesRoot)).filter((name) =>
-      name.includes('.cleanup-')
-    )
-    expect(quarantines).toHaveLength(1)
-    const quarantine = join(fixture.dispatchesRoot, quarantines[0]!)
     expect((await lstat(quarantine)).isDirectory()).toBe(true)
     expect((await lstat(join(quarantine, 'external-link'))).isSymbolicLink()).toBe(true)
     await expect(lstat(sibling)).resolves.toBeDefined()
@@ -241,11 +236,10 @@ describe('native Codex laboratory runtime layout host', () => {
     let dispatchRoot = ''
     let displaced = ''
     const fixture = await createFixture({
-      randomId: () => {
+      beforeQuarantineRename: () => {
         displaced = join(dirname(dispatchRoot), 'displaced-generation')
         renameSync(dispatchRoot, displaced)
         mkdirSync(dispatchRoot, { mode: 0o700 })
-        return 'race'
       }
     })
     dispatchRoot = fixture.dispatchRoot
@@ -256,21 +250,19 @@ describe('native Codex laboratory runtime layout host', () => {
         fixture.root.identity,
         fixture.dispatches.identity
       )
-    ).rejects.toThrow(/retained/u)
+    ).rejects.toThrow(/changed before quarantine rename/u)
 
     await expect(lstat(displaced)).resolves.toBeDefined()
-    const quarantines = (await readdir(fixture.dispatchesRoot)).filter((name) =>
-      name.includes('.cleanup-')
-    )
-    expect(quarantines).toHaveLength(1)
-    await expect(lstat(join(fixture.dispatchesRoot, quarantines[0]!))).resolves.toBeDefined()
+    await expect(
+      lstat(join(fixture.dispatchesRoot, '.dispatch-native-test.cleanup-quarantine'))
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(lstat(fixture.dispatchRoot)).resolves.toBeDefined()
   })
 
   it('never deletes either generation when the quarantine path is replaced after re-attestation', async () => {
     let quarantine = ''
     let capturedElsewhere = ''
     const fixture = await createFixture({
-      randomId: () => 'post-attestation-race',
       afterQuarantineAttested: (quarantinePath) => {
         quarantine = quarantinePath
         capturedElsewhere = join(dirname(quarantinePath), 'captured-after-attestation')
@@ -295,5 +287,123 @@ describe('native Codex laboratory runtime layout host', () => {
 
     await expect(readFile(join(capturedElsewhere, 'captured.txt'), 'utf8')).resolves.toBe('keep')
     await expect(readFile(join(quarantine, 'replacement.txt'), 'utf8')).resolves.toBe('keep')
+  })
+
+  it('returns the same revocation evidence when retrying after the atomic rename', async () => {
+    const fixture = await createFixture()
+    const expected = {
+      evidence: 'identity-fenced-active-layout-revoked',
+      quarantinePath: join(fixture.dispatchesRoot, '.dispatch-native-test.cleanup-quarantine'),
+      rootIdentity: fixture.root.identity
+    }
+
+    await expect(
+      fixture.host.removeTree(
+        fixture.dispatchRoot,
+        fixture.root.identity,
+        fixture.dispatches.identity
+      )
+    ).resolves.toEqual(expected)
+    await expect(
+      fixture.host.removeTree(
+        fixture.dispatchRoot,
+        fixture.root.identity,
+        fixture.dispatches.identity
+      )
+    ).resolves.toEqual(expected)
+  })
+
+  it('keeps a retry incomplete when the deterministic quarantine lacks the captured identity', async () => {
+    const fixture = await createFixture()
+    const capturedElsewhere = join(fixture.dispatchesRoot, 'captured-elsewhere')
+    const quarantine = join(fixture.dispatchesRoot, '.dispatch-native-test.cleanup-quarantine')
+    await rename(fixture.dispatchRoot, capturedElsewhere)
+    await mkdir(quarantine, { mode: 0o700 })
+    await writeFile(join(quarantine, 'replacement.txt'), 'keep')
+
+    await expect(
+      fixture.host.removeTree(
+        fixture.dispatchRoot,
+        fixture.root.identity,
+        fixture.dispatches.identity
+      )
+    ).rejects.toMatchObject({
+      code: CODEX_LAB_RUNTIME_CLEANUP_INCOMPLETE_CODE,
+      reason: 'cleanup_incomplete',
+      quarantinePath: quarantine
+    })
+
+    await expect(lstat(capturedElsewhere)).resolves.toBeDefined()
+    await expect(readFile(join(quarantine, 'replacement.txt'), 'utf8')).resolves.toBe('keep')
+  })
+
+  it('rejects a deterministic quarantine conflict without moving either tree', async () => {
+    const fixture = await createFixture()
+    const quarantine = join(fixture.dispatchesRoot, '.dispatch-native-test.cleanup-quarantine')
+    await mkdir(quarantine, { mode: 0o700 })
+    await writeFile(join(quarantine, 'conflict.txt'), 'keep')
+
+    await expect(
+      fixture.host.removeTree(
+        fixture.dispatchRoot,
+        fixture.root.identity,
+        fixture.dispatches.identity
+      )
+    ).rejects.toThrow(/quarantine conflict/u)
+
+    await expect(lstat(fixture.dispatchRoot)).resolves.toBeDefined()
+    await expect(readFile(join(quarantine, 'conflict.txt'), 'utf8')).resolves.toBe('keep')
+  })
+
+  it('rejects a symlink at the deterministic quarantine path without following it', async () => {
+    const fixture = await createFixture()
+    const external = join(sandbox, 'quarantine-target')
+    const sentinel = join(external, 'sentinel.txt')
+    const quarantine = join(fixture.dispatchesRoot, '.dispatch-native-test.cleanup-quarantine')
+    await mkdir(external, { mode: 0o700 })
+    await writeFile(sentinel, 'keep')
+    await symlink(external, quarantine)
+
+    await expect(
+      fixture.host.removeTree(
+        fixture.dispatchRoot,
+        fixture.root.identity,
+        fixture.dispatches.identity
+      )
+    ).rejects.toThrow(/quarantine conflict/u)
+
+    expect((await lstat(quarantine)).isSymbolicLink()).toBe(true)
+    await expect(readFile(sentinel, 'utf8')).resolves.toBe('keep')
+    await expect(lstat(fixture.dispatchRoot)).resolves.toBeDefined()
+  })
+
+  it('refuses success when the original path is replaced after quarantine attestation', async () => {
+    let dispatchRoot = ''
+    const fixture = await createFixture({
+      afterQuarantineAttested: () => {
+        mkdirSync(dispatchRoot, { mode: 0o700 })
+        writeFileSync(join(dispatchRoot, 'replacement.txt'), 'keep')
+      }
+    })
+    dispatchRoot = fixture.dispatchRoot
+    await writeFile(join(fixture.dispatchRoot, 'captured.txt'), 'keep')
+    const quarantine = join(fixture.dispatchesRoot, '.dispatch-native-test.cleanup-quarantine')
+
+    await expect(
+      fixture.host.removeTree(
+        fixture.dispatchRoot,
+        fixture.root.identity,
+        fixture.dispatches.identity
+      )
+    ).rejects.toMatchObject({
+      code: CODEX_LAB_RUNTIME_CLEANUP_INCOMPLETE_CODE,
+      reason: 'cleanup_incomplete',
+      quarantinePath: quarantine
+    })
+
+    await expect(readFile(join(quarantine, 'captured.txt'), 'utf8')).resolves.toBe('keep')
+    await expect(readFile(join(fixture.dispatchRoot, 'replacement.txt'), 'utf8')).resolves.toBe(
+      'keep'
+    )
   })
 })

@@ -8,14 +8,17 @@ import type {
 } from './codex-app-server-connection'
 import type { CodexLabAppServerAttestationExpected } from './codex-lab-app-server-attestation'
 import {
+  TEST_LAB_DISPATCH_ID,
   testCodexLabDynamicToolHost,
   testCodexLabDynamicToolHostAttestation
 } from '../runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-test-support'
 import {
   testCodexLabAccount,
   testCodexLabEffectiveConfig,
+  testCodexLabExternalChatGptAuth,
   testCodexLabOpenedThread,
-  testCodexLabPermissionProfiles
+  testCodexLabPermissionProfiles,
+  testCodexLabRateLimits
 } from './codex-lab-session-attestation-test-support'
 import { CODEX_LAB_READONLY_PERMISSION_PROFILE_ID } from './codex-structured-permission-policy'
 import {
@@ -31,6 +34,7 @@ const EXPECTED: CodexLabAppServerAttestationExpected = Object.freeze({
   cwd: CWD,
   codexHome: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757/codex-home',
   fakeHome: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757/fake-home',
+  gatewaySocketPath: '/private/tmp/orca-lab/runtime/dispatches/dispatch-757/gateway.sock',
   workspaceId: '00000000-0000-4000-8000-000000000757',
   permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID
 })
@@ -43,6 +47,7 @@ type Scenario =
   | 'profile-broadened'
   | 'thread-request-broadened'
   | 'thread-result-broadened'
+  | 'paid-usage-forbidden'
 
 type ObservedCall = Readonly<{ method: string; params?: Record<string, unknown> }>
 
@@ -53,7 +58,13 @@ type FakeConnection = CodexAppServerConnection & {
   launch: CodexAppServerLaunch
 }
 
-function launch(): CodexStructuredLaunch {
+function launch(planType = 'business'): CodexStructuredLaunch {
+  const auth = testCodexLabExternalChatGptAuth({
+    dispatchId: TEST_LAB_DISPATCH_ID,
+    sessionId: SESSION_ID,
+    expected: EXPECTED,
+    planType
+  })
   return {
     command: '/usr/local/bin/codex',
     args: ['--strict-config', 'app-server'],
@@ -66,6 +77,8 @@ function launch(): CodexStructuredLaunch {
     labDynamicToolHost: testCodexLabDynamicToolHost(),
     labDynamicToolHostAttestationExpected: testCodexLabDynamicToolHostAttestation(),
     labAppServerAttestationExpected: EXPECTED,
+    labExternalChatGptAuthHost: auth.host,
+    labExternalChatGptAuthBindingExpected: auth.binding,
     permissionPolicy: {
       approvalPolicy: 'never',
       permissions: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID,
@@ -91,6 +104,7 @@ function harness(scenario: Scenario): {
   timeline: string[]
   openConnection: typeof openCodexAppServerConnection
 } {
+  const planType = scenario === 'paid-usage-forbidden' ? 'enterprise_cbp_usage_based' : 'business'
   const connections: FakeConnection[] = []
   const events: CodexStructuredSessionEvent[] = []
   const timeline: string[] = []
@@ -107,6 +121,9 @@ function harness(scenario: Scenario): {
       request: async (method, params) => {
         connection.calls.push(params ? { method, params } : { method })
         timeline.push(`request:${method}`)
+        if (method === 'account/login/start') {
+          return { type: 'chatgptAuthTokens' }
+        }
         if (method === 'thread/start') {
           if (scenario === 'thread-request-broadened' && params) {
             params.sandbox = 'danger-full-access'
@@ -117,17 +134,41 @@ function harness(scenario: Scenario): {
           })
           return testCodexLabOpenedThread(
             EXPECTED,
-            scenario === 'thread-result-broadened',
+            scenario !== 'thread-result-broadened',
             THREAD_ID
           )
         }
         if (method === 'account/read') {
-          return testCodexLabAccount(
+          return testCodexLabAccount(EXPECTED, 'chatgpt', planType)
+        }
+        if (method === 'account/rateLimits/read') {
+          return testCodexLabRateLimits(
             EXPECTED,
-            'chatgpt',
             scenario === 'account-broadened'
-              ? '00000000-0000-4000-8000-000000000000'
-              : EXPECTED.workspaceId
+              ? { accountId: '00000000-0000-4000-8000-000000000000' }
+              : scenario === 'paid-usage-forbidden'
+                ? {
+                    ordinaryUsageAllowed: null,
+                    rateLimits: {
+                      credits: { hasCredits: true, unlimited: false, balance: null },
+                      individualLimit: {
+                        limit: '1000',
+                        used: '350',
+                        remainingPercent: 65,
+                        resetsAt: 1_789_819_200
+                      },
+                      limitId: 'codex',
+                      limitName: null,
+                      normalModelSlug: null,
+                      planType,
+                      primary: null,
+                      rateLimitReachedType: null,
+                      secondary: null,
+                      spendControlReached: false
+                    }
+                  }
+                : {},
+            planType
           )
         }
         if (method === 'config/read') {
@@ -171,7 +212,7 @@ function harness(scenario: Scenario): {
     return connection
   }
   const adapter = new CodexStructuredSessionAdapter({
-    resolveLaunch: async () => launch(),
+    resolveLaunch: async () => launch(planType),
     openConnection,
     readProcessStartTime: async () => 1_700_000_000_000,
     onEvent: (event) => {
@@ -196,13 +237,15 @@ describe('Codex laboratory acquisition attestation', () => {
 
     expect(connections).toHaveLength(1)
     expect(connections[0].calls.map(({ method }) => method)).toEqual([
+      'account/login/start',
       'thread/start',
       'account/read',
+      'account/rateLimits/read',
       'config/read',
       'configRequirements/read',
       'permissionProfile/list'
     ])
-    expect(connections[0].calls[0]?.params).toMatchObject({
+    expect(connections[0].calls[1]?.params).toMatchObject({
       cwd: EXPECTED.cwd,
       approvalPolicy: 'never',
       permissions: EXPECTED.permissionProfileId,
@@ -211,8 +254,10 @@ describe('Codex laboratory acquisition attestation', () => {
     })
     expect(events).toHaveLength(1)
     expect(timeline).toEqual([
+      'request:account/login/start',
       'request:thread/start',
       'request:account/read',
+      'request:account/rateLimits/read',
       'request:config/read',
       'request:configRequirements/read',
       'request:permissionProfile/list',
@@ -229,7 +274,8 @@ describe('Codex laboratory acquisition attestation', () => {
     ['telemetry-broadened', 'effective_config_broadened'],
     ['profile-broadened', 'permission_profile_denied'],
     ['thread-request-broadened', 'thread_request_unverified'],
-    ['thread-result-broadened', 'thread_result_unverified']
+    ['thread-result-broadened', 'thread_result_unverified'],
+    ['paid-usage-forbidden', 'paid_usage_forbidden']
   ] satisfies readonly (readonly [Scenario, string])[])(
     'closes and publishes nothing when %s fails attestation',
     async (scenario, reason) => {
@@ -242,6 +288,7 @@ describe('Codex laboratory acquisition attestation', () => {
       expect(connections).toHaveLength(1)
       expect(connections[0].closeCount).toBe(1)
       expect(events).toEqual([])
+      expect(connections[0].calls.some(({ method }) => method === 'turn/start')).toBe(false)
       await expect(
         adapter.dispatch({
           sessionId: SESSION_ID,

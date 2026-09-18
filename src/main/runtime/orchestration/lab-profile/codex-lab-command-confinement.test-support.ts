@@ -1,15 +1,16 @@
 import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import type { ProcessResult } from '../../../../shared/child-process/run-process'
-import {
-  CODEX_LAB_COMMAND_CONFINEMENT_SCHEMA_VERSION,
-  type CodexLabCommandConfinementControlEvidence,
-  type CodexLabCommandConfinementPreflightInput,
-  type CodexLabCommandConfinementProbeReport,
-  type CodexLabFreshWriteControlEvidence,
-  type CodexLabObservedDirectory,
-  type CodexLabObservedPathIdentity,
-  type CodexLabProbeIdentityCandidate
+import { buildCodexLabCommandConfinementTargets } from './codex-lab-command-confinement-preflight'
+import { buildExpectedConfinementProbeReport } from './codex-lab-command-confinement-report.test-support'
+import type {
+  CodexLabCommandConfinementControlEvidence,
+  CodexLabCommandConfinementPreflightInput,
+  CodexLabCommandConfinementProbeReport,
+  CodexLabFreshWriteControlEvidence,
+  CodexLabObservedDirectory,
+  CodexLabObservedPathIdentity,
+  CodexLabProbeIdentityCandidate
 } from './codex-lab-command-confinement-contract'
 import { sealedHostPlan } from './codex-lab-host-fake.test-support'
 import type { SealedCodexLabLaunchPlan } from './codex-lab-launch-contract'
@@ -19,6 +20,7 @@ export const CONFINEMENT_PROBE_SHA256 = 'b'.repeat(64)
 export const CONFINEMENT_RUN_NONCE = '7'.repeat(32)
 export const CONFINEMENT_TCP_CHALLENGE = '8'.repeat(32)
 export const CONFINEMENT_UNIX_CHALLENGE = '9'.repeat(32)
+export const CONFINEMENT_UNIX_DENIED_CHALLENGE = 'a'.repeat(32)
 export const CONFINEMENT_TCP_CONNECT_PORT = 43_117
 export const CONFINEMENT_OUTSIDE_PARENT =
   '/Users/lab/Library/Application Support/Orca/confinement-controls'
@@ -31,6 +33,7 @@ export function confinementProbeCandidate(
 ): CodexLabProbeIdentityCandidate {
   return {
     path: '/Applications/Orca.app/Contents/Helpers/orca-codex-lab-confinement-probe',
+    argvPrefix: [],
     observedRealPath: '/Applications/Orca.app/Contents/Helpers/orca-codex-lab-confinement-probe',
     kind: 'regular-file',
     executable: true,
@@ -67,17 +70,30 @@ export function preparedConfinementLayout(
 export function confinementControls(
   plan: SealedCodexLabLaunchPlan = sealedHostPlan(),
   prepared: PreparedCodexLabRuntimeLayout = preparedConfinementLayout(plan),
-  runNonce = CONFINEMENT_RUN_NONCE
+  runNonce = CONFINEMENT_RUN_NONCE,
+  proofPaths: Readonly<{
+    worktreeReadTarget?: string
+    outsideWriteRoot?: string
+  }> = {}
 ): CodexLabCommandConfinementControlEvidence {
+  const worktreeReadTarget = proofPaths.worktreeReadTarget ?? join(plan.cwd, 'README.md')
+  const outsideWriteRoot = proofPaths.outsideWriteRoot ?? CONFINEMENT_OUTSIDE_PARENT
   const basename = `.orca-command-confinement-${plan.dispatchId}-${runNonce}`
+  const targets = buildCodexLabCommandConfinementTargets(
+    plan.dispatchId,
+    runNonce,
+    plan.cwd,
+    plan.runtimePaths,
+    outsideWriteRoot
+  )
   const payloadSha256 = sha256(runNonce)
   const privateTmp = directory('/private/tmp', identity('201'))
   return {
     phase: 'completed-before-sandbox',
     worktreeRead: {
       operation: 'open-read-hash',
-      target: join(plan.cwd, 'README.md'),
-      observedRealPath: join(plan.cwd, 'README.md'),
+      target: worktreeReadTarget,
+      observedRealPath: worktreeReadTarget,
       kind: 'regular-file',
       identity: identity('301'),
       sha256: WORKTREE_READ_SHA256,
@@ -105,8 +121,8 @@ export function confinementControls(
         payloadSha256
       ),
       outsideRoot: writeControl(
-        directory(CONFINEMENT_OUTSIDE_PARENT, identity('203')),
-        join(CONFINEMENT_OUTSIDE_PARENT, `${basename}.write`),
+        directory(outsideWriteRoot, identity('203')),
+        join(outsideWriteRoot, `${basename}.write`),
         payloadSha256
       )
     },
@@ -135,10 +151,18 @@ export function confinementControls(
         connect: 'succeeded',
         challengeExchange: 'succeeded'
       },
+      unixConnectDenied: {
+        path: targets.unixConnectDenied,
+        listener: 'confirmed-live',
+        challengeToken: CONFINEMENT_UNIX_DENIED_CHALLENGE,
+        challengeSha256: sha256(CONFINEMENT_UNIX_DENIED_CHALLENGE),
+        connect: 'succeeded',
+        challengeExchange: 'succeeded'
+      },
       unixBind: {
         operation: 'bind-listen-close-unlink',
         parent: privateTmp,
-        path: join('/private/tmp', `${basename}.sock`),
+        path: targets.unixBind,
         targetBefore: 'absent',
         bind: 'succeeded',
         listen: 'succeeded',
@@ -169,83 +193,7 @@ export function confinementInput(
 export function expectedConfinementProbeReport(
   input: CodexLabCommandConfinementPreflightInput = confinementInput()
 ): CodexLabCommandConfinementProbeReport {
-  const { plan, preparedLayout, probeIdentityCandidate: probe, controls } = input
-  const deniedWrite = (root: string, target: string) => ({
-    root,
-    target,
-    syscall: 'open(O_CREAT|O_EXCL|O_WRONLY)' as const,
-    result: 'denied-by-sandbox' as const,
-    errno: 'EPERM' as const
-  })
-  return {
-    schemaVersion: CODEX_LAB_COMMAND_CONFINEMENT_SCHEMA_VERSION,
-    probe: {
-      path: probe.path,
-      sha256: probe.observedSha256,
-      device: probe.device,
-      inode: probe.inode,
-      identityTrust: 'candidate-only'
-    },
-    layout: {
-      dispatchId: preparedLayout.dispatchId,
-      dispatchRoot: preparedLayout.dispatchRoot,
-      dispatchRootIdentity: preparedLayout.dispatchRootIdentity,
-      codexHomeIdentity: preparedLayout.codexHomeIdentity,
-      fakeHomeIdentity: preparedLayout.fakeHomeIdentity,
-      configIdentity: preparedLayout.configIdentity,
-      configSha256: preparedLayout.configSha256
-    },
-    worktree: {
-      identity: plan.worktreeIdentity,
-      path: plan.cwd,
-      read: {
-        target: controls.worktreeRead.target,
-        sha256: controls.worktreeRead.sha256,
-        syscall: 'open(O_RDONLY)',
-        result: 'succeeded'
-      },
-      write: deniedWrite(plan.cwd, controls.writes.worktree.target)
-    },
-    writes: {
-      codexHome: deniedWrite(plan.runtimePaths.codexHome, controls.writes.codexHome.target),
-      fakeHome: deniedWrite(plan.runtimePaths.fakeHome, controls.writes.fakeHome.target),
-      privateTmp: deniedWrite('/private/tmp', controls.writes.privateTmp.target),
-      outsideRoot: deniedWrite(
-        controls.writes.outsideRoot.parent.path,
-        controls.writes.outsideRoot.target
-      )
-    },
-    network: {
-      tcpConnect: {
-        host: '127.0.0.1',
-        port: controls.network.tcpConnect.port,
-        challengeSha256: controls.network.tcpConnect.challengeSha256,
-        syscall: 'connect(AF_INET,SOCK_STREAM)',
-        result: 'denied-by-sandbox',
-        errno: 'EPERM'
-      },
-      tcpBind: {
-        host: '127.0.0.1',
-        port: 0,
-        syscall: 'bind(AF_INET,SOCK_STREAM)',
-        result: 'denied-by-sandbox',
-        errno: 'EPERM'
-      },
-      unixConnect: {
-        path: plan.gatewaySocketPath,
-        challengeSha256: controls.network.unixConnect.challengeSha256,
-        syscall: 'connect(AF_UNIX,SOCK_STREAM)',
-        result: 'denied-by-sandbox',
-        errno: 'EPERM'
-      },
-      unixBind: {
-        path: controls.network.unixBind.path,
-        syscall: 'bind(AF_UNIX,SOCK_STREAM)',
-        result: 'denied-by-sandbox',
-        errno: 'EPERM'
-      }
-    }
-  }
+  return buildExpectedConfinementProbeReport(input)
 }
 
 function directory(
@@ -256,7 +204,7 @@ function directory(
     path,
     observedRealPath: path,
     kind: 'directory',
-    ownedByCurrentUser: true,
+    custody: 'trusted-local-host',
     identity: observedIdentity
   }
 }

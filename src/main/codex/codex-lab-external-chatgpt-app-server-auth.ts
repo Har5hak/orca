@@ -2,7 +2,10 @@ import type {
   CodexAppServerConnection,
   CodexAppServerServerRequest
 } from './codex-app-server-connection-types'
-import type { CodexLabExternalChatGptAuthHostPort } from './codex-lab-external-chatgpt-auth-contract'
+import type {
+  CodexLabExternalChatGptAuthHostPort,
+  CodexLabExternalChatGptLoginReceipt
+} from './codex-lab-external-chatgpt-auth-contract'
 import { isCodexLabExternalChatGptAuthHostBoundTo } from './codex-lab-external-chatgpt-auth-authority'
 import { exactCodexLabExternalChatGptOwnDataRecord } from './codex-lab-external-chatgpt-auth-validation'
 import { CODEX_AUTH_TOKEN_REFRESH_METHOD } from './codex-server-request-disposition'
@@ -13,7 +16,10 @@ const AUTH_RESPONSE_ERROR_MESSAGE = 'Orca could not refresh app-server auth toke
 const AUTH_LOGIN_ERROR_MESSAGE = 'Codex laboratory external ChatGPT login failed'
 
 export type CodexLabExternalChatGptAppServerAuth = Readonly<{
-  authenticate(connection: CodexAppServerConnection, timeoutMs?: number): Promise<void>
+  authenticate(
+    connection: CodexAppServerConnection,
+    timeoutMs?: number
+  ): Promise<CodexLabExternalChatGptLoginReceipt>
   tryRespond(request: CodexAppServerServerRequest): boolean
   dispose(): void
 }>
@@ -51,7 +57,7 @@ export async function authenticateCodexLabExternalChatGptAppServer(
   connection: Pick<CodexAppServerConnection, 'request'>,
   host: CodexLabExternalChatGptAuthHostPort,
   timeoutMs?: number
-): Promise<void> {
+): Promise<CodexLabExternalChatGptLoginReceipt> {
   const params = host.takeInitialLoginParams()
   let result: unknown
   try {
@@ -65,6 +71,11 @@ export async function authenticateCodexLabExternalChatGptAppServer(
   if (response?.type !== 'chatgptAuthTokens') {
     throw new Error('Codex laboratory external ChatGPT login response is invalid')
   }
+  return Object.freeze({
+    type: params.type,
+    chatgptAccountId: params.chatgptAccountId,
+    chatgptPlanType: params.chatgptPlanType
+  })
 }
 
 /**
@@ -101,7 +112,10 @@ function createSessionAuth(
   let earlyRefresh: CodexAppServerServerRequest | null = null
   let earlyRefreshOverflow = false
   return Object.freeze({
-    async authenticate(upstream: CodexAppServerConnection, timeoutMs?: number): Promise<void> {
+    async authenticate(
+      upstream: CodexAppServerConnection,
+      timeoutMs?: number
+    ): Promise<CodexLabExternalChatGptLoginReceipt> {
       connection = upstream
       if (earlyRefresh) {
         upstream.respondWithError(
@@ -115,7 +129,7 @@ function createSessionAuth(
             : 'Codex app-server requested token refresh before external auth login'
         )
       }
-      await authenticateCodexLabExternalChatGptAppServer(upstream, host, timeoutMs)
+      return authenticateCodexLabExternalChatGptAppServer(upstream, host, timeoutMs)
     },
     tryRespond(request: CodexAppServerServerRequest): boolean {
       if (request.method !== CODEX_AUTH_TOKEN_REFRESH_METHOD) {

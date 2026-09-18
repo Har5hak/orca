@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { RuntimeTerminalPromptDelivery } from '../../../../../../shared/runtime-terminal-contracts'
+import { OrcaRuntimeService } from '../../../../orca-runtime'
 import { LAB_DYNAMIC_TOOL_USAGE_CONTRACT } from '../../../../orchestration/lab-profile/lab-dispatch-preamble'
 import { buildDispatchPreamble } from '../../../../orchestration/preamble'
 
@@ -29,10 +31,39 @@ vi.mock('../../orchestration-structured-worker-session', () => ({
 
 import { deliverWorkerDispatchPreamble } from './deliver-worker-dispatch-preamble'
 
-const structuredSession = {
-  host: { marker: 'host' },
-  identity: { sessionId: 'session-lab-757' }
-} as never
+type DispatchPreambleArgs = Parameters<typeof deliverWorkerDispatchPreamble>[0]
+type LabDispatchPreambleArgs = Extract<DispatchPreambleArgs, { delivery: 'lab-structured-only' }>
+type OrdinaryDispatchPreambleArgs = Extract<DispatchPreambleArgs, { delivery: 'ordinary' }>
+
+function structuredSessionFixture(
+  sessionId: string,
+  host: unknown = { marker: 'host' }
+): LabDispatchPreambleArgs['structuredSession'] {
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: this boundary test passes the host opaquely to a mocked sender and exercises only the sessionId snapshot.
+  return { host, identity: { sessionId } } as LabDispatchPreambleArgs['structuredSession']
+}
+
+function ordinaryRuntime() {
+  const runtime = new OrcaRuntimeService()
+  const getNestedWorkerMaxDepth = vi.spyOn(runtime, 'getNestedWorkerMaxDepth').mockReturnValue(3)
+  const getTerminalOrchestrationCliCommand = vi
+    .spyOn(runtime, 'getTerminalOrchestrationCliCommand')
+    .mockReturnValue('orca')
+  const sendTerminalAgentPrompt = vi.spyOn(runtime, 'sendTerminalAgentPrompt')
+  return {
+    runtime,
+    getNestedWorkerMaxDepth,
+    getTerminalOrchestrationCliCommand,
+    sendTerminalAgentPrompt
+  }
+}
+
+// oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: adversarial tests deliberately pass malformed JavaScript caller objects that cannot satisfy the compile-time discriminated union.
+const deliverUnchecked = deliverWorkerDispatchPreamble as (
+  args: object
+) => ReturnType<typeof deliverWorkerDispatchPreamble>
+
+const structuredSession = structuredSessionFixture('session-lab-757')
 
 beforeEach(() => {
   getCodexLabStructuredLaunchBinding.mockReset()
@@ -72,9 +103,9 @@ describe('worker dispatch preamble delivery', () => {
       dispatchId: 'dispatch-lab-757',
       taskSpec: 'Inspect the fixture.',
       runtime: { sendTerminalAgentPrompt }
-    } as unknown as Parameters<typeof deliverWorkerDispatchPreamble>[0]
+    }
 
-    await expect(deliverWorkerDispatchPreamble(staleCaller)).rejects.toMatchObject({
+    await expect(deliverUnchecked(staleCaller)).rejects.toMatchObject({
       code: 'ORCA_CODEX_LAB_PREAMBLE_DELIVERY_REFUSED',
       reason: 'structured_session_required'
     })
@@ -89,9 +120,9 @@ describe('worker dispatch preamble delivery', () => {
       dispatchId: 'dispatch-lab-757',
       taskSpec: 'Inspect the fixture.',
       dispatchCapability: 'dcap_forbidden'
-    } as unknown as Parameters<typeof deliverWorkerDispatchPreamble>[0]
+    }
 
-    await expect(deliverWorkerDispatchPreamble(staleCaller)).rejects.toMatchObject({
+    await expect(deliverUnchecked(staleCaller)).rejects.toMatchObject({
       code: 'ORCA_CODEX_LAB_PREAMBLE_DELIVERY_REFUSED',
       reason: 'forbidden_authority_input'
     })
@@ -117,24 +148,17 @@ describe('worker dispatch preamble delivery', () => {
       [Symbol('authority')]: 'forbidden'
     }
 
-    await expect(
-      deliverWorkerDispatchPreamble(
-        hiddenAuthority as unknown as Parameters<typeof deliverWorkerDispatchPreamble>[0]
-      )
-    ).rejects.toMatchObject({ reason: 'forbidden_authority_input' })
-    await expect(
-      deliverWorkerDispatchPreamble(
-        symbolAuthority as unknown as Parameters<typeof deliverWorkerDispatchPreamble>[0]
-      )
-    ).rejects.toMatchObject({ reason: 'forbidden_authority_input' })
+    await expect(deliverUnchecked(hiddenAuthority)).rejects.toMatchObject({
+      reason: 'forbidden_authority_input'
+    })
+    await expect(deliverUnchecked(symbolAuthority)).rejects.toMatchObject({
+      reason: 'forbidden_authority_input'
+    })
     expect(sendStructuredWorkerPreamble).not.toHaveBeenCalled()
   })
 
   it('refuses laboratory delivery through an unbound structured session', async () => {
-    const unboundSession = {
-      host: { marker: 'host' },
-      identity: { sessionId: 'session-ordinary-757' }
-    } as never
+    const unboundSession = structuredSessionFixture('session-ordinary-757')
 
     await expect(
       deliverWorkerDispatchPreamble({
@@ -166,18 +190,17 @@ describe('worker dispatch preamble delivery', () => {
   })
 
   it('refuses the ordinary authority preamble for a laboratory-bound session', async () => {
-    const getNestedWorkerMaxDepth = vi.fn(() => 3)
-    const getTerminalOrchestrationCliCommand = vi.fn(() => 'orca orchestration')
-    const sendTerminalAgentPrompt = vi.fn()
+    const {
+      runtime,
+      getNestedWorkerMaxDepth,
+      getTerminalOrchestrationCliCommand,
+      sendTerminalAgentPrompt
+    } = ordinaryRuntime()
 
     await expect(
       deliverWorkerDispatchPreamble({
         delivery: 'ordinary',
-        runtime: {
-          getNestedWorkerMaxDepth,
-          getTerminalOrchestrationCliCommand,
-          sendTerminalAgentPrompt
-        } as never,
+        runtime,
         structuredSession,
         terminalHandle: 'term_worker',
         dispatchId: 'dispatch-lab-757',
@@ -207,9 +230,9 @@ describe('worker dispatch preamble delivery', () => {
       structuredSession,
       dispatchId: 'dispatch-lab-757',
       taskSpec: 'Inspect the fixture.'
-    } as unknown as Parameters<typeof deliverWorkerDispatchPreamble>[0]
+    }
 
-    await expect(deliverWorkerDispatchPreamble(staleCaller)).rejects.toMatchObject({
+    await expect(deliverUnchecked(staleCaller)).rejects.toMatchObject({
       code: 'ORCA_CODEX_LAB_PREAMBLE_DELIVERY_REFUSED',
       reason: 'delivery_mode_invalid'
     })
@@ -218,18 +241,13 @@ describe('worker dispatch preamble delivery', () => {
   })
 
   it('refuses a truthy structured session without a stable session identity', async () => {
-    const getNestedWorkerMaxDepth = vi.fn(() => 3)
-    const sendTerminalAgentPrompt = vi.fn()
+    const { runtime, getNestedWorkerMaxDepth, sendTerminalAgentPrompt } = ordinaryRuntime()
 
     await expect(
-      deliverWorkerDispatchPreamble({
+      deliverUnchecked({
         delivery: 'ordinary',
-        runtime: {
-          getNestedWorkerMaxDepth,
-          getTerminalOrchestrationCliCommand: vi.fn(() => 'orca orchestration'),
-          sendTerminalAgentPrompt
-        } as never,
-        structuredSession: { host: {}, identity: { sessionId: '' } } as never,
+        runtime,
+        structuredSession: { host: {}, identity: { sessionId: '' } },
         terminalHandle: 'term_worker',
         dispatchId: 'dispatch-ordinary',
         dispatchDepth: 1,
@@ -248,18 +266,12 @@ describe('worker dispatch preamble delivery', () => {
 
   it('snapshots an ordinary structured session before checking its binding', async () => {
     const unboundHost = { marker: 'unbound-host' }
-    const unboundSession = {
-      host: unboundHost,
-      identity: { sessionId: 'session-ordinary-757' }
-    }
+    const unboundSession = structuredSessionFixture('session-ordinary-757', unboundHost)
     let sessionReads = 0
-    const switchingCaller = {
+    const { runtime } = ordinaryRuntime()
+    const switchingCaller: OrdinaryDispatchPreambleArgs = {
       delivery: 'ordinary',
-      runtime: {
-        getNestedWorkerMaxDepth: () => 3,
-        getTerminalOrchestrationCliCommand: () => 'orca orchestration',
-        sendTerminalAgentPrompt: vi.fn()
-      },
+      runtime,
       get structuredSession() {
         sessionReads += 1
         return sessionReads === 1 ? unboundSession : structuredSession
@@ -273,7 +285,7 @@ describe('worker dispatch preamble delivery', () => {
       dispatchCapability: 'dcap_test_secret',
       devMode: false,
       requestId: 'request-ordinary'
-    } as unknown as Parameters<typeof deliverWorkerDispatchPreamble>[0]
+    }
 
     await deliverWorkerDispatchPreamble(switchingCaller)
 
@@ -284,12 +296,22 @@ describe('worker dispatch preamble delivery', () => {
   })
 
   it('keeps ordinary preamble bytes and terminal delivery unchanged', async () => {
-    const sendTerminalAgentPrompt = vi.fn(async () => ({ prompt: { state: 'accepted' } }))
-    const runtime = {
-      getNestedWorkerMaxDepth: () => 3,
-      getTerminalOrchestrationCliCommand: () => 'orca orchestration',
-      sendTerminalAgentPrompt
-    } as never
+    const { runtime, sendTerminalAgentPrompt } = ordinaryRuntime()
+    const promptReceipt: RuntimeTerminalPromptDelivery = {
+      requestId: 'request-ordinary',
+      stages: ['input_accepted'],
+      provider: 'codex',
+      observation: 'supported',
+      processIncarnation: 'process-ordinary',
+      generation: 1,
+      baselineWorkingSequence: 0
+    }
+    sendTerminalAgentPrompt.mockResolvedValue({
+      handle: 'term_worker',
+      accepted: true,
+      bytesWritten: 1,
+      prompt: promptReceipt
+    })
     const expected = buildDispatchPreamble({
       canDispatchSubWorkers: true,
       taskId: 'task-ordinary',
@@ -299,7 +321,7 @@ describe('worker dispatch preamble delivery', () => {
       workerHandle: 'term_worker',
       dispatchCapability: 'dcap_test_secret',
       devMode: false,
-      cliCommand: 'orca orchestration' as never
+      cliCommand: 'orca'
     })
 
     const prompt = await deliverWorkerDispatchPreamble({
@@ -322,21 +344,13 @@ describe('worker dispatch preamble delivery', () => {
       observationTimeoutMs: 0,
       requestId: 'request-ordinary'
     })
-    expect(prompt).toEqual({ state: 'accepted' })
+    expect(prompt).toEqual(promptReceipt)
   })
 
   it('keeps full ordinary delivery for an unbound structured session', async () => {
     const ordinaryHost = { marker: 'ordinary-host' }
-    const ordinarySession = {
-      host: ordinaryHost,
-      identity: { sessionId: 'session-ordinary-757' }
-    } as never
-    const sendTerminalAgentPrompt = vi.fn()
-    const runtime = {
-      getNestedWorkerMaxDepth: () => 3,
-      getTerminalOrchestrationCliCommand: () => 'orca orchestration',
-      sendTerminalAgentPrompt
-    } as never
+    const ordinarySession = structuredSessionFixture('session-ordinary-757', ordinaryHost)
+    const { runtime, sendTerminalAgentPrompt } = ordinaryRuntime()
     const expected = buildDispatchPreamble({
       canDispatchSubWorkers: true,
       taskId: 'task-ordinary',
@@ -346,7 +360,7 @@ describe('worker dispatch preamble delivery', () => {
       workerHandle: 'term_worker',
       dispatchCapability: 'dcap_test_secret',
       devMode: false,
-      cliCommand: 'orca orchestration' as never
+      cliCommand: 'orca'
     })
 
     await deliverWorkerDispatchPreamble({

@@ -14,53 +14,19 @@ export function validateCodexLabPermissionConfig(
 ): ValidationFailure | null {
   const permissions = exactRecord(value, [expected.permissionProfileId])
   const profile = permissions
-    ? exactRecord(permissions[expected.permissionProfileId], [
-        'description',
-        'extends',
-        'workspace_roots',
-        'filesystem',
-        'network'
-      ])
+    ? exactRecord(permissions[expected.permissionProfileId], ['description', 'extends', 'network'])
     : null
   if (!profile || !nonEmptyString(profile.description) || profile.extends !== ':read-only') {
     return invalid(`config.permissions.${expected.permissionProfileId}`)
   }
-  const roots = exactRecord(profile.workspace_roots, [expected.cwd])
-  if (!roots || roots[expected.cwd] !== true) {
-    return invalid(`config.permissions.${expected.permissionProfileId}.workspace_roots`)
-  }
-  const filesystemFailure = validateFilesystem(profile.filesystem, expected.permissionProfileId)
-  if (filesystemFailure) {
-    return filesystemFailure
-  }
-  return validateNetwork(profile.network, expected.permissionProfileId)
+  return validateNetwork(profile.network, expected)
 }
 
-function validateFilesystem(value: unknown, profileId: string): ValidationFailure | null {
-  const filesystem = knownRecord(value, [
-    'glob_scan_max_depth',
-    ':root',
-    ':minimal',
-    ':tmpdir',
-    ':slash_tmp',
-    ':workspace_roots'
-  ])
-  const workspace = filesystem ? exactRecord(filesystem[':workspace_roots'], ['.']) : null
-  if (
-    !filesystem ||
-    !isAbsent(filesystem.glob_scan_max_depth) ||
-    filesystem[':root'] !== 'deny' ||
-    filesystem[':minimal'] !== 'read' ||
-    filesystem[':tmpdir'] !== 'deny' ||
-    filesystem[':slash_tmp'] !== 'deny' ||
-    workspace?.['.'] !== 'read'
-  ) {
-    return invalid(`config.permissions.${profileId}.filesystem`)
-  }
-  return null
-}
-
-function validateNetwork(value: unknown, profileId: string): ValidationFailure | null {
+function validateNetwork(
+  value: unknown,
+  expected: CodexLabAppServerAttestationExpected
+): ValidationFailure | null {
+  const profileId = expected.permissionProfileId
   const network = knownRecord(value, [
     'enabled',
     'proxy_url',
@@ -78,7 +44,7 @@ function validateNetwork(value: unknown, profileId: string): ValidationFailure |
   ])
   if (
     !network ||
-    network.enabled !== false ||
+    network.enabled !== true ||
     !isAbsent(network.proxy_url) ||
     !isAbsent(network.enable_socks5) ||
     !isAbsent(network.socks_url) ||
@@ -93,7 +59,7 @@ function validateNetwork(value: unknown, profileId: string): ValidationFailure |
     !isAbsent(network.mode) ||
     !isEmptyOrAbsentRecord(network.domains) ||
     !isAbsent(network.mitm) ||
-    !emptyRecord(network.unix_sockets)
+    !exactUnixSocket(network.unix_sockets, expected.gatewaySocketPath)
   ) {
     return invalid(`config.permissions.${profileId}.network`)
   }
@@ -108,9 +74,9 @@ function knownRecord(value: unknown, keys: readonly string[]): Record<string, un
   return object
 }
 
-function emptyRecord(value: unknown): boolean {
-  const object = record(value)
-  return Boolean(object && Object.keys(object).length === 0)
+function exactUnixSocket(value: unknown, path: string): boolean {
+  const sockets = exactRecord(value, [path])
+  return sockets?.[path] === 'allow'
 }
 
 function nonEmptyString(value: unknown): value is string {

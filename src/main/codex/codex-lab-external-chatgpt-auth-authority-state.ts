@@ -20,6 +20,15 @@ import {
   snapshotCodexLabExternalChatGptInitialCredential,
   snapshotCodexLabExternalChatGptRefreshCredential
 } from './codex-lab-external-chatgpt-auth-validation'
+import {
+  registerCodexLabExternalChatGptAuthHost,
+  takeCodexLabExternalChatGptAuthHostDisposal
+} from './codex-lab-external-chatgpt-auth-host-lifecycle'
+
+export {
+  bindCodexLabExternalChatGptAuthHostDisposal,
+  isCodexLabExternalChatGptAuthHostBoundTo
+} from './codex-lab-external-chatgpt-auth-host-lifecycle'
 
 type RuntimeState = {
   readonly binding: CodexLabExternalChatGptAuthBinding
@@ -39,14 +48,13 @@ type FactoryState = {
 
 const factoryStates = new WeakMap<object, FactoryState>()
 const revokedFactories = new WeakSet<object>()
-const runtimesByHost = new WeakMap<object, RuntimeState>()
 
 class CodexLabExternalChatGptAuthHost implements CodexLabExternalChatGptAuthHostPort {
   readonly #runtime: RuntimeState
 
   constructor(runtime: RuntimeState) {
     this.#runtime = runtime
-    runtimesByHost.set(this, runtime)
+    registerCodexLabExternalChatGptAuthHost(this, runtime)
     Object.freeze(this)
   }
 
@@ -88,7 +96,9 @@ class CodexLabExternalChatGptAuthHost implements CodexLabExternalChatGptAuthHost
   }
 
   dispose(): void {
+    const onDispose = takeCodexLabExternalChatGptAuthHostDisposal(this)
     deactivate(this.#runtime, 'disposed')
+    onDispose?.()
   }
 }
 
@@ -100,7 +110,8 @@ export function createCodexLabExternalChatGptAuthHostFactory(
     'credential',
     'refresh'
   ])
-  if (!fields || typeof fields.refresh !== 'function') {
+  const refresh = fields?.refresh
+  if (!fields || typeof refresh !== 'function') {
     throw refuseCodexLabExternalChatGptAuth('authority_invalid')
   }
   const binding = snapshotCodexLabExternalChatGptAuthBinding(fields.binding)
@@ -108,7 +119,7 @@ export function createCodexLabExternalChatGptAuthHostFactory(
   const runtime: RuntimeState = {
     binding,
     credential,
-    refreshSource: fields.refresh as CodexLabExternalChatGptRefreshSource,
+    refreshSource: async (context) => refresh(context),
     phase: 'active',
     initialTaken: false,
     refreshGeneration: 0,
@@ -176,19 +187,6 @@ function revokeFactory(factory: unknown, requiredPhase?: FactoryState['phase']):
 function frozenFactoryState(factory: unknown): FactoryState | undefined {
   const state = typeof factory === 'function' ? factoryStates.get(factory) : undefined
   return state && Object.isFrozen(factory) ? state : undefined
-}
-
-export function isCodexLabExternalChatGptAuthHostBoundTo(
-  host: unknown,
-  expected: CodexLabExternalChatGptAuthBinding
-): host is CodexLabExternalChatGptAuthHostPort {
-  const runtime = host && typeof host === 'object' ? runtimesByHost.get(host) : undefined
-  return (
-    runtime !== undefined &&
-    Object.isFrozen(host) &&
-    runtime.phase === 'active' &&
-    sameCodexLabExternalChatGptAuthBinding(runtime.binding, expected)
-  )
 }
 
 async function runRefresh(

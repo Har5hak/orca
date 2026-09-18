@@ -105,7 +105,7 @@ function snapshotExactRootDeletionOrder(root: string): OwnedPath[] {
       return
     }
     if (!current.isFile()) {
-      throw new Error('refusing cleanup of a non-file fixture entry')
+      throw new Error(`refusing cleanup of a non-file fixture entry: ${path}`)
     }
     entries.push({ path, kind: 'file', identity: statIdentity(current) })
   }

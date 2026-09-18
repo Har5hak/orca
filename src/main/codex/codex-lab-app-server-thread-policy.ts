@@ -64,7 +64,7 @@ export function validateCodexLabOpenedThread(
   if (value.modelProvider !== 'openai') {
     return invalid('openedThread.modelProvider')
   }
-  if (!sameStrings(value.disabledPluginIds, [])) {
+  if (Object.hasOwn(value, 'disabledPluginIds')) {
     return invalid('openedThread.disabledPluginIds')
   }
   if (value.multiAgentMode !== 'explicitRequestOnly') {
@@ -75,7 +75,7 @@ export function validateCodexLabOpenedThread(
     return invalid('openedThread.activePermissionProfile')
   }
   const sandbox = record(value.sandbox)
-  if (sandbox?.type !== 'readOnly' || sandbox.networkAccess !== false) {
+  if (sandbox?.type !== 'readOnly' || sandbox.networkAccess !== true) {
     return invalid('openedThread.sandbox')
   }
   const thread = record(value.thread)

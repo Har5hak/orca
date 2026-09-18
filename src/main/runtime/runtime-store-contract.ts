@@ -121,6 +121,9 @@ export type RuntimeStore = {
     agentSkillSharingEnabled?: GlobalSettings['agentSkillSharingEnabled']
     nativeChatSessionOptions?: GlobalSettings['nativeChatSessionOptions']
     aiVaultSearch?: GlobalSettings['aiVaultSearch']
+    codexManagedAccounts?: GlobalSettings['codexManagedAccounts']
+    activeCodexManagedAccountId?: GlobalSettings['activeCodexManagedAccountId']
+    activeCodexManagedAccountIdsByRuntime?: GlobalSettings['activeCodexManagedAccountIdsByRuntime']
   }
   // Why: narrow to `unknown` return so test mocks can return void without
   // a cast. The runtime never reads the return value — the persisted value

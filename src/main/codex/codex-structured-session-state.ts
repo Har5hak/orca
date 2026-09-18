@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { cancelProcessAcquisition } from '../../shared/child-process/cancel-process-acquisition'
 import type {
   CodexAppServerConnection,
+  CodexAppServerExecutableIntegrity,
   openCodexAppServerConnection
 } from './codex-app-server-connection'
 import { CodexAcquisitionWindow } from './codex-structured-acquisition-window'
@@ -38,6 +39,8 @@ export type CodexStructuredLaunch = {
   env?: Record<string, string>
   environmentMode?: CodexAppServerEnvironmentMode
   workerAccessMode?: 'orca-cli' | 'lab-gateway'
+  /** Present only for a sealed laboratory launch; re-attested by the final POSIX supervisor. */
+  executableIntegrity?: CodexAppServerExecutableIntegrity
   /** Host-only expectations derived from the sealed laboratory launch binding. */
   labAppServerAttestationExpected?: CodexLabAppServerAttestationExpected
   /** Host-only Dispatch bridge. Never serialized into the provider launch environment. */
@@ -95,6 +98,8 @@ export type CodexStructuredSessionAdapterDeps = {
     providerIdentity: AgentJournalItemIdentity
   }) => void
   openConnection?: typeof openCodexAppServerConnection
+  /** Final host-side absence proof after laboratory login and opened-thread attestation. */
+  observeLabAuthJson?: (authJsonPath: string) => 'absent' | 'present'
   readProcessStartTime?: (pid: number) => Promise<number | null>
   mintLinkId?: () => string
   mintAcquisitionGeneration?: () => string

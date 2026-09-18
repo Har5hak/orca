@@ -189,6 +189,7 @@ describe('structured worker release retires the chat tab', () => {
     installHost()
     const identity = registerIdentity()
     const { runtime } = await runtimeShowingStructuredTab()
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This release fixture supplies every resource field read by the path under test.
     const resource = {
       id: 'resource-1',
       terminal_handle: HANDLE,
@@ -198,12 +199,14 @@ describe('structured worker release retires the chat tab', () => {
       ownership_state: 'owned',
       release_state: 'requested'
     } as WorkerTerminalResourceRow
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: The release path calls only the explicitly supplied database methods in this fixture.
     const db = {
       getWorkerDispatch: () => ({
         agent_terminal_handle: HANDLE,
         created_at: '2026-09-05 00:00:00'
       }),
       getDispatchContextById: () => null,
+      getCodexLabRuntimeCustody: () => undefined,
       isDispatchProcessCurrent: (args: { paneKey: string; processIncarnation: string }) =>
         args.paneKey === identity.paneKey &&
         args.processIncarnation === identity.processIncarnation,
@@ -241,6 +244,7 @@ describe('structured worker release retires the chat tab', () => {
       }
     })
     const identity = registerIdentity()
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This closed-tab fixture supplies every resource field read by the path under test.
     const resource = {
       id: 'resource-2',
       terminal_handle: HANDLE,
@@ -251,12 +255,14 @@ describe('structured worker release retires the chat tab', () => {
       release_state: 'requested'
     } as unknown as WorkerTerminalResourceRow
     let stored: { kind?: string; content?: string } = {}
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: The release path calls only the explicitly supplied database methods in this fixture.
     const db = {
       getWorkerDispatch: () => ({
         agent_terminal_handle: HANDLE,
         created_at: '2026-09-05 00:00:00'
       }),
       getDispatchContextById: () => null,
+      getCodexLabRuntimeCustody: () => undefined,
       isDispatchProcessCurrent: (args: { paneKey: string; processIncarnation: string }) =>
         args.paneKey === identity.paneKey &&
         args.processIncarnation === identity.processIncarnation,
@@ -316,10 +322,11 @@ describe('structured worker discard retires the chat tab', () => {
     await expect(
       createStructuredWorkerSession({
         runtime,
+        // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This refusal path reads only the two guard methods supplied by this fixture before the mocked create returns.
         db: {
           getDispatchContextById: () => ({ status: 'pending' }),
           getWorkerDispatch: () => ({ state: 'starting' })
-        } as never,
+        } as unknown as OrchestrationDb,
         worktreeId: WORKTREE,
         agent: 'claude',
         dispatchId: 'd_discard',

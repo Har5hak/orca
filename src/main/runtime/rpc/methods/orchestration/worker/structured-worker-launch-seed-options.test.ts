@@ -4,16 +4,18 @@
  * selection seeds a chat with are seeded into the worker's own session here.
  */
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
+import { OrcaRuntimeService } from '../../../../orca-runtime'
+import { OrchestrationDb } from '../../../../orchestration/db'
 
 const createStructuredWorkerSession = vi.fn(async (_args: Record<string, unknown>) => ({
   identity: { handle: 'structworker_1', sessionId: 'sess_1' },
   host: {}
 }))
-const startingDb = {
-  getDispatchContextById: () => ({ status: 'pending' }),
-  getWorkerDispatch: () => ({ state: 'starting' })
-} as never
+const runtime = new OrcaRuntimeService()
+const startingDb = new OrchestrationDb(':memory:')
+
+afterAll(() => startingDb.close())
 
 vi.mock('../../orchestration-structured-worker-session', () => ({
   createStructuredWorkerSession: (args: never) => createStructuredWorkerSession(args)
@@ -22,6 +24,10 @@ vi.mock('../../orchestration-structured-worker-session', () => ({
 const { createStructuredWorkerSessionForWorktree } = await import('./worker-topology')
 const { prepareStructuredAgentSessionCreateForWorktree } =
   await import('../../structured-agent-session-create')
+
+function createFromUncheckedJavascript(args: Record<string, unknown>) {
+  return Reflect.apply(createStructuredWorkerSessionForWorktree, undefined, [args])
+}
 
 async function createWith(launchPreferences?: Record<string, string>) {
   createStructuredWorkerSession.mockClear()
@@ -78,7 +84,9 @@ describe('a structured worker seeds the dispatch launch preferences', () => {
 
   it('forwards explicit laboratory mode and its required binding callback together', async () => {
     createStructuredWorkerSession.mockClear()
-    const beforeAttach = vi.fn(async () => ({ labLaunchBinding: {} as never }))
+    const beforeAttach = vi.fn(async () => {
+      throw new Error('topology must not invoke beforeAttach')
+    })
 
     await createStructuredWorkerSessionForWorktree({
       runtime: {} as never,
@@ -93,7 +101,8 @@ describe('a structured worker seeds the dispatch launch preferences', () => {
 
     expect(createStructuredWorkerSession.mock.calls[0]?.[0]).toMatchObject({
       launchMode: 'codex-lab',
-      beforeAttach
+      beforeAttach,
+      options: { fastMode: 'false' }
     })
     expect(beforeAttach).not.toHaveBeenCalled()
   })
@@ -101,16 +110,16 @@ describe('a structured worker seeds the dispatch launch preferences', () => {
   it('refuses the removed direct laboratory binding input', async () => {
     createStructuredWorkerSession.mockClear()
     const staleCallerArgs = {
-      runtime: {} as never,
+      runtime,
       db: startingDb,
       worktreeId: 'repo::wt',
       agent: 'codex',
       dispatchId: 'ctx_removed_direct_binding',
       labLaunchBinding: { dispatchId: 'ctx_removed_direct_binding' },
       effects: []
-    } as unknown as Parameters<typeof createStructuredWorkerSessionForWorktree>[0]
+    }
 
-    await expect(createStructuredWorkerSessionForWorktree(staleCallerArgs)).rejects.toMatchObject({
+    await expect(createFromUncheckedJavascript(staleCallerArgs)).rejects.toMatchObject({
       code: 'ORCA_CODEX_LAB_STRUCTURED_BINDING_REFUSED',
       reason: 'binding_invalid'
     })
@@ -120,16 +129,16 @@ describe('a structured worker seeds the dispatch launch preferences', () => {
   it('refuses an unknown launch mode instead of stripping it into ordinary mode', async () => {
     createStructuredWorkerSession.mockClear()
     const staleCallerArgs = {
-      runtime: {} as never,
+      runtime,
       db: startingDb,
       worktreeId: 'repo::wt',
       agent: 'codex',
       dispatchId: 'ctx_unknown_launch_mode',
       launchMode: 'legacy-lab',
       effects: []
-    } as unknown as Parameters<typeof createStructuredWorkerSessionForWorktree>[0]
+    }
 
-    await expect(createStructuredWorkerSessionForWorktree(staleCallerArgs)).rejects.toMatchObject({
+    await expect(createFromUncheckedJavascript(staleCallerArgs)).rejects.toMatchObject({
       code: 'worker_launch_mode_invalid'
     })
     expect(createStructuredWorkerSession).not.toHaveBeenCalled()
@@ -137,9 +146,11 @@ describe('a structured worker seeds the dispatch launch preferences', () => {
 
   it('refuses a forged non-Codex lab mode without coercion or callback', async () => {
     createStructuredWorkerSession.mockClear()
-    const beforeAttach = vi.fn(async () => ({ labLaunchBinding: {} as never }))
+    const beforeAttach = vi.fn(async () => {
+      throw new Error('topology must not invoke beforeAttach')
+    })
     const forgedArgs = {
-      runtime: {} as never,
+      runtime,
       db: startingDb,
       worktreeId: 'repo::wt',
       agent: 'claude',
@@ -147,9 +158,9 @@ describe('a structured worker seeds the dispatch launch preferences', () => {
       launchMode: 'codex-lab',
       beforeAttach,
       effects: []
-    } as unknown as Parameters<typeof createStructuredWorkerSessionForWorktree>[0]
+    }
 
-    await expect(createStructuredWorkerSessionForWorktree(forgedArgs)).rejects.toMatchObject({
+    await expect(createFromUncheckedJavascript(forgedArgs)).rejects.toMatchObject({
       code: 'ORCA_CODEX_LAB_STRUCTURED_BINDING_REFUSED',
       reason: 'agent_mode_mismatch'
     })

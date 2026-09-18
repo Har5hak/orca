@@ -3,39 +3,18 @@ import type { OrcaRuntimeService } from '../../../../orca-runtime'
 import type { OrchestrationDb } from '../../../../orchestration/db'
 import type { RunRow } from '../../../../orchestration/types'
 import { CODEX_LAB_RUNTIME_ROOT } from '../../../../orchestration/lab-profile/codex-lab-launch-contract'
-import type { CodexLabStructuredLaunchBinding } from '../../../../orchestration/lab-profile/codex-lab-structured-launch-binding-registry'
-import type {
-  CodexLabGatewayPublicReceipt,
-  CodexLabRuntimeLayoutEvidence
-} from '../../../../orchestration/db/lab-runtime-custody/lab-runtime-custody-contract'
 import type { StructuredWorkerIdentity } from '../../../../structured-worker-identity'
 import { deliverWorkerDispatchPreamble } from './deliver-worker-dispatch-preamble'
 import { tearDownFailedWorkerStart } from './failed-worker-start-teardown'
 import { createStructuredWorkerSessionForWorktree, type WorkerEffect } from './worker-topology'
 import type { PreparedLocalLabWorkerStart } from './local-lab-worker-start'
-
-export type PreparedLocalLabLaunchAuthority = Readonly<{
-  labLaunchBinding: CodexLabStructuredLaunchBinding
-  layoutEvidence: CodexLabRuntimeLayoutEvidence
-  gatewayReceipt: CodexLabGatewayPublicReceipt
-  /**
-   * Releases resources only while no provider attachment has completed. Once attach returns, auth
-   * remains in child-exit custody and cleanup must wait for the observed process exit.
-   */
-  /** Atomic: releases only unclaimed authority; a claimed provider remains exit-custodied. */
-  rollbackIfUnclaimed: () => Promise<boolean>
-}>
-
-export type LocalLabWorkerContinuationDeps = Readonly<{
-  prepareLaunchAuthority: (input: {
-    prepared: PreparedLocalLabWorkerStart
-    identity: Readonly<StructuredWorkerIdentity>
-    dispatchCapability: string
-  }) => Promise<PreparedLocalLabLaunchAuthority>
-  createStructuredSession?: typeof createStructuredWorkerSessionForWorktree
-  deliverPreamble?: typeof deliverWorkerDispatchPreamble
-  tearDownFailedStart?: typeof tearDownFailedWorkerStart
-}>
+import {
+  LocalLabLaunchAuthorityPreparationRefusal,
+  type LocalLabLaunchLifecycleRecorder,
+  type PreparedLocalLabLaunchAuthority
+} from './local-lab-launch-authority-contract'
+import type { LocalLabWorkerContinuationDeps } from './local-lab-worker-start-continuation-contract'
+import { reconcileExitedFailedLabProvider } from './local-lab-worker-start-recovery'
 
 /**
  * Finishes the lifecycle after admission has durably reserved the laboratory runtime.
@@ -67,6 +46,7 @@ export async function continuePreparedLocalLabWorkerStart(args: {
   let structuredSession: Awaited<
     ReturnType<typeof createStructuredWorkerSessionForWorktree>
   > | null = null
+  let preAttachIdentity: Readonly<StructuredWorkerIdentity> | undefined
   let failedStage = 'lab_authority_attach'
   try {
     db.planCodexLabRuntimeCustody({
@@ -84,6 +64,7 @@ export async function continuePreparedLocalLabWorkerStart(args: {
       launchMode: 'codex-lab',
       effects,
       beforeAttach: async (identity) => {
+        preAttachIdentity = identity
         const terminalEffect: WorkerEffect = {
           kind: 'terminal',
           role: 'agent',
@@ -105,24 +86,47 @@ export async function continuePreparedLocalLabWorkerStart(args: {
         })
         db.recordCodexLabRuntimeAuthorityAttached(custodyIdentity)
         failedStage = 'lab_host_prepare'
+        const recorded = {
+          layout: false,
+          provider: false,
+          gateway: false
+        }
+        const lifecycle: LocalLabLaunchLifecycleRecorder = Object.freeze({
+          recordLayoutPrepared(evidence) {
+            db.recordCodexLabRuntimeLayoutPrepared(evidence)
+            recorded.layout = true
+          },
+          recordProviderReserved() {
+            if (!recorded.layout) {
+              throw new Error('Codex laboratory provider reservation preceded durable layout.')
+            }
+            db.recordCodexLabRuntimeProviderReserved({
+              ...custodyIdentity,
+              providerId: prepared.admission.adapter,
+              sessionId: identity.sessionId,
+              terminalHandle: identity.handle,
+              terminalPaneKey: identity.paneKey,
+              processIncarnation: identity.processIncarnation
+            })
+            recorded.provider = true
+          },
+          recordGatewayStarted(receipt) {
+            if (!recorded.provider) {
+              throw new Error('Codex laboratory gateway start preceded provider reservation.')
+            }
+            db.recordCodexLabRuntimeGatewayStarted({ ...custodyIdentity, receipt })
+            recorded.gateway = true
+          }
+        })
         authority = await args.deps.prepareLaunchAuthority({
           prepared,
           identity,
-          dispatchCapability
+          dispatchCapability,
+          lifecycle
         })
-        db.recordCodexLabRuntimeLayoutPrepared(authority.layoutEvidence)
-        db.recordCodexLabRuntimeProviderReserved({
-          ...custodyIdentity,
-          providerId: prepared.admission.adapter,
-          sessionId: identity.sessionId,
-          terminalHandle: identity.handle,
-          terminalPaneKey: identity.paneKey,
-          processIncarnation: identity.processIncarnation
-        })
-        db.recordCodexLabRuntimeGatewayStarted({
-          ...custodyIdentity,
-          receipt: authority.gatewayReceipt
-        })
+        if (!recorded.layout || !recorded.provider || !recorded.gateway) {
+          throw new Error('Codex laboratory launch authority skipped durable lifecycle evidence.')
+        }
         failedStage = 'provider_attach'
         return { labLaunchBinding: authority.labLaunchBinding }
       }
@@ -185,15 +189,16 @@ export async function continuePreparedLocalLabWorkerStart(args: {
       mode: { requested: 'structured', effective: 'structured' },
       effects: alreadySettled
         ? [
-            ...(JSON.parse(worker.effects) as unknown[]),
+            ...parseWorkerJsonArray(worker.effects, 'effects'),
             ...effects.filter((effect) => effect.kind === 'dispatch_input')
           ]
-        : (JSON.parse(worker.effects) as unknown[]),
-      residualResources: JSON.parse(worker.residual_resources) as unknown[]
+        : parseWorkerJsonArray(worker.effects, 'effects'),
+      residualResources: parseWorkerJsonArray(worker.residual_resources, 'residual resources')
     }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     const cleanupErrors: string[] = []
+    let unclaimedAuthorityReleased = false
     try {
       await (args.deps.tearDownFailedStart ?? tearDownFailedWorkerStart)({
         runtime,
@@ -207,7 +212,31 @@ export async function continuePreparedLocalLabWorkerStart(args: {
     }
     if (!structuredSession) {
       try {
-        await authority?.rollbackIfUnclaimed()
+        unclaimedAuthorityReleased = (await authority?.rollbackIfUnclaimed()) === true
+      } catch (cleanupError) {
+        cleanupErrors.push(
+          cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+        )
+      }
+    }
+    const cleanPreparationRefusal =
+      failedStage === 'lab_host_prepare' &&
+      !authority &&
+      error instanceof LocalLabLaunchAuthorityPreparationRefusal &&
+      error.cleanupProven
+    if (preAttachIdentity && (cleanPreparationRefusal || unclaimedAuthorityReleased)) {
+      try {
+        db.releaseCodexLabPreAttachRuntimeCustody({
+          ...custodyIdentity,
+          terminalHandle: preAttachIdentity.handle,
+          terminalPaneKey: preAttachIdentity.paneKey,
+          processIncarnation: preAttachIdentity.processIncarnation
+        })
+        if (cleanPreparationRefusal) {
+          error.releaseCleanupRegistration?.()
+        } else {
+          authority?.releaseCleanupRegistration()
+        }
       } catch (cleanupError) {
         cleanupErrors.push(
           cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
@@ -233,11 +262,24 @@ export async function continuePreparedLocalLabWorkerStart(args: {
         profile: prepared.admission.profile,
         adapter: prepared.admission.adapter,
         mode: { requested: 'structured', effective: 'structured' },
-        effects: JSON.parse(settledWorker.effects) as unknown[],
-        residualResources: JSON.parse(settledWorker.residual_resources) as unknown[]
+        effects: parseWorkerJsonArray(settledWorker.effects, 'effects'),
+        residualResources: parseWorkerJsonArray(
+          settledWorker.residual_resources,
+          'residual resources'
+        )
       }
     }
-    const worker = db.failWorkerStart(dispatchId, failedStage, reason)
+    const failedWorker = db.failWorkerStart(dispatchId, failedStage, reason)
+    if (authority && !unclaimedAuthorityReleased) {
+      try {
+        await reconcileExitedFailedLabProvider({ runtime, db, dispatchId })
+      } catch (cleanupError) {
+        cleanupErrors.push(
+          cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+        )
+      }
+    }
+    const worker = db.getWorkerDispatch(dispatchId) ?? failedWorker
     return {
       runId: run.id,
       taskId: task.id,
@@ -250,8 +292,16 @@ export async function continuePreparedLocalLabWorkerStart(args: {
       profile: prepared.admission.profile,
       adapter: prepared.admission.adapter,
       mode: { requested: 'structured', effective: 'structured' },
-      effects: JSON.parse(worker.effects) as unknown[],
-      residualResources: JSON.parse(worker.residual_resources) as unknown[]
+      effects: parseWorkerJsonArray(worker.effects, 'effects'),
+      residualResources: parseWorkerJsonArray(worker.residual_resources, 'residual resources')
     }
   }
+}
+
+function parseWorkerJsonArray(serialized: string, field: string): unknown[] {
+  const value: unknown = JSON.parse(serialized)
+  if (!Array.isArray(value)) {
+    throw new Error(`Worker ${field} must be a JSON array.`)
+  }
+  return value
 }

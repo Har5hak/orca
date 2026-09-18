@@ -14,6 +14,7 @@ import {
   testCodexLabStructuredLaunchBinding
 } from '../runtime/orchestration/lab-profile/codex-lab-structured-launch-binding-test-support'
 import { CodexLabDynamicToolHost } from './codex-lab-dynamic-tool-host'
+import { prepareCodexLabExternalChatGptAppServerAuth } from './codex-lab-external-chatgpt-app-server-auth'
 import { createCodexLabExternalChatGptAuthHostFactory } from './codex-lab-external-chatgpt-auth-authority'
 import {
   registerCodexLabExternalChatGptAuthAuthority,
@@ -145,6 +146,10 @@ describe('structured Codex lab launch resolution', () => {
           },
           environmentMode: 'exact',
           workerAccessMode: 'lab-gateway',
+          executableIntegrity: {
+            canonicalPath: binding.plan.executable,
+            sha256: binding.plan.codexExecutableSha256
+          },
           labDynamicToolHost: expect.any(CodexLabDynamicToolHost),
           labDynamicToolHostAttestationExpected: testCodexLabDynamicToolHostAttestation(),
           labExternalChatGptAuthHost: expect.any(Object),
@@ -157,6 +162,7 @@ describe('structured Codex lab launch resolution', () => {
             cwd: TEST_LAB_WORKTREE_PATH,
             codexHome: binding.plan.runtimePaths.codexHome,
             fakeHome: binding.plan.runtimePaths.fakeHome,
+            gatewaySocketPath: binding.plan.gatewaySocketPath,
             workspaceId: binding.plan.enforcedWorkspaceId,
             permissionProfileId: 'orca-lab-readonly-v1'
           },
@@ -166,6 +172,9 @@ describe('structured Codex lab launch resolution', () => {
             runtimeWorkspaceRoots: [TEST_LAB_WORKTREE_PATH]
           }
         })
+        const appServerAuth = prepareCodexLabExternalChatGptAppServerAuth(launch)
+        expect(appServerAuth).not.toBeNull()
+        appServerAuth?.dispose()
       } finally {
         launch.labDynamicToolHost?.dispose()
         launch.labExternalChatGptAuthHost?.dispose()

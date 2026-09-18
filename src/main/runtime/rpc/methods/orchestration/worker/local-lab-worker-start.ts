@@ -15,6 +15,8 @@ import { parseTaskDeps } from './task-deps-argument'
 import type { WorkerStartInput } from './worker-start-schema'
 import type { LabWorkerStartAdmission } from './worker-start-profile-admission'
 import type { RuntimeLabProfileReadiness } from '../../../../runtime-lab-profile-readiness'
+import type { LocalLabWorkerStartContinuationContext } from './local-lab-worker-start-production'
+import { createDefaultLocalLabWorkerStartContinuation } from './local-lab-worker-start-production-loader'
 
 type WorkerStartMutation = {
   callerFingerprint: string
@@ -45,7 +47,10 @@ export type LocalLabWorkerStartDeps = Readonly<{
     runtime: OrcaRuntimeService
     worktree: Worktree
   }) => Promise<void>
-  continuePreparedStart: (prepared: PreparedLocalLabWorkerStart) => Promise<unknown>
+  continuePreparedStart: (
+    prepared: PreparedLocalLabWorkerStart,
+    context: LocalLabWorkerStartContinuationContext
+  ) => Promise<unknown>
 }>
 
 export async function startLocalLabWorker(args: {
@@ -150,7 +155,8 @@ export async function startLocalLabWorker(args: {
       worktree: observed.worktree,
       observation: observed.observation,
       admission
-    })
+    }),
+    Object.freeze({ runtime, db, run, coordinatorHandle: params.from })
   )
 }
 
@@ -219,9 +225,7 @@ const LOCAL_LAB_WORKER_START_DEPS: LocalLabWorkerStartDeps = Object.freeze({
   readReadiness: readLocalLabWorkerStartReadiness,
   observeWorktree: observeLocalLabWorktree,
   requireStructuredCodex,
-  continuePreparedStart: async () => {
-    throw new Error('The lab launch continuation is not wired.')
-  }
+  continuePreparedStart: createDefaultLocalLabWorkerStartContinuation()
 })
 
 function refuse(reason: string, message: string, extra?: Readonly<Record<string, string>>): never {

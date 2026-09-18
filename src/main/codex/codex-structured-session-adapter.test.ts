@@ -58,6 +58,23 @@ describe('CodexStructuredSessionAdapter.acquire', () => {
     expect(acquisition.acquisitionGeneration).toBe('generation-1')
   })
 
+  it('carries resolved executable integrity unchanged to the app-server spawn boundary', async () => {
+    const codex = fakeCodex()
+    const executableIntegrity = Object.freeze({
+      canonicalPath: '/trusted/codex',
+      sha256: 'a'.repeat(64)
+    })
+    const adapter = adapterFor(codex, { executableIntegrity })
+
+    await adapter.acquire({
+      identity: identityFor('session-integrity'),
+      fence: 7,
+      spawnToken: 'spawn-integrity'
+    })
+
+    expect(codex.connections[0].launch.executableIntegrity).toBe(executableIntegrity)
+  })
+
   it('resumes the thread the durable handle chain names, not the client one', async () => {
     const codex = fakeCodex()
     const adapter = adapterFor(codex, {

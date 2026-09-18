@@ -198,13 +198,12 @@ function snapshotExactArray(value: unknown, field: string): readonly unknown[] {
   if (
     !lengthDescriptor ||
     !('value' in lengthDescriptor) ||
+    typeof lengthDescriptor.value !== 'number' ||
     !Number.isSafeInteger(lengthDescriptor.value)
   ) {
     throw new Error(`Codex laboratory runtime custody ${field} is invalid.`)
   }
-  const expectedKeys = Array.from({ length: lengthDescriptor.value as number }, (_, index) =>
-    String(index)
-  )
+  const expectedKeys = Array.from({ length: lengthDescriptor.value }, (_, index) => String(index))
   const keys = Reflect.ownKeys(value)
   if (
     keys.length !== expectedKeys.length + 1 ||

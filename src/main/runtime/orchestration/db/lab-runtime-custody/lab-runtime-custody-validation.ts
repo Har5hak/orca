@@ -157,8 +157,7 @@ export function normalizeCodexLabProviderEvidence(input: unknown): CodexLabRunti
     !STRUCTURED_HANDLE_PATTERN.test(terminalHandle) ||
     !SAFE_LABEL_PATTERN.test(terminalPaneKey) ||
     !STRUCTURED_INCARNATION_PATTERN.test(processIncarnation) ||
-    processIncarnation !== `structured:${sessionId}` ||
-    terminalHandle !== `structworker_${sessionId}`
+    processIncarnation !== `structured:${sessionId}`
   ) {
     throw new Error('Codex laboratory runtime provider identity is invalid.')
   }

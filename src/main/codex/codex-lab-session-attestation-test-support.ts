@@ -3,10 +3,54 @@ import {
   ENABLED_CODEX_LAB_CONFINEMENT_FEATURES
 } from '../runtime/orchestration/lab-profile/codex-lab-launch-policy'
 import type { CodexLabAppServerAttestationExpected } from './codex-lab-app-server-attestation'
+import {
+  createCodexLabExternalChatGptAuthHostFactory,
+  type CodexLabExternalChatGptAuthBinding,
+  type CodexLabExternalChatGptAuthHostPort
+} from './codex-lab-external-chatgpt-auth-authority'
+import {
+  bindCodexLabExternalChatGptAuthHostFactory,
+  claimCodexLabExternalChatGptAuthHostFactory
+} from './codex-lab-external-chatgpt-auth-authority-internal'
+
+export function testCodexLabExternalChatGptAuth(input: {
+  dispatchId: string
+  sessionId: string
+  expected: CodexLabAppServerAttestationExpected
+  planType?: string
+}): Readonly<{
+  host: CodexLabExternalChatGptAuthHostPort
+  binding: CodexLabExternalChatGptAuthBinding
+}> {
+  const binding = Object.freeze({
+    dispatchId: input.dispatchId,
+    sessionId: input.sessionId,
+    workspaceId: input.expected.workspaceId
+  })
+  const credential = Object.freeze({
+    type: 'chatgptAuthTokens' as const,
+    accessToken: testJwt(),
+    chatgptAccountId: input.expected.workspaceId,
+    chatgptPlanType: input.planType ?? 'business'
+  })
+  const factory = createCodexLabExternalChatGptAuthHostFactory({
+    binding,
+    credential,
+    refresh: async () => credential
+  })
+  if (!bindCodexLabExternalChatGptAuthHostFactory(factory, binding)) {
+    throw new Error('test external-auth factory binding failed')
+  }
+  const host = claimCodexLabExternalChatGptAuthHostFactory(factory, binding)
+  if (!host) {
+    throw new Error('test external-auth host claim failed')
+  }
+  return Object.freeze({ host, binding })
+}
 
 export function testCodexLabOpenedThread(
   expected: CodexLabAppServerAttestationExpected,
-  networkAccess = false,
+  networkAccess = true,
   threadId = 'thread-lab-attested'
 ): Record<string, unknown> {
   return {
@@ -15,7 +59,6 @@ export function testCodexLabOpenedThread(
     approvalPolicy: 'never',
     approvalsReviewer: 'user',
     modelProvider: 'openai',
-    disabledPluginIds: [],
     multiAgentMode: 'explicitRequestOnly',
     activePermissionProfile: {
       id: expected.permissionProfileId,
@@ -28,24 +71,32 @@ export function testCodexLabOpenedThread(
 }
 
 export function testCodexLabAccount(
-  expected: CodexLabAppServerAttestationExpected,
+  _expected: CodexLabAppServerAttestationExpected,
   type = 'chatgpt',
-  workspaceId = expected.workspaceId
+  planType = 'business'
 ): Record<string, unknown> {
   return {
-    account: { type, email: null, planType: 'business' },
-    requiresOpenaiAuth: true,
-    workspaceRouting: {
-      chatgptAccountId: workspaceId,
-      backendOrigin: 'https://chatgpt.com',
-      accountRoutingOverride: 'NO_CONSTRAINT'
-    }
+    account: { type, email: null, planType },
+    requiresOpenaiAuth: true
+  }
+}
+
+export function testCodexLabRateLimits(
+  expected: CodexLabAppServerAttestationExpected,
+  overrides: Readonly<Record<string, unknown>> = {},
+  planType = 'business'
+): Record<string, unknown> {
+  return {
+    accountId: expected.workspaceId,
+    ordinaryUsageAllowed: true,
+    rateLimits: { planType },
+    ...overrides
   }
 }
 
 export function testCodexLabEffectiveConfig(
   expected: CodexLabAppServerAttestationExpected,
-  networkEnabled = false
+  broadenNetwork = false
 ): Record<string, unknown> {
   return {
     approval_policy: 'never',
@@ -104,7 +155,7 @@ export function testCodexLabEffectiveConfig(
       }
     },
     features: {
-      network_proxy: false,
+      network_proxy: true,
       ...Object.fromEntries(DISABLED_CODEX_LAB_FEATURES.map((feature) => [feature, false])),
       ...Object.fromEntries(
         ENABLED_CODEX_LAB_CONFINEMENT_FEATURES.map((feature) => [feature, true])
@@ -115,17 +166,8 @@ export function testCodexLabEffectiveConfig(
       [expected.permissionProfileId]: {
         description: 'Disposable read-only laboratory worker',
         extends: ':read-only',
-        workspace_roots: { [expected.cwd]: true },
-        filesystem: {
-          glob_scan_max_depth: null,
-          ':root': 'deny',
-          ':minimal': 'read',
-          ':tmpdir': 'deny',
-          ':slash_tmp': 'deny',
-          ':workspace_roots': { '.': 'read' }
-        },
         network: {
-          enabled: networkEnabled,
+          enabled: true,
           proxy_url: null,
           enable_socks5: null,
           socks_url: null,
@@ -135,9 +177,9 @@ export function testCodexLabEffectiveConfig(
           dangerously_allow_non_loopback_proxy: null,
           dangerously_allow_all_unix_sockets: false,
           mode: null,
-          domains: null,
+          domains: broadenNetwork ? { '*': 'allow' } : null,
           mitm: null,
-          unix_sockets: {}
+          unix_sockets: { [expected.gatewaySocketPath]: 'allow' }
         }
       }
     }
@@ -158,4 +200,12 @@ export function testCodexLabPermissionProfiles(
     ],
     nextCursor: null
   }
+}
+
+function testJwt(): string {
+  const header = Buffer.from(JSON.stringify({ alg: 'none', source: 'test' })).toString('base64url')
+  const payload = Buffer.from(
+    JSON.stringify({ exp: Math.floor(Date.now() / 1_000) + 3_600, source: 'test' })
+  ).toString('base64url')
+  return `${header}.${payload}.signature`
 }

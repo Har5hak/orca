@@ -27,34 +27,14 @@ import {
 } from './codex-lab-command-confinement.test-support'
 import { accessorCases } from './codex-lab-command-confinement-adversarial-input.test-support'
 import { withHostCompatibilityInput } from './codex-lab-command-confinement-host.test-support'
-import { runCodexLabCommandConfinementPreflight } from './codex-lab-command-confinement-preflight'
-
-const UNSUCCESSFUL_PROCESS_RESULTS: readonly [
-  Partial<ProcessResult>,
-  CodexLabCommandConfinementRefusalReason
-][] = [
-  [{ timedOut: true }, 'process_timed_out'],
-  [{ outputTruncated: true }, 'output_truncated'],
-  [{ code: 7 }, 'process_failed'],
-  [{ signal: 'SIGTERM' }, 'process_failed'],
-  [{ stderr: 'unexpected diagnostic' }, 'process_failed']
-]
-
-async function captureSuccessfulRun(input = confinementInput()): Promise<{
-  spec: ProcessSpec
-  result: Awaited<ReturnType<typeof runCodexLabCommandConfinementPreflight>>
-}> {
-  const specs: ProcessSpec[] = []
-  const result = await runCodexLabCommandConfinementPreflight(input, async (spec) => {
-    specs.push(spec)
-    return successfulProbeResult(JSON.stringify(expectedConfinementProbeReport(input)))
-  })
-  const spec = specs[0]
-  if (!spec) {
-    throw new Error('executor was not invoked')
-  }
-  return { spec, result }
-}
+import {
+  buildCodexLabCommandConfinementTargets,
+  runCodexLabCommandConfinementPreflight
+} from './codex-lab-command-confinement-preflight'
+import {
+  captureSuccessfulConfinementRun,
+  UNSUCCESSFUL_CONFINEMENT_PROCESS_RESULTS
+} from './codex-lab-command-confinement-preflight.test-support'
 
 async function expectRefusal(
   input: CodexLabCommandConfinementPreflightInput,
@@ -77,8 +57,15 @@ async function expectRefusal(
 describe('Codex laboratory command-confinement preflight', () => {
   it('runs the candidate probe through the exact no-shell sandbox command', async () => {
     const input = confinementInput()
-    const { spec, result } = await captureSuccessfulRun(input)
+    const { spec, result } = await captureSuccessfulConfinementRun(input)
     const basename = `.orca-command-confinement-dispatch-757-host-1-${CONFINEMENT_RUN_NONCE}`
+    const targets = buildCodexLabCommandConfinementTargets(
+      input.plan.dispatchId,
+      CONFINEMENT_RUN_NONCE,
+      input.plan.cwd,
+      input.plan.runtimePaths,
+      input.controls.writes.outsideRoot.parent.path
+    )
 
     expect(spec).toEqual({
       program: input.plan.executable,
@@ -95,6 +82,8 @@ describe('Codex laboratory command-confinement preflight', () => {
         '1',
         '--run-nonce',
         CONFINEMENT_RUN_NONCE,
+        '--probe-path',
+        input.probeIdentityCandidate.path,
         '--worktree-identity',
         input.plan.worktreeIdentity,
         '--worktree-path',
@@ -139,8 +128,12 @@ describe('Codex laboratory command-confinement preflight', () => {
         input.plan.gatewaySocketPath,
         '--unix-connect-challenge',
         input.controls.network.unixConnect.challengeToken,
+        '--unix-connect-denied-path',
+        targets.unixConnectDenied,
+        '--unix-connect-denied-challenge',
+        input.controls.network.unixConnectDenied.challengeToken,
         '--unix-bind-path',
-        `/private/tmp/${basename}.sock`
+        targets.unixBind
       ],
       cwd: input.plan.cwd,
       env: {
@@ -173,7 +166,7 @@ describe('Codex laboratory command-confinement preflight', () => {
 
   it('passes only sealed homes and excludes provider, model, and credential material', async () => {
     const input = confinementInput()
-    const { spec, result } = await captureSuccessfulRun(input)
+    const { spec, result } = await captureSuccessfulConfinementRun(input)
     const serialized = JSON.stringify({ spec, result })
 
     expect(Object.keys(spec.env ?? {}).sort()).toEqual(['CODEX_HOME', 'HOME'])
@@ -195,7 +188,7 @@ describe('Codex laboratory command-confinement preflight', () => {
       }
       const binaryPath = realpathSync(binary)
       await withHostCompatibilityInput(binaryPath, async ({ input }) => {
-        const { spec } = await captureSuccessfulRun(input)
+        const { spec } = await captureSuccessfulConfinementRun(input)
         const args = spec.args
         if (!args) {
           throw new Error('confinement process args disappeared')
@@ -250,7 +243,7 @@ describe('Codex laboratory command-confinement preflight', () => {
           throw new Error('SUPER_SECRET_VALUE')
         }
       })
-    ) as CodexLabCommandConfinementPreflightInput['plan']
+    )
     let called = false
     const refusal = await expectRefusal(
       { ...confinementInput(), plan },
@@ -406,7 +399,7 @@ describe('Codex laboratory command-confinement preflight', () => {
   it.each([
     ['observedRealPath', '/different/parent'],
     ['kind', 'file'],
-    ['ownedByCurrentUser', false],
+    ['custody', 'caller-asserted'],
     ['identity', { device: '16777234', inode: '999' }]
   ])('refuses unverified write parent field %s', async (field, value) => {
     const controls = confinementControls()
@@ -559,10 +552,14 @@ describe('Codex laboratory command-confinement preflight', () => {
     const report = expectedConfinementProbeReport(input)
     const before = JSON.parse(JSON.stringify(input.controls))
     const result = await runCodexLabCommandConfinementPreflight(input, async () => {
-      const controls = input.controls as unknown as Record<PropertyKey, unknown>
-      const read = input.controls.worktreeRead as unknown as Record<PropertyKey, unknown>
-      controls.SUPER_SECRET_VALUE = 'must-not-escape'
-      read.sha256 = 'd'.repeat(64)
+      Object.defineProperty(input.controls, 'SUPER_SECRET_VALUE', {
+        value: 'must-not-escape',
+        enumerable: true
+      })
+      Object.defineProperty(input.controls.worktreeRead, 'sha256', {
+        value: 'd'.repeat(64),
+        enumerable: true
+      })
       return successfulProbeResult(JSON.stringify(report))
     })
 
@@ -586,7 +583,7 @@ describe('Codex laboratory command-confinement preflight', () => {
     expect(refusal.message).not.toContain('SUPER_SECRET_VALUE')
   })
 
-  it.each(UNSUCCESSFUL_PROCESS_RESULTS)(
+  it.each(UNSUCCESSFUL_CONFINEMENT_PROCESS_RESULTS)(
     'fails closed for an unsuccessful process result %#',
     async (override, reason) => {
       const input = confinementInput()
@@ -641,16 +638,15 @@ function malformedPlanGraphCases(): readonly MalformedPlanGraphCase[] {
     value: base.receiptInputs.configSha256,
     enumerable: false
   })
-  const inheritedRuntimePaths = Object.assign(
-    Object.create({ SUPER_SECRET_VALUE: 'inherited' }) as object,
-    base.runtimePaths
+  const inheritedRuntimePaths = Object.setPrototypeOf(
+    { ...base.runtimePaths },
+    { SUPER_SECRET_VALUE: 'inherited' }
   )
-  const cyclicEnvironment = {
-    ambientAllowlist: base.environment.ambientAllowlist,
-    inherited: base.environment.inherited,
-    injected: undefined as unknown
-  }
-  cyclicEnvironment.injected = cyclicEnvironment
+  const cyclicEnvironment = { ...base.environment }
+  Object.defineProperty(cyclicEnvironment, 'injected', {
+    value: cyclicEnvironment,
+    enumerable: true
+  })
 
   return [
     ['a symbolic argv property', Object.freeze({ ...base, argv: Object.freeze(symbolicArgv) })],
@@ -670,35 +666,44 @@ function malformedPlanGraphCases(): readonly MalformedPlanGraphCase[] {
       Object.freeze({
         ...base,
         environment: Object.freeze(cyclicEnvironment)
-      }) as unknown as CodexLabCommandConfinementPreflightInput['plan']
+      })
     ],
     [
       'a Map receipt',
-      Object.freeze({
-        ...base,
-        receiptInputs: Object.freeze(new Map([['schemaVersion', 1]]))
-      }) as unknown as CodexLabCommandConfinementPreflightInput['plan']
+      Object.freeze(
+        Object.defineProperty({ ...base }, 'receiptInputs', {
+          value: Object.freeze(new Map([['schemaVersion', 1]])),
+          enumerable: true
+        })
+      )
     ],
     [
       'a BigInt receipt value',
       Object.freeze({
         ...base,
-        receiptInputs: Object.freeze({ ...base.receiptInputs, schemaVersion: 1n })
-      }) as unknown as CodexLabCommandConfinementPreflightInput['plan']
+        receiptInputs: Object.freeze(
+          Object.defineProperty({ ...base.receiptInputs }, 'schemaVersion', {
+            value: 1n,
+            enumerable: true
+          })
+        )
+      })
     ],
     [
       'a null runtime-path record',
-      Object.freeze({
-        ...base,
-        runtimePaths: null
-      }) as unknown as CodexLabCommandConfinementPreflightInput['plan']
+      Object.freeze(
+        Object.defineProperty({ ...base }, 'runtimePaths', {
+          value: null,
+          enumerable: true
+        })
+      )
     ],
     [
       'an inherited nested record',
       Object.freeze({
         ...base,
         runtimePaths: Object.freeze(inheritedRuntimePaths)
-      }) as unknown as CodexLabCommandConfinementPreflightInput['plan']
+      })
     ]
   ]
 }
@@ -710,9 +715,9 @@ type MalformedPlainDataCase = readonly [
 ]
 
 function malformedPlainDataCases(): readonly MalformedPlainDataCase[] {
-  const inheritedLayout = Object.assign(
-    Object.create({ SUPER_SECRET_VALUE: 'inherited' }) as object,
-    preparedConfinementLayout()
+  const inheritedLayout = Object.setPrototypeOf(
+    { ...preparedConfinementLayout() },
+    { SUPER_SECRET_VALUE: 'inherited' }
   )
   const symbolProbe = { ...confinementProbeCandidate() }
   Object.defineProperty(symbolProbe, Symbol('SUPER_SECRET_VALUE'), {
@@ -728,42 +733,45 @@ function malformedPlainDataCases(): readonly MalformedPlainDataCase[] {
     ...confinementControls(),
     SUPER_SECRET_VALUE: 'extra'
   }
-  const cyclicControls = { ...confinementControls() } as Record<PropertyKey, unknown>
-  cyclicControls.writes = cyclicControls
-  const mapLayout = {
-    ...preparedConfinementLayout(),
-    codexHomeIdentity: new Map([['inode', '103']])
-  }
-  const bigintProbe = { ...confinementProbeCandidate(), inode: 1n }
+  const cyclicControls = { ...confinementControls() }
+  Object.defineProperty(cyclicControls, 'writes', {
+    value: cyclicControls,
+    enumerable: true
+  })
+  const mapLayout = Object.defineProperty({ ...preparedConfinementLayout() }, 'codexHomeIdentity', {
+    value: new Map([['inode', '103']]),
+    enumerable: true
+  })
+  const bigintProbe = Object.defineProperty({ ...confinementProbeCandidate() }, 'inode', {
+    value: 1n,
+    enumerable: true
+  })
   const controlsWithNull = confinementControls()
-  const nullNetwork = { ...controlsWithNull, network: null }
+  const nullNetwork = Object.defineProperty({ ...controlsWithNull }, 'network', {
+    value: null,
+    enumerable: true
+  })
   const controlsWithNullPrototype = confinementControls()
-  const nullPrototypeRead = Object.assign(
-    Object.create(null) as object,
-    controlsWithNullPrototype.worktreeRead
+  const nullPrototypeRead = Object.setPrototypeOf(
+    { ...controlsWithNullPrototype.worktreeRead },
+    null
   )
   const inheritedParentControls = confinementControls()
-  const inheritedParent = Object.assign(
-    Object.create({ SUPER_SECRET_VALUE: 'nested-inherited' }) as object,
-    inheritedParentControls.writes.codexHome.parent
+  const inheritedParent = Object.setPrototypeOf(
+    { ...inheritedParentControls.writes.codexHome.parent },
+    { SUPER_SECRET_VALUE: 'nested-inherited' }
   )
   const proxyControls = new Proxy(confinementControls(), {})
 
   return [
     [
       'an inherited prepared layout',
-      confinementInput({
-        preparedLayout:
-          inheritedLayout as CodexLabCommandConfinementPreflightInput['preparedLayout']
-      }),
+      confinementInput({ preparedLayout: inheritedLayout }),
       'layout_invalid'
     ],
     [
       'a symbolic probe property',
-      confinementInput({
-        probeIdentityCandidate:
-          symbolProbe as CodexLabCommandConfinementPreflightInput['probeIdentityCandidate']
-      }),
+      confinementInput({ probeIdentityCandidate: symbolProbe }),
       'probe_identity_candidate_invalid'
     ],
     [
@@ -773,39 +781,27 @@ function malformedPlainDataCases(): readonly MalformedPlainDataCase[] {
     ],
     [
       'an extra secret-like control property',
-      confinementInput({
-        controls: extraControls as CodexLabCommandConfinementPreflightInput['controls']
-      }),
+      confinementInput({ controls: extraControls }),
       'control_evidence_invalid'
     ],
     [
       'cyclic control claims',
-      confinementInput({
-        controls: cyclicControls as CodexLabCommandConfinementPreflightInput['controls']
-      }),
+      confinementInput({ controls: cyclicControls }),
       'control_evidence_invalid'
     ],
     [
       'a Map nested in the prepared layout',
-      confinementInput({
-        preparedLayout:
-          mapLayout as unknown as CodexLabCommandConfinementPreflightInput['preparedLayout']
-      }),
+      confinementInput({ preparedLayout: mapLayout }),
       'layout_invalid'
     ],
     [
       'a BigInt nested in the probe candidate',
-      confinementInput({
-        probeIdentityCandidate:
-          bigintProbe as unknown as CodexLabCommandConfinementPreflightInput['probeIdentityCandidate']
-      }),
+      confinementInput({ probeIdentityCandidate: bigintProbe }),
       'probe_identity_candidate_invalid'
     ],
     [
       'null nested control claims',
-      confinementInput({
-        controls: nullNetwork as unknown as CodexLabCommandConfinementPreflightInput['controls']
-      }),
+      confinementInput({ controls: nullNetwork }),
       'control_evidence_invalid'
     ],
     [
@@ -814,7 +810,7 @@ function malformedPlainDataCases(): readonly MalformedPlainDataCase[] {
         controls: {
           ...controlsWithNullPrototype,
           worktreeRead: nullPrototypeRead
-        } as CodexLabCommandConfinementPreflightInput['controls']
+        }
       }),
       'control_evidence_invalid'
     ],
@@ -830,7 +826,7 @@ function malformedPlainDataCases(): readonly MalformedPlainDataCase[] {
               parent: inheritedParent
             }
           }
-        } as CodexLabCommandConfinementPreflightInput['controls']
+        }
       }),
       'control_evidence_invalid'
     ],

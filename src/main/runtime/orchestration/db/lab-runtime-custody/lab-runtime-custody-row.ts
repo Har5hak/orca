@@ -223,7 +223,7 @@ function parseGatewayReceipt(
   }
   let parsed: unknown
   try {
-    parsed = JSON.parse(serialized) as unknown
+    parsed = JSON.parse(serialized)
   } catch {
     throw new Error('Codex laboratory runtime gateway receipt is malformed.')
   }

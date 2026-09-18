@@ -250,7 +250,7 @@ function validateFeatures(value: unknown): ValidationFailure | null {
   if (unknown) {
     return invalid(`config.features.${unknown}`)
   }
-  if (Object.keys(features).length !== expected.size || features.network_proxy !== false) {
+  if (Object.keys(features).length !== expected.size || features.network_proxy !== true) {
     return invalid('config.features')
   }
   for (const feature of DISABLED_CODEX_LAB_FEATURES) {

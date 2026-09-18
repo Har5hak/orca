@@ -17,6 +17,7 @@ import type { CodexStructuredLaunch } from './codex-structured-session-adapter'
 import type { CodexStructuredPermissionPolicy } from './codex-structured-permission-policy'
 import { CODEX_LAB_READONLY_PERMISSION_PROFILE_ID } from './codex-structured-permission-policy'
 import { isCodexLabDynamicToolHostBoundTo } from './codex-lab-dynamic-tool-host'
+import { bindCodexLabExternalChatGptAuthHostDisposal } from './codex-lab-external-chatgpt-auth-host-lifecycle'
 import { resolvePinnedCodexRolloutProof } from './codex-tui-rollout-proof'
 import { isWindowsProcessStartTimeAvailable } from '../windows/windows-process-table'
 import {
@@ -168,21 +169,25 @@ function resolveCodexLabStructuredLaunch(
     throw error
   }
   let authReleased = false
-  const labExternalChatGptAuthHost = Object.freeze({
-    takeInitialLoginParams: () => claimedAuthHost.takeInitialLoginParams(),
-    refresh: (candidate: unknown) => claimedAuthHost.refresh(candidate),
-    dispose(): void {
-      if (authReleased) {
-        return
-      }
-      authReleased = true
-      try {
-        claimedAuthHost.dispose()
-      } finally {
-        releaseCodexLabExternalChatGptAuthAuthority(sessionId, binding.dispatchId)
-      }
+  const releaseAuthAuthority = (): void => {
+    if (authReleased) {
+      return
     }
-  })
+    authReleased = true
+    releaseCodexLabExternalChatGptAuthAuthority(sessionId, binding.dispatchId)
+  }
+  if (
+    !bindCodexLabExternalChatGptAuthHostDisposal(
+      claimedAuthHost,
+      expectedAuthBinding,
+      releaseAuthAuthority
+    )
+  ) {
+    claimedAuthHost.dispose()
+    releaseAuthAuthority()
+    labDynamicToolHost.dispose()
+    throw new CodexLabStructuredBindingRefusal('binding_invalid')
+  }
   return {
     command: plan.executable,
     args: [...plan.argv],
@@ -192,14 +197,19 @@ function resolveCodexLabStructuredLaunch(
     env: { ...plan.environment.injected },
     environmentMode: 'exact',
     workerAccessMode: 'lab-gateway',
+    executableIntegrity: Object.freeze({
+      canonicalPath: plan.executable,
+      sha256: plan.codexExecutableSha256
+    }),
     labDynamicToolHost,
     labDynamicToolHostAttestationExpected: expectedDynamicHostBinding,
-    labExternalChatGptAuthHost,
+    labExternalChatGptAuthHost: claimedAuthHost,
     labExternalChatGptAuthBindingExpected: expectedAuthBinding,
     labAppServerAttestationExpected: Object.freeze({
       cwd: workspacePath,
       codexHome: plan.runtimePaths.codexHome,
       fakeHome: plan.runtimePaths.fakeHome,
+      gatewaySocketPath: plan.gatewaySocketPath,
       workspaceId: plan.enforcedWorkspaceId,
       permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID
     }),

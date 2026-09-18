@@ -194,12 +194,11 @@ function exactOwnDataRecordWithExtras(
     if (prototype !== Object.prototype && prototype !== null) {
       return null
     }
-    const keys = Reflect.ownKeys(candidate)
-    if (keys.some((key) => typeof key !== 'string')) {
-      return null
-    }
-    const fields: Record<string, unknown> = Object.create(null) as Record<string, unknown>
-    for (const key of keys as string[]) {
+    const fields: Record<string, unknown> = Object.create(null)
+    for (const key of Reflect.ownKeys(candidate)) {
+      if (typeof key !== 'string') {
+        return null
+      }
       const descriptor = Object.getOwnPropertyDescriptor(candidate, key)
       if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) {
         return null

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { dispatchWriteFailureReason } from '../../../../shared/structured-agent-session-dispatch-rejection'
 import { OrchestrationDb } from '../../orchestration/db'
 import type { StructuredWorkerIdentity } from '../../structured-worker-identity'
@@ -7,10 +7,20 @@ const hostRef: { current: unknown } = { current: null }
 const createSpy = vi.fn()
 const sessionIdMint = vi.hoisted(() => vi.fn())
 let sessionSequence = 0
-const startingDb = {
-  getDispatchContextById: () => ({ status: 'pending' }),
-  getWorkerDispatch: () => ({ state: 'starting' })
-} as never
+const startingDbTarget = new OrchestrationDb(':memory:')
+const startingDb = new Proxy(startingDbTarget, {
+  get(target, property, receiver) {
+    if (property === 'getDispatchContextById') {
+      return () => ({ status: 'pending' })
+    }
+    if (property === 'getWorkerDispatch') {
+      return () => ({ state: 'starting' })
+    }
+    return Reflect.get(target, property, receiver)
+  }
+})
+
+afterAll(() => startingDbTarget.close())
 
 vi.mock('../../../native-chat/agent-session-wire/structured-agent-session-registry', () => ({
   getStructuredAgentSessionHost: () => hostRef.current
@@ -333,7 +343,10 @@ describe('structured worker session hold', () => {
       onJournalActivity: () => {}
     })
     await vi.waitFor(() => expect(hold).toHaveBeenCalledOnce())
-    const sessionId = createSpy.mock.calls[0]?.[0]?.envelope.sessionId as string
+    const sessionId: unknown = createSpy.mock.calls[0]?.[0]?.envelope.sessionId
+    if (typeof sessionId !== 'string') {
+      throw new Error('session create did not receive a session id')
+    }
 
     releaseStructuredWorkerSession('d_settled_during_hold')
     finishHold?.()

@@ -37,10 +37,14 @@ export async function probeCodexLabAppServerReadiness(
 
   const surface = createCodexLabAttestationSurface(input.connection)
   let accountResponse: unknown
+  let rateLimitsResponse: unknown
   let configResponse: unknown
   let requirementsResponse: unknown
   try {
     accountResponse = await surface.request('account/read', {}, { timeoutMs: input.timeoutMs })
+    rateLimitsResponse = await surface.request('account/rateLimits/read', undefined, {
+      timeoutMs: input.timeoutMs
+    })
     configResponse = await surface.request(
       'config/read',
       { includeLayers: true, cwd: input.expected.cwd },
@@ -53,9 +57,14 @@ export async function probeCodexLabAppServerReadiness(
     return notReady('rpc_unavailable', 'required attestation read')
   }
 
-  const accountFailure = validateCodexLabAccount(accountResponse, input.expected)
-  if (accountFailure) {
-    return notReady('account_unverified', accountFailure.field)
+  const accountValidation = validateCodexLabAccount(
+    accountResponse,
+    rateLimitsResponse,
+    input.expected,
+    input.externalAuthReceipt
+  )
+  if (!accountValidation.ready) {
+    return notReady(accountValidation.reason, accountValidation.field)
   }
 
   const config = readCodexLabEffectiveConfig(configResponse)
@@ -105,6 +114,7 @@ export async function probeCodexLabAppServerReadiness(
       permissionProfilePages: profileRead.pages,
       managedRequirements: requirements === null ? 'absent' : 'compatible',
       accountRoute: 'chatgpt-workspace',
+      capacityRoute: accountValidation.capacityRoute,
       dynamicToolGatewayMap: CODEX_LAB_DYNAMIC_TOOL_GATEWAY_MAP,
       outOfBandMethods: 'not-requested-by-attestation-probe'
     }

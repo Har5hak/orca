@@ -76,21 +76,19 @@ describe('sealed Codex laboratory launch plan', () => {
     expect(plan.configToml).toContain(
       '[permissions.orca-lab-readonly-v1]\ndescription = "Orca attended disposable read-only laboratory worker"\nextends = ":read-only"'
     )
-    expect(plan.configToml).toContain('[permissions.orca-lab-readonly-v1.filesystem]')
-    expect(plan.configToml).toContain('":root" = "deny"')
-    expect(plan.configToml).toContain('":minimal" = "read"')
+    expect(plan.configToml).not.toContain('[permissions.orca-lab-readonly-v1.filesystem')
+    expect(plan.configToml).not.toContain('":workspace_roots"')
+    expect(plan.configToml).not.toContain('"/private/tmp/orca-lab/disposable-worktree"')
+    expect(plan.configToml).toContain('network_proxy = true')
     expect(plan.configToml).toContain(
-      '[permissions.orca-lab-readonly-v1.filesystem.":workspace_roots"]'
+      '[permissions.orca-lab-readonly-v1.network]\nenabled = true\nallow_local_binding = false\nallow_upstream_proxy = false\ndangerously_allow_all_unix_sockets = false'
     )
-    expect(plan.configToml).toContain('"." = "read"')
-    expect(plan.configToml).toContain('[permissions.orca-lab-readonly-v1.network]')
-    expect(plan.configToml).toContain('network_proxy = false')
-    expect(plan.configToml).toContain('enabled = false')
-    expect(plan.configToml).toContain('allow_upstream_proxy = false')
-    expect(plan.configToml).toContain('[permissions.orca-lab-readonly-v1.network.unix_sockets]')
     expect(plan.configToml).toContain('include_only = []')
     expect(plan.configToml).not.toContain('ORCA_LAB_GATEWAY_')
-    expect(plan.configToml).not.toContain('/gateway.sock')
+    expect(plan.configToml).toContain(
+      '[permissions.orca-lab-readonly-v1.network.domains]\n\n[permissions.orca-lab-readonly-v1.network.unix_sockets]\n"/private/tmp/orca-lab/runtime/dispatches/dispatch-757-canary-1/gateway.sock" = "allow"\n\n[mcp_servers]'
+    )
+    expect(plan.configToml).not.toContain('/opt/homebrew')
     expect(plan.configToml).not.toContain('sandbox_mode')
     expect(plan.configToml).not.toContain('[sandbox_workspace_write]')
     expect(plan.configToml).toContain('cli_auth_credentials_store = "ephemeral"')
@@ -275,10 +273,16 @@ describe('sealed Codex laboratory launch plan', () => {
   it.each([
     ['approval policy', 'approval_policy = "never"', 'approval_policy = "on-request"'],
     ['permission inheritance', 'extends = ":read-only"', 'extends = ":workspace"'],
+    ['network proxy bypass', 'network_proxy = true', 'network_proxy = false'],
     [
-      'filesystem policy',
-      '":workspace_roots"]\n"." = "read"',
-      '":workspace_roots"]\n"." = "write"'
+      'domain wildcard',
+      '[permissions.orca-lab-readonly-v1.network.domains]\n\n',
+      '[permissions.orca-lab-readonly-v1.network.domains]\n"*" = "allow"\n\n'
+    ],
+    [
+      'Unix socket scope',
+      'dangerously_allow_all_unix_sockets = false',
+      'dangerously_allow_all_unix_sockets = true'
     ],
     ['multi-agent policy', 'multi_agent = false', 'multi_agent = true'],
     [

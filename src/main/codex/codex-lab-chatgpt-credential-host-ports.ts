@@ -45,7 +45,9 @@ export type CodexLabCredentialHostPortRefusalReason =
   | 'platform_unsupported'
   | 'secure_keyring_write_unavailable'
   | 'selected_account_invalid'
+  | 'source_ambiguous'
   | 'source_home_invalid'
+  | 'source_unavailable'
   | 'target_auth_json_observation_failed'
   | 'target_auth_json_present'
   | 'target_home_invalid'
@@ -72,10 +74,11 @@ export type SelectedHostCodexCredentialSource = Readonly<{
   selectedAccountId: string | null
 }>
 
-type SelectionSettings = Pick<
-  GlobalSettings,
-  'activeCodexManagedAccountId' | 'activeCodexManagedAccountIdsByRuntime' | 'codexManagedAccounts'
->
+export type CodexLabCredentialSelectionSettings = Readonly<{
+  activeCodexManagedAccountId: GlobalSettings['activeCodexManagedAccountId']
+  activeCodexManagedAccountIdsByRuntime?: GlobalSettings['activeCodexManagedAccountIdsByRuntime']
+  codexManagedAccounts: readonly GlobalSettings['codexManagedAccounts'][number][]
+}>
 
 type SourceSelectionDependencies = Readonly<{
   canonicalizeSystemHome?: (candidatePath: string) => string
@@ -85,7 +88,7 @@ type SourceSelectionDependencies = Readonly<{
 /** Resolve the host lane only; laboratory workers never borrow a WSL credential lane. */
 export function resolveSelectedHostCodexCredentialSource(
   args: Readonly<{
-    settings: SelectionSettings
+    settings: CodexLabCredentialSelectionSettings
     storage: CodexLabCredentialSourceStorage
     systemCodexHomePath?: string
     managedAccountsRoot?: string

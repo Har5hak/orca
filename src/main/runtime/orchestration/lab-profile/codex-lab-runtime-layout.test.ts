@@ -137,6 +137,34 @@ describe('Codex laboratory runtime layout core', () => {
     ])
   })
 
+  it('preserves structured active-layout revocation evidence for custody persistence', async () => {
+    const plan = sealedHostPlan()
+    const host = new FakeCodexLabHost(plan)
+    const prepared = await prepareCodexLabRuntimeLayout(plan, layoutHost(host))
+    if (!prepared.ok) {
+      throw new Error(prepared.message)
+    }
+    const quarantinePath = `${prepared.prepared.dispatchRoot}.cleanup-quarantine`
+
+    const rollback = await removeCodexLabRuntimeLayout(prepared.prepared, {
+      removeTree: async () => ({
+        evidence: 'identity-fenced-active-layout-revoked',
+        quarantinePath,
+        rootIdentity: prepared.prepared.dispatchRootIdentity
+      })
+    })
+
+    expect(rollback).toEqual([
+      {
+        action: 'remove_dispatch_root',
+        status: 'succeeded',
+        evidence: 'identity-fenced-active-layout-revoked',
+        quarantinePath,
+        rootIdentity: prepared.prepared.dispatchRootIdentity
+      }
+    ])
+  })
+
   it('retains a replacement root instead of deleting through a stale identity', async () => {
     const plan = sealedHostPlan()
     const host = new FakeCodexLabHost(plan)

@@ -19,6 +19,7 @@ import { workerTerminalLeaseIsCurrent } from './worker-terminal-release-lease'
 import { resolveStructuredWorkerForDispatch } from '../../orchestration-structured-worker-lifecycle'
 import { stopStructuredWorkerForRelease } from './structured-worker-release-stop'
 import { isStructuredWorkerHandle } from '../../../../structured-worker-identity'
+import { finishReleasedWorkerCodexLabCleanup } from './worker-release-lab-cleanup'
 
 export {
   archiveSummary,
@@ -148,10 +149,16 @@ async function completeWorkerTerminalReleaseOnce(
             processIncarnation: resource.process_incarnation
           })
           if (reconciled.disposition === 'released') {
+            const cleanup = await finishReleasedWorkerCodexLabCleanup(
+              db,
+              dispatchId,
+              reconciled.resource,
+              'released'
+            )
             runtime.notifyMessageArrived(`dispatch:${dispatchId}`, 'status')
             return {
               dispatchId,
-              state: 'released',
+              ...cleanup,
               processAction: 'closed_exited_terminal',
               archive: archiveSummary(reconciled.resource)
             }
@@ -297,10 +304,11 @@ async function completeWorkerTerminalReleaseOnce(
     }
   }
   const released = db.settleWorkerTerminalRelease(resource.id)
+  const cleanup = await finishReleasedWorkerCodexLabCleanup(db, dispatchId, released, 'released')
   runtime.notifyMessageArrived(`dispatch:${dispatchId}`, 'status')
   return {
     dispatchId,
-    state: 'released',
+    ...cleanup,
     processAction:
       observation.status === 'exited' ? 'closed_exited_terminal' : 'closed_agent_terminal',
     archive: archiveSummary(released)

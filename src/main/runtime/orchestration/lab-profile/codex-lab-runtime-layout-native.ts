@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { CODEX_LAB_RUNTIME_ROOT } from './codex-lab-launch-contract'
 import type { CodexLabRuntimeLayoutHost } from './codex-lab-runtime-layout'
 import { createNativeCodexLabRuntimeLayoutHostAtRoot } from './codex-lab-runtime-layout-native-internal'
@@ -8,5 +7,5 @@ export function createNativeCodexLabRuntimeLayoutHost(): CodexLabRuntimeLayoutHo
   if (process.platform !== 'darwin') {
     throw new Error('The native Codex laboratory layout is supported only on macOS.')
   }
-  return createNativeCodexLabRuntimeLayoutHostAtRoot(CODEX_LAB_RUNTIME_ROOT, randomUUID)
+  return createNativeCodexLabRuntimeLayoutHostAtRoot(CODEX_LAB_RUNTIME_ROOT)
 }

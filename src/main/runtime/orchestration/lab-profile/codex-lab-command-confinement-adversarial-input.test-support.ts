@@ -50,28 +50,27 @@ export function accessorCases(): readonly {
 
   return [
     {
-      input: root as CodexLabCommandConfinementPreflightInput,
+      input: root,
       reason: 'input_invalid',
       reads: rootGetter.reads
     },
     {
       input: confinementInput({
-        preparedLayout: layout as CodexLabCommandConfinementPreflightInput['preparedLayout']
+        preparedLayout: layout
       }),
       reason: 'layout_invalid',
       reads: layoutGetter.reads
     },
     {
       input: confinementInput({
-        probeIdentityCandidate:
-          probe as CodexLabCommandConfinementPreflightInput['probeIdentityCandidate']
+        probeIdentityCandidate: probe
       }),
       reason: 'probe_identity_candidate_invalid',
       reads: probeGetter.reads
     },
     {
       input: confinementInput({
-        controls: controls as CodexLabCommandConfinementPreflightInput['controls']
+        controls
       }),
       reason: 'control_evidence_invalid',
       reads: controlGetter.reads

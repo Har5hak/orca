@@ -28,8 +28,10 @@ import type {
 import {
   testCodexLabAccount,
   testCodexLabEffectiveConfig,
+  testCodexLabExternalChatGptAuth,
   testCodexLabOpenedThread,
-  testCodexLabPermissionProfiles
+  testCodexLabPermissionProfiles,
+  testCodexLabRateLimits
 } from './codex-lab-session-attestation-test-support'
 import { CODEX_LAB_READONLY_PERMISSION_PROFILE_ID } from './codex-structured-permission-policy'
 
@@ -324,15 +326,27 @@ describe('Codex laboratory dynamic-tool server-request disposition', () => {
       cwd: '/private/tmp/orca-lab/disposable-757',
       codexHome: '/private/tmp/orca-lab/homes/session-757/codex-home',
       fakeHome: '/private/tmp/orca-lab/homes/session-757/fake-home',
+      gatewaySocketPath: '/private/tmp/orca-lab/homes/session-757/gateway.sock',
       workspaceId: '00000000-0000-4000-8000-000000000757',
       permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID
     })
+    const auth = testCodexLabExternalChatGptAuth({
+      dispatchId: gatewayBinding.expectedReceipt.dispatchId,
+      sessionId: SESSION_ID,
+      expected
+    })
     exactConnection.request = async (method) => {
+      if (method === 'account/login/start') {
+        return { type: 'chatgptAuthTokens' }
+      }
       if (method === 'thread/start') {
-        return testCodexLabOpenedThread(expected, false, THREAD_ID)
+        return testCodexLabOpenedThread(expected, true, THREAD_ID)
       }
       if (method === 'account/read') {
         return testCodexLabAccount(expected)
+      }
+      if (method === 'account/rateLimits/read') {
+        return testCodexLabRateLimits(expected)
       }
       if (method === 'config/read') {
         return { config: testCodexLabEffectiveConfig(expected), origins: {}, layers: [] }
@@ -365,6 +379,8 @@ describe('Codex laboratory dynamic-tool server-request disposition', () => {
         workerAccessMode: 'lab-gateway',
         labAppServerAttestationExpected: expected,
         labDynamicToolHostAttestationExpected: testCodexLabDynamicToolHostAttestation(),
+        labExternalChatGptAuthHost: auth.host,
+        labExternalChatGptAuthBindingExpected: auth.binding,
         permissionPolicy: {
           approvalPolicy: 'never',
           permissions: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID,
@@ -544,6 +560,7 @@ describe('Codex laboratory dynamic-tool server-request disposition', () => {
       cwd: '/private/tmp/orca-lab/disposable-failure',
       codexHome: '/private/tmp/orca-lab/runtime/failure/codex-home',
       fakeHome: '/private/tmp/orca-lab/runtime/failure/fake-home',
+      gatewaySocketPath: '/private/tmp/orca-lab/runtime/failure/gateway.sock',
       workspaceId: '00000000-0000-4000-8000-000000000757',
       permissionProfileId: CODEX_LAB_READONLY_PERMISSION_PROFILE_ID
     })

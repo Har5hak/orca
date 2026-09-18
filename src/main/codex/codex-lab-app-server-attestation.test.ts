@@ -19,12 +19,14 @@ const EXPECTED = Object.freeze({
   cwd: '/private/tmp/orca-lab/worktree',
   codexHome: '/private/tmp/orca-lab/codex-home',
   fakeHome: '/private/tmp/orca-lab/home',
+  gatewaySocketPath: '/private/tmp/orca-lab/runtime/dispatches/test/gateway.sock',
   workspaceId: 'workspace_test',
   permissionProfileId: 'orca-lab-readonly-v1'
 })
 
 type Transcript = Readonly<{
   account?: unknown
+  rateLimits?: unknown
   config?: unknown
   requirements?: unknown
   permissionPages?: readonly unknown[]
@@ -49,10 +51,9 @@ function makeOpenedThread(): Record<string, unknown> {
     approvalPolicy: 'never',
     approvalsReviewer: 'user',
     modelProvider: 'openai',
-    disabledPluginIds: [],
     multiAgentMode: 'explicitRequestOnly',
     activePermissionProfile: { id: EXPECTED.permissionProfileId, extends: ':read-only' },
-    sandbox: { type: 'readOnly', networkAccess: false },
+    sandbox: { type: 'readOnly', networkAccess: true },
     thread: { id: 'thread_test', ephemeral: true },
     instructionSources: [`${EXPECTED.cwd}/AGENTS.md`]
   }
@@ -61,13 +62,51 @@ function makeOpenedThread(): Record<string, unknown> {
 function makeAccount(): Record<string, unknown> {
   return {
     account: { type: 'chatgpt', email: null, planType: 'business' },
-    requiresOpenaiAuth: true,
-    workspaceRouting: {
-      chatgptAccountId: EXPECTED.workspaceId,
-      backendOrigin: 'https://chatgpt.com',
-      accountRoutingOverride: 'NO_CONSTRAINT'
-    }
+    requiresOpenaiAuth: true
   }
+}
+
+function makeRateLimits(): Record<string, unknown> {
+  return {
+    accountId: EXPECTED.workspaceId,
+    ordinaryUsageAllowed: true,
+    rateLimits: { planType: 'business' }
+  }
+}
+
+function makeExternalAuthReceipt(
+  overrides: Partial<
+    Pick<
+      CodexLabAppServerAttestationInput['externalAuthReceipt'],
+      'chatgptAccountId' | 'chatgptPlanType'
+    >
+  > = {},
+  frozen = true
+): CodexLabAppServerAttestationInput['externalAuthReceipt'] {
+  const receipt: CodexLabAppServerAttestationInput['externalAuthReceipt'] = {
+    type: 'chatgptAuthTokens',
+    chatgptAccountId: EXPECTED.workspaceId,
+    chatgptPlanType: 'business',
+    ...overrides
+  }
+  return frozen ? Object.freeze(receipt) : receipt
+}
+
+function alteredExternalAuthReceipt(
+  field: string,
+  value: unknown
+): CodexLabAppServerAttestationInput['externalAuthReceipt'] {
+  const receipt = makeExternalAuthReceipt({}, false)
+  Reflect.set(receipt, field, value)
+  return Object.freeze(receipt)
+}
+
+function externalAuthReceiptWithout(
+  field: string
+): CodexLabAppServerAttestationInput['externalAuthReceipt'] {
+  const receipt = makeExternalAuthReceipt({}, false)
+  Reflect.deleteProperty(receipt, field)
+  return Object.freeze(receipt)
 }
 
 function makeConfig(): Record<string, unknown> {
@@ -133,23 +172,14 @@ function makeConfig(): Record<string, unknown> {
         PATH: '/usr/bin:/bin:/usr/sbin:/sbin'
       }
     },
-    features: { network_proxy: false, ...disabledFeatures, ...enabledFeatures },
+    features: { network_proxy: true, ...disabledFeatures, ...enabledFeatures },
     skills: { include_instructions: false, bundled: { enabled: false } },
     permissions: {
       [EXPECTED.permissionProfileId]: {
         description: 'Disposable read-only laboratory worker',
         extends: ':read-only',
-        workspace_roots: { [EXPECTED.cwd]: true },
-        filesystem: {
-          glob_scan_max_depth: null,
-          ':root': 'deny',
-          ':minimal': 'read',
-          ':tmpdir': 'deny',
-          ':slash_tmp': 'deny',
-          ':workspace_roots': { '.': 'read' }
-        },
         network: {
-          enabled: false,
+          enabled: true,
           proxy_url: null,
           enable_socks5: null,
           socks_url: null,
@@ -161,7 +191,7 @@ function makeConfig(): Record<string, unknown> {
           mode: null,
           domains: null,
           mitm: null,
-          unix_sockets: {}
+          unix_sockets: { [EXPECTED.gatewaySocketPath]: 'allow' }
         }
       }
     }
@@ -199,6 +229,9 @@ function fakeInput(transcript: Transcript = {}): {
     if (method === 'account/read') {
       return transcript.account ?? makeAccount()
     }
+    if (method === 'account/rateLimits/read') {
+      return transcript.rateLimits ?? makeRateLimits()
+    }
     if (method === 'config/read') {
       return transcript.config ?? { config: makeConfig(), origins: {}, layers: [] }
     }
@@ -217,6 +250,7 @@ function fakeInput(transcript: Transcript = {}): {
     input: {
       connection: { request },
       expected: EXPECTED,
+      externalAuthReceipt: makeExternalAuthReceipt(),
       threadStartParams: makeThreadStartParams(),
       openedThread: makeOpenedThread(),
       timeoutMs: 2_000
@@ -226,7 +260,7 @@ function fakeInput(transcript: Transcript = {}): {
 }
 
 describe('TASK-757 Codex app-server policy attestation', () => {
-  it('requires all four official reads before returning secret-free readiness evidence', async () => {
+  it('requires all five official reads before returning secret-free readiness evidence', async () => {
     const { input, request } = fakeInput()
 
     await expect(probeCodexLabAppServerReadiness(input)).resolves.toEqual({
@@ -237,33 +271,62 @@ describe('TASK-757 Codex app-server policy attestation', () => {
         permissionProfilePages: 2,
         managedRequirements: 'absent',
         accountRoute: 'chatgpt-workspace',
+        capacityRoute: 'ordinary-included',
         dynamicToolGatewayMap: CODEX_LAB_DYNAMIC_TOOL_GATEWAY_MAP,
         outOfBandMethods: 'not-requested-by-attestation-probe'
       }
     })
     expect(request).toHaveBeenNthCalledWith(1, 'account/read', {}, { timeoutMs: 2_000 })
+    expect(request).toHaveBeenNthCalledWith(2, 'account/rateLimits/read', undefined, {
+      timeoutMs: 2_000
+    })
     expect(request).toHaveBeenNthCalledWith(
-      2,
+      3,
       'config/read',
       { includeLayers: true, cwd: EXPECTED.cwd },
       { timeoutMs: 2_000 }
     )
-    expect(request).toHaveBeenNthCalledWith(3, 'configRequirements/read', undefined, {
+    expect(request).toHaveBeenNthCalledWith(4, 'configRequirements/read', undefined, {
       timeoutMs: 2_000
     })
     expect(request).toHaveBeenNthCalledWith(
-      4,
+      5,
       'permissionProfile/list',
       { cwd: EXPECTED.cwd },
       { timeoutMs: 2_000 }
     )
     expect(request).toHaveBeenNthCalledWith(
-      5,
+      6,
       'permissionProfile/list',
       { cwd: EXPECTED.cwd, cursor: 'page_2' },
       { timeoutMs: 2_000 }
     )
   })
+
+  it('accepts the pinned Codex 0.155 opened-thread response without newer plugin metadata', async () => {
+    const { input } = fakeInput()
+    const openedThread = makeOpenedThread()
+    expect(Object.hasOwn(openedThread, 'disabledPluginIds')).toBe(false)
+
+    await expect(
+      probeCodexLabAppServerReadiness({ ...input, openedThread })
+    ).resolves.toMatchObject({ ready: true })
+  })
+
+  it.each([undefined, null, [], 'plugin@example', ['plugin@example']])(
+    'rejects disabled-plugin metadata outside the pinned response schema %#',
+    async (disabledPluginIds) => {
+      const { input, request } = fakeInput()
+      const openedThread = { ...makeOpenedThread(), disabledPluginIds }
+
+      await expect(probeCodexLabAppServerReadiness({ ...input, openedThread })).resolves.toEqual({
+        ready: false,
+        reason: 'thread_result_unverified',
+        field: 'openedThread.disabledPluginIds'
+      })
+      expect(request).not.toHaveBeenCalled()
+    }
+  )
 
   it('does not expose shellCommand or any process method on the attestation surface', async () => {
     const upstream = vi.fn<CodexAppServerConnection['request']>()
@@ -311,8 +374,7 @@ describe('TASK-757 Codex app-server policy attestation', () => {
     const config = makeConfig()
     const profile = getProfile(config)
     const network = requireRecord(profile.network, 'network')
-    network.enabled = true
-    network.unix_sockets = { '/private/tmp/orca-gateway.sock': 'read-write' }
+    network.domains = { '*': 'allow' }
     const { input } = fakeInput({ config: { config, origins: {}, layers: [] } })
 
     await expect(probeCodexLabAppServerReadiness(input)).resolves.toEqual({
@@ -320,6 +382,55 @@ describe('TASK-757 Codex app-server policy attestation', () => {
       reason: 'effective_config_broadened',
       field: `config.permissions.${EXPECTED.permissionProfileId}.network`
     })
+  })
+
+  it('requires proxy enforcement, network enablement, and only the exact gateway socket', async () => {
+    const cases = [
+      {
+        expectedField: 'config.features',
+        mutate(config: Record<string, unknown>) {
+          requireRecord(config.features, 'features').network_proxy = false
+        }
+      },
+      {
+        expectedField: `config.permissions.${EXPECTED.permissionProfileId}.network`,
+        mutate(config: Record<string, unknown>) {
+          const profile = getProfile(config)
+          requireRecord(profile.network, 'network').enabled = false
+        }
+      },
+      {
+        expectedField: `config.permissions.${EXPECTED.permissionProfileId}.network`,
+        mutate(config: Record<string, unknown>) {
+          const profile = getProfile(config)
+          requireRecord(profile.network, 'network').unix_sockets = {
+            [EXPECTED.gatewaySocketPath]: 'allow',
+            '/private/tmp/alternate.sock': 'allow'
+          }
+        }
+      }
+    ]
+
+    for (const testCase of cases) {
+      const config = makeConfig()
+      testCase.mutate(config)
+      const { input } = fakeInput({ config: { config, origins: {}, layers: [] } })
+
+      await expect(probeCodexLabAppServerReadiness(input)).resolves.toEqual({
+        ready: false,
+        reason: 'effective_config_broadened',
+        field: testCase.expectedField
+      })
+    }
+  })
+
+  it('accepts an explicit empty domain policy', async () => {
+    const config = makeConfig()
+    const profile = getProfile(config)
+    requireRecord(profile.network, 'network').domains = {}
+    const { input } = fakeInput({ config: { config, origins: {}, layers: [] } })
+
+    await expect(probeCodexLabAppServerReadiness(input)).resolves.toMatchObject({ ready: true })
   })
 
   it('rejects enabled or missing analytics', async () => {
@@ -493,32 +604,43 @@ describe('TASK-757 Codex app-server policy attestation', () => {
     }
   )
 
+  it('accepts the exact pinned Codex 0.155 account/read response schema', async () => {
+    const { input } = fakeInput({
+      account: {
+        account: { type: 'chatgpt', email: null, planType: 'business' },
+        requiresOpenaiAuth: true
+      }
+    })
+
+    await expect(probeCodexLabAppServerReadiness(input)).resolves.toMatchObject({ ready: true })
+  })
+
   it.each([
     [{ account: { type: 'apiKey' }, requiresOpenaiAuth: true }, 'account/read.account.type'],
     [
       { account: { type: 'chatgpt', email: null, planType: 'plus' }, requiresOpenaiAuth: true },
       'account/read.account.planType'
     ],
-    [{ ...makeAccount(), requiresOpenaiAuth: false }, 'account/read.requiresOpenaiAuth'],
     [
       {
-        account: { type: 'chatgpt', email: null, planType: 'business' },
+        account: { type: 'chatgpt', email: null, planType: 'enterprise' },
         requiresOpenaiAuth: true
       },
-      'account/read.workspaceRouting'
+      'account/read.account.planType'
     ],
+    [{ ...makeAccount(), requiresOpenaiAuth: false }, 'account/read.requiresOpenaiAuth'],
     [
       {
         ...makeAccount(),
         workspaceRouting: {
-          chatgptAccountId: 'another_workspace',
+          chatgptAccountId: EXPECTED.workspaceId,
           backendOrigin: 'https://chatgpt.com',
           accountRoutingOverride: 'NO_CONSTRAINT'
         }
       },
-      'account/read.workspaceRouting'
+      'account/read'
     ]
-  ])('rejects non-workspace or unresolved account routing %#', async (account, field) => {
+  ])('rejects invalid or out-of-schema account evidence %#', async (account, field) => {
     const { input } = fakeInput({ account })
 
     await expect(probeCodexLabAppServerReadiness(input)).resolves.toEqual({
@@ -526,6 +648,133 @@ describe('TASK-757 Codex app-server policy attestation', () => {
       reason: 'account_unverified',
       field
     })
+  })
+
+  it.each([
+    [
+      { ordinaryUsageAllowed: true, rateLimits: { planType: 'business' } },
+      'account/rateLimits/read.accountId'
+    ],
+    [{ ...makeRateLimits(), accountId: null }, 'account/rateLimits/read.accountId'],
+    [{ ...makeRateLimits(), accountId: 'another_workspace' }, 'account/rateLimits/read.accountId'],
+    [{ ...makeRateLimits(), rateLimits: {} }, 'account/rateLimits/read.rateLimits.planType'],
+    [
+      { ...makeRateLimits(), rateLimits: { planType: null } },
+      'account/rateLimits/read.rateLimits.planType'
+    ],
+    [
+      { ...makeRateLimits(), rateLimits: { planType: 'unknown' } },
+      'account/rateLimits/read.rateLimits.planType'
+    ],
+    [{ ...makeRateLimits(), rateLimits: null }, 'account/rateLimits/read.rateLimits'],
+    [
+      { ...makeRateLimits(), rateLimits: { planType: 'plus' } },
+      'account/rateLimits/read.rateLimits.planType'
+    ],
+    [
+      { ...makeRateLimits(), rateLimits: { planType: 'enterprise' } },
+      'account/rateLimits/read.rateLimits.planType'
+    ],
+    [{ ...makeRateLimits(), futureAuthority: true }, 'account/rateLimits/read'],
+    [
+      { ...makeRateLimits(), rateLimits: { planType: 'business', futureAuthority: true } },
+      'account/rateLimits/read.rateLimits'
+    ]
+  ])('rejects unresolved or broadened backend usage evidence %#', async (rateLimits, field) => {
+    const { input } = fakeInput({ rateLimits })
+
+    await expect(probeCodexLabAppServerReadiness(input)).resolves.toEqual({
+      ready: false,
+      reason: 'account_unverified',
+      field
+    })
+  })
+
+  it.each([
+    [{ accountId: EXPECTED.workspaceId, rateLimits: { planType: 'business' } }, 'response_invalid'],
+    [{ ...makeRateLimits(), ordinaryUsageAllowed: 'allowed' }, 'response_invalid'],
+    [{ ...makeRateLimits(), ordinaryUsageAllowed: null }, 'ordinary_usage_unavailable'],
+    [{ ...makeRateLimits(), ordinaryUsageAllowed: false }, 'ordinary_usage_blocked']
+  ])('classifies non-usage-based capacity evidence %#', async (rateLimits, reason) => {
+    const { input } = fakeInput({ rateLimits })
+
+    await expect(probeCodexLabAppServerReadiness(input)).resolves.toEqual({
+      ready: false,
+      reason,
+      field: 'account/rateLimits/read.ordinaryUsageAllowed'
+    })
+  })
+
+  it.each(['self_serve_business_usage_based', 'enterprise_cbp_usage_based'])(
+    'refuses the metered workspace plan %s even when its live budget is available',
+    async (planType) => {
+      const { input } = fakeInput({
+        account: {
+          account: { type: 'chatgpt', email: null, planType },
+          requiresOpenaiAuth: true
+        },
+        rateLimits: {
+          accountId: EXPECTED.workspaceId,
+          ordinaryUsageAllowed: null,
+          rateLimits: {
+            credits: { hasCredits: true, unlimited: false, balance: null },
+            individualLimit: {
+              limit: '1000',
+              used: '350',
+              remainingPercent: 65,
+              resetsAt: 1_789_819_200
+            },
+            limitId: 'codex',
+            limitName: null,
+            normalModelSlug: null,
+            planType,
+            primary: null,
+            rateLimitReachedType: null,
+            secondary: null,
+            spendControlReached: false
+          }
+        }
+      })
+
+      await expect(
+        probeCodexLabAppServerReadiness({
+          ...input,
+          externalAuthReceipt: makeExternalAuthReceipt({ chatgptPlanType: planType })
+        })
+      ).resolves.toEqual({
+        ready: false,
+        reason: 'paid_usage_forbidden',
+        field: 'account/rateLimits/read.rateLimits.planType'
+      })
+    }
+  )
+
+  it.each([
+    [
+      makeExternalAuthReceipt({
+        chatgptAccountId: 'another_workspace'
+      }),
+      'externalAuthReceipt'
+    ],
+    [
+      makeExternalAuthReceipt({
+        chatgptPlanType: 'plus'
+      }),
+      'externalAuthReceipt'
+    ],
+    [makeExternalAuthReceipt({}, false), 'externalAuthReceipt'],
+    [alteredExternalAuthReceipt('type', 'apiKey'), 'externalAuthReceipt'],
+    [alteredExternalAuthReceipt('futureAuthority', true), 'externalAuthReceipt'],
+    [externalAuthReceiptWithout('chatgptPlanType'), 'externalAuthReceipt']
+  ])('rejects unbound external-auth receipt evidence %#', async (externalAuthReceipt, field) => {
+    const { input } = fakeInput()
+
+    await expect(
+      probeCodexLabAppServerReadiness({
+        ...input,
+        externalAuthReceipt
+      })
+    ).resolves.toEqual({ ready: false, reason: 'account_unverified', field })
   })
 
   it.each([

@@ -3,6 +3,7 @@ import {
   recordCodexLabRuntimeCleanupResult,
   releaseCodexLabRuntimeCustody
 } from './lab-runtime-custody-cleanup'
+import { releaseCodexLabPreAttachRuntimeCustody } from './lab-runtime-custody-pre-attach-cleanup'
 import { getCodexLabRuntimeCustody } from './lab-runtime-custody-row'
 import {
   planCodexLabRuntimeCustody,
@@ -27,6 +28,7 @@ export type CodexLabRuntimeCustodyMethods = {
   recordCodexLabRuntimeReady: typeof recordCodexLabRuntimeReady
   beginCodexLabRuntimeCleanup: typeof beginCodexLabRuntimeCleanup
   recordCodexLabRuntimeCleanupResult: typeof recordCodexLabRuntimeCleanupResult
+  releaseCodexLabPreAttachRuntimeCustody: typeof releaseCodexLabPreAttachRuntimeCustody
   releaseCodexLabRuntimeCustody: typeof releaseCodexLabRuntimeCustody
 }
 
@@ -43,6 +45,7 @@ export function attachCodexLabRuntimeCustody(ctor: { prototype: object }): void 
     recordCodexLabRuntimeReady,
     beginCodexLabRuntimeCleanup,
     recordCodexLabRuntimeCleanupResult,
+    releaseCodexLabPreAttachRuntimeCustody,
     releaseCodexLabRuntimeCustody
   })
 }

@@ -17,6 +17,7 @@ export const CODEX_LAB_COMMAND_CONFINEMENT_REMAINING_GATES = Object.freeze([
 
 export type CodexLabProbeIdentityCandidate = Readonly<{
   path: string
+  argvPrefix: readonly string[]
   observedRealPath: string
   kind: 'regular-file'
   executable: true
@@ -30,7 +31,7 @@ export type CodexLabObservedDirectory = Readonly<{
   path: string
   observedRealPath: string
   kind: 'directory'
-  ownedByCurrentUser: true
+  custody: 'trusted-local-host'
   identity: CodexLabObservedPathIdentity
 }>
 type Succeeded<K extends string> = Readonly<Record<K, 'succeeded'>>
@@ -82,6 +83,7 @@ export type CodexLabCommandConfinementControlEvidence = Readonly<{
     tcpConnect: CodexLabTcpConnectControlEvidence
     tcpBind: CodexLabTcpBindControlEvidence
     unixConnect: CodexLabUnixConnectControlEvidence
+    unixConnectDenied: CodexLabUnixConnectControlEvidence
     unixBind: CodexLabUnixBindControlEvidence
   }>
 }>
@@ -101,6 +103,12 @@ type Denial<S extends string> = Readonly<{
 }>
 export type CodexLabSandboxDeniedWriteEvidence = Readonly<{ root: string; target: string }> &
   Denial<'open(O_CREAT|O_EXCL|O_WRONLY)'>
+export type CodexLabSandboxPermittedUnixConnectEvidence = Readonly<{
+  path: string
+  challengeSha256: string
+  syscall: 'connect(AF_UNIX,SOCK_STREAM)'
+  result: 'succeeded'
+}>
 export type CodexLabCommandConfinementProbeReport = Readonly<{
   schemaVersion: typeof CODEX_LAB_COMMAND_CONFINEMENT_SCHEMA_VERSION
   probe: Readonly<{
@@ -135,7 +143,8 @@ export type CodexLabCommandConfinementProbeReport = Readonly<{
     tcpConnect: Readonly<{ host: '127.0.0.1'; port: number; challengeSha256: string }> &
       Denial<'connect(AF_INET,SOCK_STREAM)'>
     tcpBind: Readonly<{ host: '127.0.0.1'; port: 0 }> & Denial<'bind(AF_INET,SOCK_STREAM)'>
-    unixConnect: Readonly<{ path: string; challengeSha256: string }> &
+    unixConnect: CodexLabSandboxPermittedUnixConnectEvidence
+    unixConnectDenied: Readonly<{ path: string; challengeSha256: string }> &
       Denial<'connect(AF_UNIX,SOCK_STREAM)'>
     unixBind: Readonly<{ path: string }> & Denial<'bind(AF_UNIX,SOCK_STREAM)'>
   }>
