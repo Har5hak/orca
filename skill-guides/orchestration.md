@@ -65,6 +65,9 @@ non-Orca subagent tool when Orca orchestration provenance was requested.
 - Use the executable you used to run `skills get` for the entire run. In the
   examples below, replace `ORCA` with it; do not create a shell variable or run
   `ORCA` literally. If it fails, report that exact error instead of switching.
+- A runtime capability says the host can evaluate a feature; it is not launch
+  authorization. Only a `ready` receipt from the required admission path
+  authorizes that exact Dispatch. A missing capability or refusal is `HALT`.
 - A successful `orchestration send` proves durable enqueue; its wake or nudge is
   best-effort attention only and does not prove the recipient read or accepted it.
 
@@ -93,24 +96,34 @@ precedence over the idle rule. Do not reuse the settled lifecycle IDs.
 ## Canonical supervised loop
 
 Confirm the runtime, bind one Run, and start the full independent wave before
-waiting. `worker-start --spec` creates the Task and its attempt in one call:
+waiting. `worker-start --spec` creates the Task and its attempt in one call.
+
+When `lab-readonly-supervised-v1` is required, continue only if `status`
+advertises `orchestration.lab-readonly-profile.v1`. Supply the independently
+observed immutable worktree identity and exact absolute path. Do not add
+`--worktree`, placement, setup, retry, or terminal flags, and do not substitute
+another agent or adapter. This is the only supervised-profile launch recipe:
 
 ```text
 ORCA status --json
 ORCA orchestration run-create --objective "<objective>" --json
-ORCA orchestration worker-start --spec "<worker A task>" --worktree current --agent codex --json
-ORCA orchestration worker-start --spec "<worker B task>" --worktree current --agent claude --json
+ORCA orchestration worker-start --spec "<worker task>" --profile lab-readonly-supervised-v1 --adapter codex-workspace-chatgpt-v1 --worktree-identity <immutable_identity> --expected-worktree-path <absolute_path> --agent codex --json
 ORCA orchestration check --wait --types "worker_done,escalation,question" --timeout-ms 900000 --json
 ```
+
+Outside profile admission, the conditional references retain generic placement
+and provider choices. Those choices and `orca-cli` handoffs cannot satisfy,
+recover, or replace a required supervised profile.
 
 If `worker-start` exits non-zero, do not relaunch. Read the receipt's
 `failedStage` and `residualResources`, then load
 `references/recovery-and-cleanup.md`.
 
-Use `task-create` plus `worker-start --task <task_id>` for planned fan-out with
-dependencies or a retry of a known Task. Use dependencies only for real ordering
-and prefer parallel waves over chains deeper than three or four steps; nested
-workers obey the depth limit, and a new Run does not reset the caller's depth.
+Outside profile admission, use `task-create` plus `worker-start --task <task_id>`
+for planned fan-out with dependencies or a retry of a known Task. Use dependencies
+only for real ordering and prefer parallel waves over chains deeper than three or
+four steps; nested workers obey the depth limit, and a new Run does not reset the
+caller's depth.
 
 A consuming `check` names its caller with `--terminal <handle>`, never `--from`;
 omit it inside the coordinator's own Orca terminal. It returns the bound Run's
@@ -143,7 +156,8 @@ stop, abandon, retry, or release; keep waiting or inspect.
 
 `worker-start` is the normal path, composing placement, terminal readiness,
 prompt injection, and supervised resource ownership. `dispatch --inject` leaves
-an operator-created process unsupervised and is only for an expressiveness gap.
+an operator-created process unsupervised and is only for a generic expressiveness
+gap outside profile admission; it never satisfies or recovers a required profile.
 
 ## Task-spec contract
 

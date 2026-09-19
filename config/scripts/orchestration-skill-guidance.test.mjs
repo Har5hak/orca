@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { BUNDLED_SKILL_GUIDES } from '../../src/cli/bundled-skill-guides'
 
 const projectDir = resolve(import.meta.dirname, '../..')
 const guidePath = join(projectDir, 'skill-guides', 'orchestration.md')
@@ -22,6 +23,132 @@ function frontmatter(text) {
 function squash(text) {
   return text.replace(/\s+/gu, ' ').trim()
 }
+
+function bundledGuide(name) {
+  const guide = BUNDLED_SKILL_GUIDES.find((candidate) => candidate.name === name)
+  if (!guide) {
+    throw new Error(`missing bundled guide: ${name}`)
+  }
+  return guide
+}
+
+function textRecipes(text) {
+  return [...text.matchAll(/```text\n([\s\S]*?)```/gu)].map((match) => match[1])
+}
+
+const CANONICAL_PROFILE_WORKER_START_ARGV = [
+  'ORCA',
+  'orchestration',
+  'worker-start',
+  '--spec',
+  '<worker task>',
+  '--profile',
+  'lab-readonly-supervised-v1',
+  '--adapter',
+  'codex-workspace-chatgpt-v1',
+  '--worktree-identity',
+  '<immutable_identity>',
+  '--expected-worktree-path',
+  '<absolute_path>',
+  '--agent',
+  'codex',
+  '--json'
+]
+
+const CANONICAL_PROFILE_WORKER_START =
+  'ORCA orchestration worker-start --spec "<worker task>" --profile lab-readonly-supervised-v1 --adapter codex-workspace-chatgpt-v1 --worktree-identity <immutable_identity> --expected-worktree-path <absolute_path> --agent codex --json'
+
+function commandArgv(line) {
+  const tokens = line.match(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\S+/gu) ?? []
+  return tokens.map((token) => {
+    const quote = token[0]
+    return (quote === '"' || quote === "'") && token.at(-1) === quote ? token.slice(1, -1) : token
+  })
+}
+
+function validateSupervisedProfileRecipes(text) {
+  const recipes = textRecipes(text).filter((recipe) => /(?:^|\s)--profile(?:=|\s)/u.test(recipe))
+  if (recipes.length !== 1) {
+    throw new Error(`expected exactly one profile-bearing text recipe, received ${recipes.length}`)
+  }
+
+  const recipe = recipes[0]
+  const workerStarts = recipe
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('ORCA orchestration worker-start '))
+  if (workerStarts.length !== 1) {
+    throw new Error(`expected exactly one profile worker-start, received ${workerStarts.length}`)
+  }
+  const workerStartArgv = commandArgv(workerStarts[0])
+  if (JSON.stringify(workerStartArgv) !== JSON.stringify(CANONICAL_PROFILE_WORKER_START_ARGV)) {
+    throw new Error(`unexpected profile worker-start argv: ${JSON.stringify(workerStartArgv)}`)
+  }
+
+  const bypass = [
+    /(?:^|\n)ORCA terminal (?:create|send)(?:\s|$)/u,
+    /(?:^|\n)ORCA orchestration dispatch\b[^\n]*\s--inject(?:\s|$)/u,
+    /(?:^|\n)ORCA worktree create(?:\s|$)/u,
+    /Computer Use/u
+  ].find((pattern) => pattern.test(recipe))
+  if (bypass) {
+    throw new Error(`profile recipe contains bypass pattern: ${bypass}`)
+  }
+
+  return { recipe, workerStartArgv }
+}
+
+function replaceProfileWorkerStart(text, replacement) {
+  const replaced = text.replace(CANONICAL_PROFILE_WORKER_START, replacement)
+  if (replaced === text) {
+    throw new Error('canonical profile worker-start was not found')
+  }
+  return replaced
+}
+
+function appendProfileArgs(args) {
+  return (text) => replaceProfileWorkerStart(text, `${CANONICAL_PROFILE_WORKER_START} ${args}`)
+}
+
+function appendProfileLine(line) {
+  return (text) => replaceProfileWorkerStart(text, `${CANONICAL_PROFILE_WORKER_START}\n${line}`)
+}
+
+const SUPERVISED_PROFILE_BYPASS_MUTATIONS = [
+  [
+    'a second profile recipe',
+    (text) =>
+      `${text.trimEnd()}\n\n\`\`\`text\nORCA orchestration worker-start --spec "<bypass task>" --profile lab-readonly-supervised-v1 --worktree current --agent claude --json\n\`\`\`\n`
+  ],
+  ['current worktree with a space', appendProfileArgs('--worktree current')],
+  ['active worktree with a space', appendProfileArgs('--worktree active')],
+  ['current worktree with equals syntax', appendProfileArgs('--worktree=current')],
+  ['active worktree with equals syntax', appendProfileArgs('--worktree=active')],
+  ['duplicate last-wins agent flags', appendProfileArgs('--agent gemini')],
+  ['duplicate last-wins adapter flags', appendProfileArgs('--adapter unauthorized-v1')],
+  ['duplicate last-wins profile flags', appendProfileArgs('--profile unauthorized-v1')],
+  ['duplicate last-wins worktree flags', appendProfileArgs('--worktree current --worktree active')],
+  [
+    'duplicate last-wins worktree identity flags',
+    appendProfileArgs('--worktree-identity unauthorized-identity')
+  ],
+  [
+    'raw terminal create',
+    appendProfileLine('ORCA terminal create --worktree active --command codex --json')
+  ],
+  ['raw terminal send', appendProfileLine('ORCA terminal send --text "<task>" --enter --json')],
+  [
+    'raw dispatch injection',
+    appendProfileLine(
+      'ORCA orchestration dispatch --task <task_id> --to <terminal> --inject --json'
+    )
+  ],
+  [
+    'raw handoff worktree creation',
+    appendProfileLine('ORCA worktree create --name bypass --agent claude --json')
+  ],
+  ['Computer Use fallback', appendProfileLine('Use Computer Use if admission is refused.')]
+]
 
 // Routing lives in the frontmatter description alone; the body must not satisfy these.
 function readDescription() {
@@ -74,8 +201,8 @@ describe('orchestration kernel', () => {
       '## Conditional references'
     ]
 
-    // Why: 202 is the budget after the anti-loop nextAction rule; the kernel is always in context.
-    expect(kernel.split('\n').length).toBeLessThanOrEqual(202)
+    // Why: 216 includes the fail-closed profile recipe while keeping the kernel always-loadable.
+    expect(kernel.split('\n').length).toBeLessThanOrEqual(216)
     for (let index = 1; index < headings.length; index += 1) {
       expect(kernel.indexOf(headings[index])).toBeGreaterThan(kernel.indexOf(headings[index - 1]))
     }
@@ -129,15 +256,13 @@ describe('orchestration kernel', () => {
     expect(kernel).toContain('Do not reuse the settled lifecycle IDs')
   })
 
-  it('teaches worker-start as the only normal-path launch and starts the wave before waiting', () => {
+  it('teaches the admitted N=1 worker-start before waiting', () => {
     const kernel = readKernel()
-    const firstStart = kernel.indexOf('worker-start --spec "<worker A task>"')
-    const secondStart = kernel.indexOf('worker-start --spec "<worker B task>"')
+    const firstStart = kernel.indexOf('worker-start --spec "<worker task>"')
     const firstWait = kernel.indexOf('check --wait')
 
     expect(firstStart).toBeGreaterThan(kernel.indexOf('run-create'))
-    expect(secondStart).toBeGreaterThan(firstStart)
-    expect(firstWait).toBeGreaterThan(secondStart)
+    expect(firstWait).toBeGreaterThan(firstStart)
     expect(squash(kernel)).toContain('start the full independent wave before waiting')
     expect(kernel).toContain('`worker-start` is the normal path')
     expect(squash(kernel)).toContain(
@@ -151,7 +276,9 @@ describe('orchestration kernel', () => {
     const kernel = squash(readKernel())
 
     expect(kernel).toContain('`worker-start --spec` creates the Task and its attempt in one call')
-    expect(kernel).toContain('Use `task-create` plus `worker-start --task <task_id>`')
+    expect(kernel).toContain(
+      'Outside profile admission, use `task-create` plus `worker-start --task <task_id>`'
+    )
   })
 
   it('gives the supervised loop an exit condition for a live terminal with a dead agent', () => {
@@ -251,6 +378,55 @@ describe('orchestration kernel', () => {
     expect(kernel).toContain('successful `orchestration send` proves durable enqueue')
     expect(kernel).toContain('best-effort attention only')
     expect(squash(kernel)).toContain('does not prove the recipient read or accepted it')
+  })
+})
+
+describe('TASK-757 supervised profile guidance', () => {
+  it('serves one exact fail-closed profile recipe from the version-matched bundle', () => {
+    const guide = bundledGuide('orchestration')
+    const served = guide.markdown
+    const { recipe, workerStartArgv } = validateSupervisedProfileRecipes(served)
+
+    expect(served).toBe(readKernel())
+    expect(squash(served)).toContain(
+      'A runtime capability says the host can evaluate a feature; it is not launch authorization'
+    )
+    expect(squash(served)).toContain(
+      'Only a `ready` receipt from the required admission path authorizes that exact Dispatch'
+    )
+    expect(served).toContain('orchestration.lab-readonly-profile.v1')
+    expect(workerStartArgv).toEqual(CANONICAL_PROFILE_WORKER_START_ARGV)
+    expect(recipe).toContain('--adapter codex-workspace-chatgpt-v1')
+    expect(recipe).toContain('--worktree-identity <immutable_identity>')
+    expect(recipe).toContain('--expected-worktree-path <absolute_path>')
+    expect(recipe).toContain('--agent codex')
+  })
+
+  it.each(SUPERVISED_PROFILE_BYPASS_MUTATIONS)(
+    'rejects %s in the served profile recipe',
+    (_name, mutate) => {
+      const served = bundledGuide('orchestration').markdown
+
+      expect(() => validateSupervisedProfileRecipes(mutate(served))).toThrow()
+    }
+  )
+
+  it('keeps generic handoff and topology commands outside profile admission', () => {
+    const orchestration = bundledGuide('orchestration')
+    const cli = bundledGuide('orca-cli').markdown
+
+    expect(squash(orchestration.markdown)).toContain(
+      'Those choices and `orca-cli` handoffs cannot satisfy, recover, or replace a required supervised profile'
+    )
+    expect(orchestration.fullMarkdown).toContain('ORCA terminal create --worktree active')
+    expect(orchestration.fullMarkdown).toContain('dispatch --task <task_id> --to <handle> --inject')
+    expect(cli).toContain('## Supervised Profile Boundary')
+    expect(squash(cli)).toContain(
+      'Every handoff, worktree, terminal, custom-argv, and Computer Use recipe below is generic and outside profile admission'
+    )
+    expect(squash(cli)).toContain('None can satisfy, recover, or replace that profile')
+    expect(cli).toContain('ORCA worktree create --name <task-name>')
+    expect(cli).toContain('ORCA terminal create --worktree')
   })
 })
 

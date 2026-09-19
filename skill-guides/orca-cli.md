@@ -22,6 +22,18 @@ Use `orca` when Orca's running editor/runtime is the source of truth. Use plain 
 
 Prefer `--json` for agent-driven calls. If the CLI is missing, say so explicitly instead of inspecting source files first.
 
+## Supervised Profile Boundary
+
+Runtime capability is not authorization. `orchestration.lab-readonly-profile.v1`
+only says the host can evaluate the profile; only a `ready` receipt from the exact
+`worker-start --profile lab-readonly-supervised-v1` admission recipe authorizes one
+Dispatch. Load the `orchestration` guide for that recipe.
+
+Every handoff, worktree, terminal, custom-argv, and Computer Use recipe below is
+generic and outside profile admission. None can satisfy, recover, or replace that
+profile. If its capability is missing or admission is refused, stop; never fall
+back to `current`/`active`, raw terminal input, injection, or another provider.
+
 ## Full Handoffs
 
 A full handoff transfers ownership to another agent or worktree, then the original agent stops. Treat requests phrased as "hand off", "handoff", "handover", "give this to another agent", "give this to another worktree", "another agent", or "another worktree" as full handoffs unless the user explicitly asks to supervise, monitor, wait for results, track completion, coordinate a DAG, use decision gates, or manage ask/reply.
