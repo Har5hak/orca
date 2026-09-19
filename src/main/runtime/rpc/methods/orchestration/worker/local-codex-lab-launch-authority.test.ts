@@ -7,6 +7,7 @@ import type {
 import type { CodexLabHostReadinessReceipt } from '../../../../orchestration/lab-profile/codex-lab-command-confinement-live-contract'
 import { testCodexLabStructuredLaunchBinding } from '../../../../orchestration/lab-profile/codex-lab-structured-launch-binding-test-support'
 import { buildLabGatewayServerReceipt } from '../../../../orchestration/lab-profile/dispatch-gateway-server-receipt'
+import { createLabGatewayPolicyReceipt } from '../../../../orchestration/lab-profile/dispatch-gateway-policy'
 import type {
   CodexLabRuntimeLayoutHost,
   PreparedCodexLabRuntimeLayout
@@ -114,7 +115,22 @@ function gatewayReceipt(dispatchId: string) {
     IDENTITY.processIncarnation,
     'lgp1_authority757',
     dispatchId,
-    { evidence, identitySha256: sha256(JSON.stringify(evidence)) }
+    { evidence, identitySha256: sha256(JSON.stringify(evidence)) },
+    createLabGatewayPolicyReceipt({
+      schemaVersion: 1,
+      policyId: 'lgp1_authority757',
+      credentialSha256: 'a'.repeat(64),
+      binding: {
+        runId: 'run_task_757',
+        taskId: 'task_task_757',
+        dispatchId,
+        terminalHandle: IDENTITY.handle,
+        terminalPaneKey: IDENTITY.paneKey
+      },
+      revoked: false,
+      workerDoneAccepted: false,
+      terminal: false
+    })
   )
 }
 

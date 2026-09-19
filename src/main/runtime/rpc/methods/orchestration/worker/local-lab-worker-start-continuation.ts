@@ -15,6 +15,15 @@ import {
 } from './local-lab-launch-authority-contract'
 import type { LocalLabWorkerContinuationDeps } from './local-lab-worker-start-continuation-contract'
 import { reconcileExitedFailedLabProvider } from './local-lab-worker-start-recovery'
+import {
+  buildCodexLabLaunchReceipt,
+  type CodexLabLaunchReceiptV1
+} from '../../../../orchestration/lab-profile/codex-lab-launch-receipt'
+import {
+  failedLocalLabWorkerStartResult,
+  readyLocalLabWorkerStartResult,
+  settledLocalLabWorkerStartFailureResult
+} from './local-lab-worker-start-result'
 
 /**
  * Finishes the lifecycle after admission has durably reserved the laboratory runtime.
@@ -40,6 +49,13 @@ export async function continuePreparedLocalLabWorkerStart(args: {
     dispatchId,
     profileId: prepared.admission.profile
   })
+  const resultContext = Object.freeze({
+    runId: run.id,
+    taskId: task.id,
+    dispatchId,
+    profile: prepared.admission.profile,
+    adapter: prepared.admission.adapter
+  })
   const runtimeResource = Object.freeze({ kind: 'created_lab_runtime', id: dispatchId })
   const effects: WorkerEffect[] = []
   let authority: PreparedLocalLabLaunchAuthority | undefined
@@ -47,6 +63,7 @@ export async function continuePreparedLocalLabWorkerStart(args: {
     ReturnType<typeof createStructuredWorkerSessionForWorktree>
   > | null = null
   let preAttachIdentity: Readonly<StructuredWorkerIdentity> | undefined
+  let launchReceipt: CodexLabLaunchReceiptV1 | undefined
   let failedStage = 'lab_authority_attach'
   try {
     db.planCodexLabRuntimeCustody({
@@ -149,7 +166,25 @@ export async function continuePreparedLocalLabWorkerStart(args: {
       loginStartAccepted: true,
       authJsonAbsent: true
     })
-    db.recordCodexLabRuntimeProviderAttached(providerEvidence)
+    const attachedCustody = db.recordCodexLabRuntimeProviderAttached(providerEvidence)
+
+    failedStage = 'launch_receipt'
+    if (!authority) {
+      throw new Error('Codex laboratory launch authority is missing after structured attach.')
+    }
+    launchReceipt = (args.deps.buildLaunchReceipt ?? buildCodexLabLaunchReceipt)({
+      plan: authority.labLaunchBinding.plan,
+      worktree: prepared.observation.receipt,
+      hostReadiness: authority.hostReadinessReceipt,
+      gateway: authority.gatewayReceipt,
+      custody: attachedCustody,
+      runtime: {
+        runtimeId: runtime.getRuntimeId(),
+        buildVersion: prepared.runtimeBuildVersion,
+        capabilities: prepared.admittedRuntimeCapabilities
+      }
+    })
+    db.recordCodexLabRuntimeLaunchReceipt({ ...custodyIdentity, receipt: launchReceipt })
 
     failedStage = 'dispatch_input'
     await (args.deps.deliverPreamble ?? deliverWorkerDispatchPreamble)({
@@ -176,25 +211,14 @@ export async function continuePreparedLocalLabWorkerStart(args: {
       worker.stage === 'settled' && (worker.state === 'succeeded' || worker.state === 'failed')
         ? worker.state
         : undefined
-    return {
-      runId: run.id,
-      taskId: task.id,
-      dispatchId,
-      state: workerOutcome ? 'ready' : worker.state,
-      stage: worker.stage,
-      ...(workerOutcome ? { workerOutcome } : {}),
-      turnStart: 'observed',
-      profile: prepared.admission.profile,
-      adapter: prepared.admission.adapter,
-      mode: { requested: 'structured', effective: 'structured' },
-      effects: alreadySettled
-        ? [
-            ...parseWorkerJsonArray(worker.effects, 'effects'),
-            ...effects.filter((effect) => effect.kind === 'dispatch_input')
-          ]
-        : parseWorkerJsonArray(worker.effects, 'effects'),
-      residualResources: parseWorkerJsonArray(worker.residual_resources, 'residual resources')
-    }
+    return readyLocalLabWorkerStartResult({
+      context: resultContext,
+      worker,
+      workerOutcome,
+      launchReceipt,
+      alreadySettled: Boolean(alreadySettled),
+      effects
+    })
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     const cleanupErrors: string[] = []
@@ -250,24 +274,14 @@ export async function continuePreparedLocalLabWorkerStart(args: {
         (settledWorker.state === 'succeeded' || settledWorker.state === 'failed')
           ? settledWorker.state
           : undefined
-      return {
-        runId: run.id,
-        taskId: task.id,
-        dispatchId,
-        state: workerOutcome ? 'ready' : settledWorker.state,
-        stage: settledWorker.stage,
-        ...(workerOutcome ? { workerOutcome } : {}),
+      return settledLocalLabWorkerStartFailureResult({
+        context: resultContext,
+        worker: settledWorker,
+        workerOutcome,
         lastError: reason,
-        ...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
-        profile: prepared.admission.profile,
-        adapter: prepared.admission.adapter,
-        mode: { requested: 'structured', effective: 'structured' },
-        effects: parseWorkerJsonArray(settledWorker.effects, 'effects'),
-        residualResources: parseWorkerJsonArray(
-          settledWorker.residual_resources,
-          'residual resources'
-        )
-      }
+        cleanupErrors,
+        launchReceipt: db.getCodexLabRuntimeCustody(dispatchId)?.launchReceipt
+      })
     }
     const failedWorker = db.failWorkerStart(dispatchId, failedStage, reason)
     if (authority && !unclaimedAuthorityReleased) {
@@ -280,28 +294,13 @@ export async function continuePreparedLocalLabWorkerStart(args: {
       }
     }
     const worker = db.getWorkerDispatch(dispatchId) ?? failedWorker
-    return {
-      runId: run.id,
-      taskId: task.id,
-      dispatchId,
-      state: worker.state,
-      stage: worker.stage,
+    return failedLocalLabWorkerStartResult({
+      context: resultContext,
+      worker,
       failedStage,
       lastError: reason,
-      ...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
-      profile: prepared.admission.profile,
-      adapter: prepared.admission.adapter,
-      mode: { requested: 'structured', effective: 'structured' },
-      effects: parseWorkerJsonArray(worker.effects, 'effects'),
-      residualResources: parseWorkerJsonArray(worker.residual_resources, 'residual resources')
-    }
+      cleanupErrors,
+      launchReceipt: db.getCodexLabRuntimeCustody(dispatchId)?.launchReceipt
+    })
   }
-}
-
-function parseWorkerJsonArray(serialized: string, field: string): unknown[] {
-  const value: unknown = JSON.parse(serialized)
-  if (!Array.isArray(value)) {
-    throw new Error(`Worker ${field} must be a JSON array.`)
-  }
-  return value
 }

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { LabGatewayClientFailure } from '../runtime/orchestration/lab-profile/dispatch-gateway-client'
 import type { LabGatewayServerReceipt } from '../runtime/orchestration/lab-profile/dispatch-gateway-server'
+import { createLabGatewayPolicyReceipt } from '../runtime/orchestration/lab-profile/dispatch-gateway-policy'
 import {
   claimCodexLabDynamicToolHostFactory,
   CodexLabDynamicToolHost,
@@ -20,6 +21,21 @@ function receipt(): LabGatewayServerReceipt {
     mode: '0600' as const,
     type: 'socket' as const
   })
+  const policyReceipt = createLabGatewayPolicyReceipt({
+    schemaVersion: 1,
+    policyId: 'policy_757',
+    credentialSha256: sha256(CREDENTIAL),
+    binding: {
+      runId: 'run_757',
+      taskId: 'task_757',
+      dispatchId: 'dispatch-757',
+      terminalHandle: 'structworker_757',
+      terminalPaneKey: 'pane_757'
+    },
+    revoked: false,
+    workerDoneAccepted: false,
+    terminal: false
+  })
   const stable = Object.freeze({
     schema: 'orca.lab-dispatch-gateway.v1' as const,
     policyId: 'policy_757',
@@ -30,6 +46,7 @@ function receipt(): LabGatewayServerReceipt {
     endpointIdentity,
     endpointIdentitySha256: sha256(JSON.stringify(endpointIdentity)),
     processIncarnationSha256: '1'.repeat(64),
+    policyReceipt,
     allowedOperations: Object.freeze([
       'worker.status',
       'worker.check',

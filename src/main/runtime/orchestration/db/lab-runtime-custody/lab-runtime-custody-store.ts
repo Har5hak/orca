@@ -4,6 +4,7 @@ import {
   releaseCodexLabRuntimeCustody
 } from './lab-runtime-custody-cleanup'
 import { releaseCodexLabPreAttachRuntimeCustody } from './lab-runtime-custody-pre-attach-cleanup'
+import { recordCodexLabRuntimeLaunchReceipt } from './lab-runtime-custody-launch-receipt'
 import { getCodexLabRuntimeCustody } from './lab-runtime-custody-row'
 import {
   planCodexLabRuntimeCustody,
@@ -24,6 +25,7 @@ export type CodexLabRuntimeCustodyMethods = {
   recordCodexLabRuntimeProviderReserved: typeof recordCodexLabRuntimeProviderReserved
   recordCodexLabRuntimeExternalAuthInstalled: typeof recordCodexLabRuntimeExternalAuthInstalled
   recordCodexLabRuntimeGatewayStarted: typeof recordCodexLabRuntimeGatewayStarted
+  recordCodexLabRuntimeLaunchReceipt: typeof recordCodexLabRuntimeLaunchReceipt
   recordCodexLabRuntimeProviderAttached: typeof recordCodexLabRuntimeProviderAttached
   recordCodexLabRuntimeReady: typeof recordCodexLabRuntimeReady
   beginCodexLabRuntimeCleanup: typeof beginCodexLabRuntimeCleanup
@@ -41,6 +43,7 @@ export function attachCodexLabRuntimeCustody(ctor: { prototype: object }): void 
     recordCodexLabRuntimeProviderReserved,
     recordCodexLabRuntimeExternalAuthInstalled,
     recordCodexLabRuntimeGatewayStarted,
+    recordCodexLabRuntimeLaunchReceipt,
     recordCodexLabRuntimeProviderAttached,
     recordCodexLabRuntimeReady,
     beginCodexLabRuntimeCleanup,

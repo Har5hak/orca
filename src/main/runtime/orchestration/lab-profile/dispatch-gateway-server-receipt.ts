@@ -3,7 +3,11 @@ import type {
   LabUnixSocketEndpointAttestation,
   LabUnixSocketEndpointEvidence
 } from '../../rpc/lab-unix-socket-lifecycle'
-import { LAB_GATEWAY_ALLOWED_OPERATIONS, type LabGatewayOperation } from './dispatch-gateway-policy'
+import {
+  LAB_GATEWAY_ALLOWED_OPERATIONS,
+  type LabGatewayOperation,
+  type LabGatewayPolicyReceipt
+} from './dispatch-gateway-policy'
 
 export type LabGatewayServerReceipt = Readonly<{
   schema: 'orca.lab-dispatch-gateway.v1'
@@ -15,6 +19,7 @@ export type LabGatewayServerReceipt = Readonly<{
   endpointIdentity: LabUnixSocketEndpointEvidence
   endpointIdentitySha256: string
   processIncarnationSha256: string
+  policyReceipt: LabGatewayPolicyReceipt
   allowedOperations: readonly LabGatewayOperation[]
   lifecycleSource: 'injected-per-request'
   dcapCustody: 'server-only'
@@ -26,8 +31,16 @@ export function buildLabGatewayServerReceipt(
   processIncarnation: string,
   policyId: string,
   dispatchId: string,
-  endpointAttestation: LabUnixSocketEndpointAttestation
+  endpointAttestation: LabUnixSocketEndpointAttestation,
+  policyReceipt: LabGatewayPolicyReceipt
 ): LabGatewayServerReceipt {
+  if (
+    policyReceipt.policyId !== policyId ||
+    policyReceipt.binding.dispatchId !== dispatchId ||
+    policyReceipt.state !== 'active'
+  ) {
+    throw new Error('Laboratory gateway policy receipt does not match the server lifecycle.')
+  }
   const stable = Object.freeze({
     schema: 'orca.lab-dispatch-gateway.v1' as const,
     policyId,
@@ -38,6 +51,7 @@ export function buildLabGatewayServerReceipt(
     endpointIdentity: Object.freeze({ ...endpointAttestation.evidence }),
     endpointIdentitySha256: endpointAttestation.identitySha256,
     processIncarnationSha256: sha256(processIncarnation),
+    policyReceipt,
     allowedOperations: Object.freeze([...LAB_GATEWAY_ALLOWED_OPERATIONS]),
     lifecycleSource: 'injected-per-request' as const,
     dcapCustody: 'server-only' as const

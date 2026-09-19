@@ -1,201 +1,45 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { OrchestrationDb } from '../../db'
+import { SCHEMA_VERSION } from '../contract-constants'
+import { parseCodexLabLaunchReceipt } from '../../lab-profile/codex-lab-launch-receipt'
+import { testCodexLabStructuredLaunchBinding } from '../../lab-profile/codex-lab-structured-launch-binding-test-support'
 import { LAB_GATEWAY_ALLOWED_OPERATIONS } from '../../lab-profile/dispatch-gateway-policy-contract'
-import type {
-  CodexLabGatewayPublicReceipt,
-  CodexLabRuntimeCustodyState
-} from './lab-runtime-custody-contract'
 import { expectedCodexLabDispatchRuntimeRoot, sha256 } from './lab-runtime-custody-validation'
+import { exposeCodexLabRuntimeCustody } from '../../../rpc/methods/orchestration/worker/worker-observation'
+import {
+  PROCESS_INCARNATION,
+  PROFILE_ID,
+  PROVIDER_ID,
+  SESSION_ID,
+  TERMINAL_HANDLE,
+  TERMINAL_PANE_KEY,
+  advanceTo,
+  cleanupCodexLabCustodyTestHarnesses,
+  closeTrackedDatabase,
+  createHarness as createHarnessWithBinding,
+  gatewayReceipt,
+  launchReceipt,
+  plan,
+  proveCreatedResourcesReleased,
+  providerEvidence,
+  trackDatabase,
+  trackTempRoot
+} from './lab-runtime-custody-store.test-support'
 
-const PROFILE_ID = 'lab-readonly-supervised-v1'
-const PROVIDER_ID = 'codex-workspace-chatgpt-v1'
-const SESSION_ID = '11111111-1111-4111-8111-111111111111'
-const TERMINAL_HANDLE = 'structworker_33333333-3333-4333-8333-333333333333'
-const TERMINAL_PANE_KEY = `agent-session-${SESSION_ID}:22222222-2222-4222-8222-222222222222`
-const PROCESS_INCARNATION = `structured:${SESSION_ID}`
-const CLEANUP_RESOURCES = ['provider', 'gateway', 'auth', 'layout'] as const
-
-type Harness = Readonly<{
-  db: OrchestrationDb
-  dispatchId: string
-  identity: Readonly<{ dispatchId: string; profileId: string }>
-}>
-
-const databases: OrchestrationDb[] = []
+function createHarness(spec = 'persist Codex lab runtime custody', databasePath = ':memory:') {
+  return createHarnessWithBinding(
+    (dispatchId) => testCodexLabStructuredLaunchBinding({ dispatchId }),
+    spec,
+    databasePath
+  )
+}
 
 afterEach(() => {
-  for (const db of databases.splice(0)) {
-    db.close()
-  }
+  cleanupCodexLabCustodyTestHarnesses()
 })
-
-function createHarness(spec = 'persist Codex lab runtime custody'): Harness {
-  const db = new OrchestrationDb(':memory:')
-  databases.push(db)
-  const started = db.createStartingWorkerDispatch({
-    creator: { kind: 'system' },
-    maxDepth: Number.MAX_SAFE_INTEGER,
-    taskSpec: spec,
-    taskRunId: 'run_legacy_local',
-    startOptions: { profile: { id: PROFILE_ID } },
-    profileLease: { profileId: PROFILE_ID }
-  })
-  const dispatchId = started.dispatch.id
-  db.recordWorkerStage({
-    dispatchId,
-    stage: 'lab_runtime_planned',
-    effects: [{ kind: 'created_lab_runtime', id: dispatchId }],
-    residualResources: [{ kind: 'created_lab_runtime', id: dispatchId }]
-  })
-  db.prepareStartingWorkerAuthority({
-    dispatchId,
-    handle: TERMINAL_HANDLE,
-    paneKey: TERMINAL_PANE_KEY,
-    processIncarnation: PROCESS_INCARNATION,
-    worktreeId: 'lab-test-worktree',
-    effects: [{ kind: 'created_lab_runtime', id: dispatchId }],
-    setupState: 'lab_runtime_planned',
-    preserveCreatedLabRuntimeResidual: true
-  })
-  return {
-    db,
-    dispatchId,
-    identity: Object.freeze({ dispatchId, profileId: PROFILE_ID })
-  }
-}
-
-function providerEvidence(harness: Harness) {
-  return Object.freeze({
-    ...harness.identity,
-    providerId: PROVIDER_ID,
-    sessionId: SESSION_ID,
-    terminalHandle: TERMINAL_HANDLE,
-    terminalPaneKey: TERMINAL_PANE_KEY,
-    processIncarnation: PROCESS_INCARNATION
-  })
-}
-
-function plan(harness: Harness) {
-  return harness.db.planCodexLabRuntimeCustody({
-    ...harness.identity,
-    runtimeRoot: expectedCodexLabDispatchRuntimeRoot(harness.dispatchId)
-  })
-}
-
-function gatewayReceipt(dispatchId: string): CodexLabGatewayPublicReceipt {
-  const endpointIdentity = Object.freeze({
-    device: '16777234',
-    inode: '9001',
-    uid: '501',
-    mode: '0600' as const,
-    type: 'socket' as const
-  })
-  const stable = Object.freeze({
-    schema: 'orca.lab-dispatch-gateway.v1',
-    policyId: 'lgp1_public-policy-receipt',
-    dispatchId,
-    transport: 'unix',
-    socketMode: '0600',
-    endpointSha256: sha256(join(expectedCodexLabDispatchRuntimeRoot(dispatchId), 'gateway.sock')),
-    endpointIdentity,
-    endpointIdentitySha256: sha256(JSON.stringify(endpointIdentity)),
-    processIncarnationSha256: sha256(`structured:${SESSION_ID}`),
-    allowedOperations: LAB_GATEWAY_ALLOWED_OPERATIONS,
-    lifecycleSource: 'injected-per-request',
-    dcapCustody: 'server-only'
-  } as const)
-  return Object.freeze({
-    schema: stable.schema,
-    policyId: stable.policyId,
-    dispatchId: stable.dispatchId,
-    transport: stable.transport,
-    socketMode: stable.socketMode,
-    endpointSha256: stable.endpointSha256,
-    endpointIdentity: stable.endpointIdentity,
-    endpointIdentitySha256: stable.endpointIdentitySha256,
-    processIncarnationSha256: stable.processIncarnationSha256,
-    allowedOperations: stable.allowedOperations,
-    lifecycleSource: stable.lifecycleSource,
-    receiptSha256: sha256(JSON.stringify(stable))
-  })
-}
-
-function advanceTo(
-  harness: Harness,
-  target: Exclude<CodexLabRuntimeCustodyState, 'cleanup_pending' | 'released'>
-) {
-  let custody = plan(harness)
-  if (target === 'planned') {
-    return custody
-  }
-  custody = harness.db.recordCodexLabRuntimeAuthorityAttached(harness.identity)
-  if (target === 'authority_attached') {
-    return custody
-  }
-  custody = harness.db.recordCodexLabRuntimeLayoutPrepared({
-    ...harness.identity,
-    runtimeParentIdentity: { device: '1', inode: '2' },
-    runtimeRootIdentity: { device: '1', inode: '3' },
-    configSha256: 'e'.repeat(64)
-  })
-  if (target === 'layout_prepared') {
-    return custody
-  }
-  custody = harness.db.recordCodexLabRuntimeProviderReserved(providerEvidence(harness))
-  if (target === 'provider_reserved') {
-    return custody
-  }
-  custody = harness.db.recordCodexLabRuntimeGatewayStarted({
-    ...harness.identity,
-    receipt: gatewayReceipt(harness.dispatchId)
-  })
-  if (target === 'gateway_started') {
-    return custody
-  }
-  custody = harness.db.recordCodexLabRuntimeExternalAuthInstalled({
-    ...harness.identity,
-    authMethod: 'chatgptAuthTokens',
-    authStorage: 'ephemeral',
-    loginStartAccepted: true,
-    authJsonAbsent: true
-  })
-  if (target === 'external_auth_installed') {
-    return custody
-  }
-  custody = harness.db.recordCodexLabRuntimeProviderAttached(providerEvidence(harness))
-  if (target === 'provider_attached') {
-    return custody
-  }
-  return harness.db.recordCodexLabRuntimeReady(harness.identity)
-}
-
-function proveCreatedResourcesReleased(harness: Harness): void {
-  let custody = harness.db.getCodexLabRuntimeCustody(harness.dispatchId)
-  if (!custody) {
-    throw new Error('missing custody row')
-  }
-  if (custody.cleanup.provider.state !== 'not_created') {
-    const worker = harness.db.getWorkerDispatch(harness.dispatchId)
-    if (worker?.state === 'starting') {
-      harness.db.failWorkerStart(harness.dispatchId, worker.stage, 'cleanup test settlement')
-    }
-    const requested = harness.db.requestWorkerTerminalRelease(harness.dispatchId)
-    if (requested.disposition === 'requested') {
-      harness.db.settleWorkerTerminalRelease(requested.resource.id)
-    }
-  }
-  for (const resource of CLEANUP_RESOURCES) {
-    if (custody.cleanup[resource].state !== 'not_created') {
-      harness.db.recordCodexLabRuntimeCleanupResult({
-        ...harness.identity,
-        resource,
-        outcome: 'released'
-      })
-    }
-    custody = harness.db.getCodexLabRuntimeCustody(harness.dispatchId) ?? custody
-  }
-}
 
 describe('Codex laboratory runtime custody', () => {
   it('has no durable field capable of naming bearer, token, credential, secret or DCap material', () => {
@@ -222,7 +66,7 @@ describe('Codex laboratory runtime custody', () => {
       runtimeRoot: expectedCodexLabDispatchRuntimeRoot(harness.dispatchId),
       runtimeParentIdentity: { device: '1', inode: '2' },
       runtimeRootIdentity: { device: '1', inode: '3' },
-      configSha256: 'e'.repeat(64),
+      configSha256: expect.any(String),
       auth: {
         method: 'chatgptAuthTokens',
         storage: 'ephemeral',
@@ -246,7 +90,7 @@ describe('Codex laboratory runtime custody', () => {
         gateway: { state: 'pending', reasonCode: null, detailSha256: null },
         provider: { state: 'pending', reasonCode: null, detailSha256: null }
       },
-      revision: 7
+      revision: 8
     })
     const serialized = JSON.stringify(ready)
     expect(serialized).not.toContain('lgw1_')
@@ -259,6 +103,80 @@ describe('Codex laboratory runtime custody', () => {
       .get(harness.dispatchId)
     expect(JSON.stringify(durableCustody)).not.toContain(TERMINAL_HANDLE)
     expect(JSON.stringify(durableCustody)).not.toContain(TERMINAL_PANE_KEY)
+  })
+
+  it('reopens and replays the exact immutable worker-show launch receipt', () => {
+    const root = mkdtempSync(join(tmpdir(), 'orca-lab-launch-receipt-'))
+    trackTempRoot(root)
+    const path = join(root, 'orchestration.db')
+    const harness = createHarness('reopen the Codex lab launch receipt', path)
+    const ready = advanceTo(harness, 'ready')
+    const receipt = ready.launchReceipt
+    if (!receipt) {
+      throw new Error('expected persisted launch receipt')
+    }
+    closeTrackedDatabase(harness.db)
+
+    const reopened = new OrchestrationDb(path)
+    trackDatabase(reopened)
+    const shown = exposeCodexLabRuntimeCustody(reopened, harness.dispatchId)
+    expect(shown?.launchReceipt).toEqual(receipt)
+    expect(Object.isFrozen(shown?.launchReceipt?.gateway.policyReceipt.binding)).toBe(true)
+    const reopenedDispatch = reopened.getDispatchContextById(harness.dispatchId)
+    expect(shown?.launchReceipt?.gateway).toEqual(shown?.gatewayReceipt)
+    expect(shown?.launchReceipt?.gateway.policyReceipt.binding).toMatchObject({
+      runIdSha256: sha256(reopenedDispatch?.run_id ?? ''),
+      taskIdSha256: sha256(reopenedDispatch?.task_id ?? ''),
+      dispatchIdSha256: sha256(reopenedDispatch?.id ?? ''),
+      terminalHandleSha256: shown?.provider?.terminalHandleSha256,
+      terminalPaneKeySha256: shown?.provider?.terminalPaneKeySha256
+    })
+    expect(shown?.launchReceipt?.structuredAttach.providerProcessIncarnationSha256).toBe(
+      shown?.provider?.processIncarnationSha256
+    )
+    const revision = shown?.revision
+    const replayed = reopened.recordCodexLabRuntimeLaunchReceipt({
+      ...harness.identity,
+      receipt
+    })
+    expect(replayed.revision).toBe(revision)
+    expect(replayed.launchReceipt).toEqual(receipt)
+  })
+
+  it('rejects re-digested nested launch-receipt forgeries', () => {
+    const harness = createHarness()
+    const attached = advanceTo(harness, 'provider_attached')
+    const valid = launchReceipt(harness, attached)
+    const forgedStableReceipts = [
+      { ...valid, profilePolicySha256: 'f'.repeat(64), receiptSha256: undefined },
+      {
+        ...valid,
+        generatedHome: { ...valid.generatedHome, attestedContractSha256: 'f'.repeat(64) },
+        receiptSha256: undefined
+      },
+      {
+        ...valid,
+        generatedHome: { ...valid.generatedHome, attestedToolContractSha256: 'f'.repeat(64) },
+        receiptSha256: undefined
+      },
+      {
+        ...valid,
+        worktree: {
+          ...valid.worktree,
+          digests: { ...valid.worktree.digests, selectorSha256: 'f'.repeat(64) }
+        },
+        receiptSha256: undefined
+      },
+      {
+        ...valid,
+        structuredAttach: { ...valid.structuredAttach, appServerAttestation: 'forged' },
+        receiptSha256: undefined
+      }
+    ]
+    for (const { receiptSha256: _receiptSha256, ...stable } of forgedStableReceipts) {
+      const forged = { ...stable, receiptSha256: sha256(JSON.stringify(stable)) }
+      expect(() => parseCodexLabLaunchReceipt(forged, harness.dispatchId)).toThrow()
+    }
   })
 
   it('makes exact transition retries idempotent and refuses skips, backwards moves and evidence drift', () => {
@@ -325,7 +243,7 @@ describe('Codex laboratory runtime custody', () => {
     expect(() =>
       harness.db.recordCodexLabRuntimeGatewayStarted({
         ...harness.identity,
-        receipt: gatewayReceipt(harness.dispatchId)
+        receipt: gatewayReceipt(harness)
       })
     ).toThrow('provider identity does not match the gateway receipt')
 
@@ -355,7 +273,7 @@ describe('Codex laboratory runtime custody', () => {
 
     const gateway = harness.db.recordCodexLabRuntimeGatewayStarted({
       ...harness.identity,
-      receipt: gatewayReceipt(harness.dispatchId)
+      receipt: gatewayReceipt(harness)
     })
     expect(gateway).toMatchObject({
       state: 'gateway_started',
@@ -367,7 +285,7 @@ describe('Codex laboratory runtime custody', () => {
     expect(
       harness.db.recordCodexLabRuntimeGatewayStarted({
         ...harness.identity,
-        receipt: gatewayReceipt(harness.dispatchId)
+        receipt: gatewayReceipt(harness)
       }).revision
     ).toBe(gateway.revision)
     expect(() =>
@@ -453,7 +371,7 @@ describe('Codex laboratory runtime custody', () => {
     const harness = createHarness()
     advanceTo(harness, 'provider_reserved')
     const forgedDigest = Object.freeze({
-      ...gatewayReceipt(harness.dispatchId),
+      ...gatewayReceipt(harness),
       receiptSha256: '0'.repeat(64)
     })
     expect(() =>
@@ -463,7 +381,7 @@ describe('Codex laboratory runtime custody', () => {
       })
     ).toThrow('gateway receipt digest is invalid')
     const poisoned = Object.freeze({
-      ...gatewayReceipt(harness.dispatchId),
+      ...gatewayReceipt(harness),
       bearer: 'Bearer should-never-be-durable'
     })
     expect(() =>
@@ -475,7 +393,7 @@ describe('Codex laboratory runtime custody', () => {
 
     harness.db.recordCodexLabRuntimeGatewayStarted({
       ...harness.identity,
-      receipt: gatewayReceipt(harness.dispatchId)
+      receipt: gatewayReceipt(harness)
     })
     harness.db.db
       .prepare(
@@ -483,7 +401,7 @@ describe('Codex laboratory runtime custody', () => {
          SET gateway_public_receipt = ? WHERE dispatch_id = ?`
       )
       .run(
-        JSON.stringify({ ...gatewayReceipt(harness.dispatchId), authorization: 'dcap_stolen' }),
+        JSON.stringify({ ...gatewayReceipt(harness), authorization: 'dcap_stolen' }),
         harness.dispatchId
       )
     expect(() => harness.db.getCodexLabRuntimeCustody(harness.dispatchId)).toThrow(
@@ -761,13 +679,13 @@ describe('Codex laboratory runtime custody', () => {
 
   it('migrates a v41 database to the durable custody schema', () => {
     const db = new OrchestrationDb(':memory:')
-    databases.push(db)
+    trackDatabase(db)
     db.db.exec('DROP TABLE codex_lab_runtime_custody')
     db.db.pragma('user_version = 41')
 
     db.migrate()
 
-    expect(db.db.pragma('user_version', { simple: true })).toBe(42)
+    expect(db.db.pragma('user_version', { simple: true })).toBe(SCHEMA_VERSION)
     expect(
       db.db
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")

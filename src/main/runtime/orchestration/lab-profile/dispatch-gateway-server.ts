@@ -7,6 +7,7 @@ import { UnixSocketTransport } from '../../rpc/unix-socket-transport'
 import {
   LAB_GATEWAY_ALLOWED_OPERATIONS,
   admitLabGatewayRequest,
+  createLabGatewayPolicyReceipt,
   type LabGatewayBinding,
   type LabGatewayOperation,
   type LabGatewayPolicy,
@@ -110,7 +111,8 @@ export class LabDispatchGatewayServer {
           this.options.processIncarnation,
           this.policy.policyId,
           this.policy.binding.dispatchId,
-          endpointAttestation
+          endpointAttestation,
+          createLabGatewayPolicyReceipt(this.policy)
         )
       },
       stopTransport: async () => await this.transport.stop()

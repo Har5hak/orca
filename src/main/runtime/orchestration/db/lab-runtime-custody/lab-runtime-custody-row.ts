@@ -7,7 +7,6 @@ import { isGeneratedId } from '../generated-id'
 import {
   CODEX_LAB_RUNTIME_CLEANUP_REASON_CODES,
   CODEX_LAB_RUNTIME_CUSTODY_STATES,
-  type CodexLabGatewayPublicReceipt,
   type CodexLabRuntimeCleanupReasonCode,
   type CodexLabRuntimeCleanupState,
   type CodexLabRuntimeCustody,
@@ -16,7 +15,7 @@ import {
   type CodexLabRuntimePathIdentity
 } from './lab-runtime-custody-contract'
 import { requireCodexLabRuntimeCustodyInvariants } from './lab-runtime-custody-invariants'
-import { normalizeCodexLabGatewayPublicReceipt } from './lab-runtime-custody-json-evidence'
+import { parseGatewayReceipt, parseLaunchReceipt } from './lab-runtime-custody-persisted-receipts'
 import {
   normalizeCodexLabPathIdentity,
   requireCodexLabCustodyIdentityParts,
@@ -39,6 +38,7 @@ type CustodySqlRow = {
   login_start_accepted: number | null
   auth_json_absent: number | null
   gateway_public_receipt: string | null
+  launch_receipt: string | null
   provider_id: string | null
   provider_terminal_resource_id: string | null
   provider_session_sha256: string | null
@@ -66,7 +66,7 @@ const CUSTODY_COLUMNS = `
   dispatch_id, profile_id, state, runtime_root,
   runtime_parent_device, runtime_parent_inode, runtime_root_device, runtime_root_inode,
   config_sha256, auth_method, auth_storage, login_start_accepted,
-  auth_json_absent, gateway_public_receipt, provider_id, provider_terminal_resource_id,
+  auth_json_absent, gateway_public_receipt, launch_receipt, provider_id, provider_terminal_resource_id,
   provider_session_sha256,
   terminal_handle_sha256, terminal_pane_key_sha256, process_incarnation_sha256,
   layout_cleanup_state, layout_cleanup_reason_code, layout_cleanup_detail_sha256,
@@ -131,6 +131,7 @@ function custodyFromSql(row: CustodySqlRow): CodexLabRuntimeCustody {
     configSha256: row.config_sha256 ? requireSha256(row.config_sha256, 'config digest') : null,
     auth: parseAuth(row),
     gatewayReceipt: parseGatewayReceipt(row.gateway_public_receipt, row.dispatch_id),
+    launchReceipt: parseLaunchReceipt(row.launch_receipt, row.dispatch_id),
     provider: parseProvider(row),
     cleanup: Object.freeze({
       layout: cleanupEntry(
@@ -212,22 +213,6 @@ function parseProvider(row: CustodySqlRow): CodexLabRuntimeCustody['provider'] {
       'process incarnation digest'
     )
   })
-}
-
-function parseGatewayReceipt(
-  serialized: string | null,
-  dispatchId: string
-): CodexLabGatewayPublicReceipt | null {
-  if (serialized === null) {
-    return null
-  }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(serialized)
-  } catch {
-    throw new Error('Codex laboratory runtime gateway receipt is malformed.')
-  }
-  return normalizeCodexLabGatewayPublicReceipt(parsed, dispatchId)
 }
 
 function optionalIdentity(

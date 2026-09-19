@@ -1,4 +1,5 @@
 import type { Worktree } from '../../../../../../shared/worktree/types'
+import { getAppEnvironment } from '../../../../../../shared/app-environment'
 import { LAB_READONLY_PROFILE_RUNTIME_CAPABILITY } from '../../../../../../shared/rpc-contract/orchestration-worker-start-params'
 import type { OrcaRuntimeService } from '../../../../orca-runtime'
 import type { OrchestrationDb } from '../../../../orchestration/db'
@@ -32,6 +33,8 @@ export type PreparedLocalLabWorkerStart = Readonly<{
   worktree: Worktree
   observation: VerifiedLabWorktreeObservation
   admission: LabWorkerStartAdmission
+  admittedRuntimeCapabilities: readonly string[]
+  runtimeBuildVersion: string
 }>
 
 export type LocalLabWorkerStartDeps = Readonly<{
@@ -84,11 +87,9 @@ export async function startLocalLabWorker(args: {
       { readiness: readiness.reason }
     )
   }
-  if (
-    !runtime
-      .getStatus()
-      .capabilities?.some((capability) => capability === LAB_READONLY_PROFILE_RUNTIME_CAPABILITY)
-  ) {
+  const admittedStatus = runtime.getStatus()
+  const admittedRuntimeCapabilities = Object.freeze([...(admittedStatus.capabilities ?? [])])
+  if (!admittedRuntimeCapabilities.includes(LAB_READONLY_PROFILE_RUNTIME_CAPABILITY)) {
     refuse(
       'profile_capability_unavailable',
       'This runtime no longer advertises the requested lab execution profile.'
@@ -154,7 +155,9 @@ export async function startLocalLabWorker(args: {
       started: Object.freeze({ ...started, worker }),
       worktree: observed.worktree,
       observation: observed.observation,
-      admission
+      admission,
+      admittedRuntimeCapabilities,
+      runtimeBuildVersion: admittedStatus.appVersion ?? getAppEnvironment().getVersion()
     }),
     Object.freeze({ runtime, db, run, coordinatorHandle: params.from })
   )

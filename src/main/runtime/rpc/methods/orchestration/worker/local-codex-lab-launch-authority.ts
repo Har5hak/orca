@@ -12,7 +12,6 @@ import type {
   PreparedCodexLabRuntimeLayout
 } from '../../../../orchestration/lab-profile/codex-lab-runtime-layout'
 import type { LabGatewayServerReceipt } from '../../../../orchestration/lab-profile/dispatch-gateway-server'
-import type { CodexLabGatewayPublicReceipt } from '../../../../orchestration/db/lab-runtime-custody/lab-runtime-custody-contract'
 import { registerCodexLabRuntimeCleanupAuthority } from '../../../../orchestration/lab-profile/codex-lab-runtime-cleanup-authority'
 import {
   LocalLabLaunchAuthorityPreparationRefusal,
@@ -20,6 +19,9 @@ import {
   type PreparedLocalLabLaunchAuthority
 } from './local-lab-launch-authority-contract'
 import type { PreparedLocalLabWorkerStart } from './local-lab-worker-start'
+import { publicCodexLabGatewayReceipt } from './local-codex-lab-gateway-public-receipt'
+
+export { publicCodexLabGatewayReceipt } from './local-codex-lab-gateway-public-receipt'
 
 export type LocalCodexLabGatewayAuthority = Readonly<{
   endpoint: string
@@ -208,6 +210,7 @@ export async function prepareLocalCodexLabLaunchAuthority(input: {
       labLaunchBinding,
       layoutEvidence,
       gatewayReceipt: publicGatewayReceipt,
+      hostReadinessReceipt: verified.receipt,
       rollbackIfUnclaimed: rollbackHostAuthority,
       releaseCleanupRegistration: unregisterCleanupAuthority
     })
@@ -241,25 +244,6 @@ export async function prepareLocalCodexLabLaunchAuthority(input: {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-export function publicCodexLabGatewayReceipt(
-  receipt: LabGatewayServerReceipt
-): CodexLabGatewayPublicReceipt {
-  return Object.freeze({
-    schema: receipt.schema,
-    policyId: receipt.policyId,
-    dispatchId: receipt.dispatchId,
-    transport: receipt.transport,
-    socketMode: receipt.socketMode,
-    endpointSha256: receipt.endpointSha256,
-    endpointIdentity: receipt.endpointIdentity,
-    endpointIdentitySha256: receipt.endpointIdentitySha256,
-    processIncarnationSha256: receipt.processIncarnationSha256,
-    allowedOperations: receipt.allowedOperations,
-    lifecycleSource: receipt.lifecycleSource,
-    receiptSha256: receipt.receiptSha256
-  })
 }
 
 function assertFactsMatchAdmittedAuthority(input: {

@@ -6,17 +6,16 @@ import {
   expectedCodexLabDispatchRuntimeRoot,
   sha256
 } from '../../../../orchestration/db/lab-runtime-custody/lab-runtime-custody-validation'
-import type {
-  CodexLabRuntimeCustody,
-  CodexLabRuntimeCustodyState
-} from '../../../../orchestration/db/lab-runtime-custody/lab-runtime-custody-contract'
 import type { CodexLabStructuredLaunchBinding } from '../../../../orchestration/lab-profile/codex-lab-structured-launch-binding-registry'
 import { buildLabGatewayServerReceipt } from '../../../../orchestration/lab-profile/dispatch-gateway-server-receipt'
+import { createLabGatewayPolicyReceipt } from '../../../../orchestration/lab-profile/dispatch-gateway-policy'
 import type { StructuredWorkerIdentity } from '../../../../structured-worker-identity'
 import { publicCodexLabGatewayReceipt } from './local-codex-lab-launch-authority'
 import type { PreparedLocalLabWorkerStart } from './local-lab-worker-start'
 import type { LocalLabWorkerContinuationDeps } from './local-lab-worker-start-continuation-contract'
 import type { LabWorkerStartAdmission } from './worker-start-profile-admission'
+import { LAB_READONLY_PROFILE_RUNTIME_CAPABILITY } from '../../../../../../shared/protocol-version'
+import { stubCodexLabGatewayReceipt } from './local-lab-worker-start-continuation-custody.test-support'
 
 export const PROFILE = 'lab-readonly-supervised-v1'
 const WORKTREE_PATH = '/private/tmp/orca-lab/disposable-structured'
@@ -45,6 +44,11 @@ export function harness(binding: CodexLabStructuredLaunchBinding) {
   const runtime = new OrcaRuntimeService()
   runtime.setOrchestrationDb(db)
   vi.spyOn(runtime, 'getRuntimeId').mockReturnValue('runtime_task_757')
+  const runtimeStatus = runtime.getStatus()
+  vi.spyOn(runtime, 'getStatus').mockReturnValue({
+    ...runtimeStatus,
+    capabilities: [...(runtimeStatus.capabilities ?? []), LAB_READONLY_PROFILE_RUNTIME_CAPABILITY]
+  })
   const run = db.createRun({
     objective: 'N=1 lab canary',
     coordinatorHandle: 'term_coord',
@@ -82,7 +86,7 @@ export function harness(binding: CodexLabStructuredLaunchBinding) {
       instanceId: 'disposable-structured',
       identity: {
         key: admission.worktreeIdentity,
-        executionHostId: 'local',
+        executionHostId: 'local' as const,
         instanceId: admission.worktreeInstanceId
       },
       repoId: 'repo',
@@ -103,76 +107,15 @@ export function harness(binding: CodexLabStructuredLaunchBinding) {
       lastActivityAt: 1
     },
     observation: binding.worktree,
-    admission
+    admission,
+    admittedRuntimeCapabilities: Object.freeze([LAB_READONLY_PROFILE_RUNTIME_CAPABILITY]),
+    runtimeBuildVersion: '1.4.205'
   })
   return { db, runtime, run, prepared }
 }
 
-export function stubCustodyTransitions(db: OrchestrationDb, events: string[]): void {
-  vi.spyOn(db, 'planCodexLabRuntimeCustody').mockImplementation((input) => {
-    events.push('custody:planned')
-    return custodyFixture(input.dispatchId, 'planned')
-  })
-  vi.spyOn(db, 'recordCodexLabRuntimeAuthorityAttached').mockImplementation((input) => {
-    events.push('custody:authority')
-    return custodyFixture(input.dispatchId, 'authority_attached')
-  })
-  vi.spyOn(db, 'recordCodexLabRuntimeLayoutPrepared').mockImplementation((input) => {
-    events.push('custody:layout')
-    return custodyFixture(input.dispatchId, 'layout_prepared')
-  })
-  vi.spyOn(db, 'recordCodexLabRuntimeProviderReserved').mockImplementation((input) => {
-    events.push('custody:provider-reserved')
-    return custodyFixture(input.dispatchId, 'provider_reserved')
-  })
-  vi.spyOn(db, 'recordCodexLabRuntimeGatewayStarted').mockImplementation((input) => {
-    events.push('custody:gateway')
-    return custodyFixture(input.dispatchId, 'gateway_started')
-  })
-  vi.spyOn(db, 'recordCodexLabRuntimeExternalAuthInstalled').mockImplementation((input) => {
-    events.push('custody:auth')
-    return custodyFixture(input.dispatchId, 'external_auth_installed')
-  })
-  vi.spyOn(db, 'recordCodexLabRuntimeProviderAttached').mockImplementation((input) => {
-    events.push('custody:provider')
-    return custodyFixture(input.dispatchId, 'provider_attached')
-  })
-  vi.spyOn(db, 'recordCodexLabRuntimeReady').mockImplementation((input) => {
-    events.push('custody:ready')
-    return custodyFixture(input.dispatchId, 'ready')
-  })
-}
-
-function custodyFixture(
-  dispatchId: string,
-  state: CodexLabRuntimeCustodyState
-): CodexLabRuntimeCustody {
-  const cleanupEntry = Object.freeze({
-    state: 'not_created' as const,
-    reasonCode: null,
-    detailSha256: null
-  })
-  return Object.freeze({
-    dispatchId,
-    profileId: PROFILE,
-    state,
-    runtimeRoot: join('/private/tmp/orca-lab/runtime/dispatches', dispatchId),
-    runtimeParentIdentity: null,
-    runtimeRootIdentity: null,
-    configSha256: null,
-    auth: null,
-    gatewayReceipt: null,
-    provider: null,
-    cleanup: Object.freeze({
-      layout: cleanupEntry,
-      auth: cleanupEntry,
-      gateway: cleanupEntry,
-      provider: cleanupEntry
-    }),
-    revision: 0,
-    createdAt: '2026-09-18T00:00:00.000Z',
-    updatedAt: '2026-09-18T00:00:00.000Z'
-  })
+function stubGatewayReceipt(dispatchId: string) {
+  return stubCodexLabGatewayReceipt(dispatchId, IDENTITY)
 }
 
 export function structuredSessionFixture(): Awaited<
@@ -188,6 +131,30 @@ export function preparedAuthority(
   binding: CodexLabStructuredLaunchBinding,
   rollbackIfUnclaimed: () => Promise<boolean> = vi.fn(async () => true)
 ) {
+  const stableHostReadiness = Object.freeze({
+    schema: 'orca.codex-lab-host-readiness.v1' as const,
+    dispatchId: binding.dispatchId,
+    profile: PROFILE,
+    adapter: 'codex-workspace-chatgpt-v1',
+    worktreeIdentity: binding.plan.worktreeIdentity,
+    worktreePath: binding.plan.cwd,
+    codexExecutableSha256: binding.plan.codexExecutableSha256,
+    configSha256: binding.plan.receiptInputs.configSha256,
+    probeExecutablePath: '/usr/bin/ruby',
+    probeExecutableSha256: 'd'.repeat(64),
+    probeSourceSha256: 'e'.repeat(64),
+    controlsSha256: 'f'.repeat(64),
+    probeReportSha256: '0'.repeat(64),
+    exactSandboxSpecSha256: '1'.repeat(64),
+    controlTrust: 'trusted-local-host' as const,
+    probeIdentityTrust: 'host-re-attested' as const,
+    dispatchChannel: 'exact-unix-socket-permitted' as const,
+    arbitraryNetwork: 'denied' as const,
+    forbiddenWrites: 'denied' as const,
+    worktreeRead: 'verified' as const,
+    processTreeTermination: 'verified' as const,
+    appServerAttestation: 'required-at-opened-thread-gate' as const
+  })
   return {
     labLaunchBinding: binding,
     layoutEvidence: {
@@ -197,27 +164,11 @@ export function preparedAuthority(
       runtimeRootIdentity: { device: '1', inode: '3' },
       configSha256: binding.plan.receiptInputs.configSha256
     },
-    gatewayReceipt: {
-      schema: 'orca.lab-dispatch-gateway.v1' as const,
-      policyId: 'lgp1_test',
-      dispatchId: binding.dispatchId,
-      transport: 'unix' as const,
-      socketMode: '0600' as const,
-      endpointSha256: binding.plan.receiptInputs.gatewaySocketPathSha256,
-      endpointIdentity: {
-        device: '1',
-        inode: '4',
-        uid: '501',
-        mode: '0600' as const,
-        type: 'socket' as const
-      },
-      endpointIdentitySha256: 'a'.repeat(64),
-      processIncarnationSha256: 'b'.repeat(64),
-      allowedOperations: ['worker.done', 'worker.ask', 'worker.check'] as const,
-      lifecycleSource: 'injected-per-request' as const,
-      dcapCustody: 'server-only' as const,
-      receiptSha256: 'c'.repeat(64)
-    },
+    gatewayReceipt: stubGatewayReceipt(binding.dispatchId),
+    hostReadinessReceipt: Object.freeze({
+      ...stableHostReadiness,
+      receiptSha256: sha256(JSON.stringify(stableHostReadiness))
+    }),
     rollbackIfUnclaimed,
     releaseCleanupRegistration: vi.fn(() => true)
   }
@@ -227,7 +178,10 @@ export function returningPreparedAuthority(
   binding: CodexLabStructuredLaunchBinding,
   rollbackIfUnclaimed: () => Promise<boolean> = vi.fn(async () => true)
 ): LocalLabWorkerContinuationDeps['prepareLaunchAuthority'] {
-  return async ({ lifecycle }) => {
+  return async ({ lifecycle, prepared }) => {
+    if (binding.dispatchId !== prepared.started.dispatch.id) {
+      throw new Error('Continuation test binding does not match the prepared dispatch.')
+    }
     const authority = preparedAuthority(binding, rollbackIfUnclaimed)
     lifecycle.recordLayoutPrepared(authority.layoutEvidence)
     lifecycle.recordProviderReserved()
@@ -243,6 +197,9 @@ export function realPhaseAuthority(
   releaseCleanupRegistration: () => boolean = vi.fn(() => true)
 ) {
   const dispatchId = prepared.started.dispatch.id
+  if (binding.dispatchId !== dispatchId) {
+    throw new Error('Continuation test binding does not match the prepared dispatch.')
+  }
   const socketEvidence = Object.freeze({
     device: '1',
     inode: '4',
@@ -257,7 +214,7 @@ export function realPhaseAuthority(
       profileId: PROFILE,
       runtimeParentIdentity: { device: '1', inode: '2' },
       runtimeRootIdentity: { device: '1', inode: '3' },
-      configSha256: 'd'.repeat(64)
+      configSha256: binding.plan.receiptInputs.configSha256
     },
     gatewayReceipt: publicCodexLabGatewayReceipt(
       buildLabGatewayServerReceipt(
@@ -268,7 +225,22 @@ export function realPhaseAuthority(
         {
           evidence: socketEvidence,
           identitySha256: sha256(JSON.stringify(socketEvidence))
-        }
+        },
+        createLabGatewayPolicyReceipt({
+          schemaVersion: 1,
+          policyId: 'lgp1_continuation-test',
+          credentialSha256: 'a'.repeat(64),
+          binding: {
+            runId: prepared.started.dispatch.run_id,
+            taskId: prepared.started.dispatch.task_id,
+            dispatchId,
+            terminalHandle: IDENTITY.handle,
+            terminalPaneKey: IDENTITY.paneKey
+          },
+          revoked: false,
+          workerDoneAccepted: false,
+          terminal: false
+        })
       )
     ),
     releaseCleanupRegistration

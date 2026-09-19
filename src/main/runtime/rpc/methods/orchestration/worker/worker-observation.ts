@@ -209,6 +209,10 @@ export function exposeWorker(worker: WorkerDispatchRow) {
   }
 }
 
+export function exposeCodexLabRuntimeCustody(db: OrchestrationDb, dispatchId: string) {
+  return db.getCodexLabRuntimeCustody(dispatchId) ?? null
+}
+
 /**
  * The same fleet verdict `worker-list` publishes, for one Dispatch.
  *

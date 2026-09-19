@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
 import { testCodexLabStructuredLaunchBinding } from '../../../../orchestration/lab-profile/codex-lab-structured-launch-binding-test-support'
 import { buildLabGatewayServerReceipt } from '../../../../orchestration/lab-profile/dispatch-gateway-server-receipt'
+import { createLabGatewayPolicyReceipt } from '../../../../orchestration/lab-profile/dispatch-gateway-policy'
 import {
   expectedCodexLabDispatchRuntimeRoot,
   sha256
@@ -20,9 +21,9 @@ import {
   PROFILE,
   realPhaseAuthority as createRealPhaseAuthority,
   returningPreparedAuthority,
-  structuredSessionFixture,
-  stubCustodyTransitions
+  structuredSessionFixture
 } from './local-lab-worker-start-continuation.test-support'
+import { stubCodexLabCustodyTransitions } from './local-lab-worker-start-continuation-custody.test-support'
 
 function harness() {
   return createHarness(testCodexLabStructuredLaunchBinding())
@@ -35,10 +36,22 @@ function realPhaseAuthority(
 ) {
   return createRealPhaseAuthority(
     prepared,
-    testCodexLabStructuredLaunchBinding(),
+    testCodexLabStructuredLaunchBinding({ dispatchId: prepared.started.dispatch.id }),
     rollbackIfUnclaimed,
     releaseCleanupRegistration
   )
+}
+
+type StubCustodyDb = Parameters<typeof stubCodexLabCustodyTransitions>[0]['db']
+const CUSTODY_CONTEXT = Object.freeze({
+  profile: PROFILE,
+  identity: IDENTITY,
+  configSha256ForDispatch: (dispatchId: string) =>
+    testCodexLabStructuredLaunchBinding({ dispatchId }).plan.receiptInputs.configSha256
+})
+
+function stubCustodyTransitions(db: StubCustodyDb, events: string[]): void {
+  stubCodexLabCustodyTransitions({ db, events, context: CUSTODY_CONTEXT })
 }
 
 afterEach(() => {
@@ -61,16 +74,25 @@ function effectKindIs(effect: unknown, kind: string): boolean {
 }
 
 describe('local laboratory worker continuation', () => {
-  it('attaches authority before host preparation and sends only the restricted preamble', async () => {
+  it('persists the admitted capability receipt before the restricted preamble', async () => {
     const { db, runtime, run, prepared } = harness()
     const events: string[] = []
     stubCustodyTransitions(db, events)
-    const binding = testCodexLabStructuredLaunchBinding()
+    const postLeaseStatus = runtime.getStatus()
+    vi.mocked(runtime.getStatus).mockReturnValue({
+      ...postLeaseStatus,
+      capabilities: postLeaseStatus.capabilities?.filter(
+        (capability) => capability !== 'orchestration.lab-readonly-profile.v1'
+      )
+    })
+    vi.mocked(runtime.getStatus).mockClear()
     const deps: LocalLabWorkerContinuationDeps = {
       prepareLaunchAuthority: vi.fn(async ({ dispatchCapability, lifecycle }) => {
         expect(dispatchCapability).toMatch(/^dcap_/)
         events.push('host:prepared')
-        const authority = preparedAuthority(binding)
+        const authority = preparedAuthority(
+          testCodexLabStructuredLaunchBinding({ dispatchId: prepared.started.dispatch.id })
+        )
         lifecycle.recordLayoutPrepared(authority.layoutEvidence)
         lifecycle.recordProviderReserved()
         lifecycle.recordGatewayStarted(authority.gatewayReceipt)
@@ -98,16 +120,25 @@ describe('local laboratory worker continuation', () => {
       tearDownFailedStart: vi.fn(async () => undefined)
     }
 
-    await expect(
-      continuePreparedLocalLabWorkerStart({
-        prepared,
-        runtime,
-        db,
-        run,
-        coordinatorHandle: 'term_coord',
-        deps
-      })
-    ).resolves.toMatchObject({ state: 'ready', turnStart: 'observed' })
+    const result = await continuePreparedLocalLabWorkerStart({
+      prepared,
+      runtime,
+      db,
+      run,
+      coordinatorHandle: 'term_coord',
+      deps
+    })
+
+    expect(result).toMatchObject({
+      state: 'ready',
+      turnStart: 'observed',
+      launchReceipt: {
+        capabilities: {
+          supported: expect.arrayContaining(['orchestration.lab-readonly-profile.v1'])
+        }
+      }
+    })
+    expect(runtime.getStatus).not.toHaveBeenCalled()
 
     expect(events).toEqual([
       'custody:planned',
@@ -120,6 +151,7 @@ describe('local laboratory worker continuation', () => {
       'session:attached',
       'custody:auth',
       'custody:provider',
+      'custody:receipt',
       'preamble',
       'custody:ready'
     ])
@@ -138,7 +170,7 @@ describe('local laboratory worker continuation', () => {
     })
     const deps: LocalLabWorkerContinuationDeps = {
       prepareLaunchAuthority: returningPreparedAuthority(
-        testCodexLabStructuredLaunchBinding(),
+        testCodexLabStructuredLaunchBinding({ dispatchId: prepared.started.dispatch.id }),
         rollbackIfUnclaimed
       ),
       createStructuredSession: async (args) => {
@@ -186,7 +218,7 @@ describe('local laboratory worker continuation', () => {
     const rollbackIfUnclaimed = vi.fn(async () => false)
     const deps: LocalLabWorkerContinuationDeps = {
       prepareLaunchAuthority: returningPreparedAuthority(
-        testCodexLabStructuredLaunchBinding(),
+        testCodexLabStructuredLaunchBinding({ dispatchId: prepared.started.dispatch.id }),
         rollbackIfUnclaimed
       ),
       createStructuredSession: async (args) => {
@@ -433,7 +465,9 @@ describe('local laboratory worker continuation', () => {
     stubCustodyTransitions(db, events)
     const markReady = vi.spyOn(db, 'markWorkerDispatchReady')
     const deps: LocalLabWorkerContinuationDeps = {
-      prepareLaunchAuthority: returningPreparedAuthority(testCodexLabStructuredLaunchBinding()),
+      prepareLaunchAuthority: returningPreparedAuthority(
+        testCodexLabStructuredLaunchBinding({ dispatchId: prepared.started.dispatch.id })
+      ),
       createStructuredSession: async (args) => {
         if (!args.beforeAttach) {
           throw new Error('laboratory beforeAttach callback missing')
@@ -486,7 +520,9 @@ describe('local laboratory worker continuation', () => {
     const { db, runtime, run, prepared } = harness()
     stubCustodyTransitions(db, [])
     const deps: LocalLabWorkerContinuationDeps = {
-      prepareLaunchAuthority: returningPreparedAuthority(testCodexLabStructuredLaunchBinding()),
+      prepareLaunchAuthority: returningPreparedAuthority(
+        testCodexLabStructuredLaunchBinding({ dispatchId: prepared.started.dispatch.id })
+      ),
       createStructuredSession: async (args) => {
         if (!args.beforeAttach) {
           throw new Error('laboratory beforeAttach callback missing')
@@ -524,7 +560,7 @@ describe('local laboratory worker continuation', () => {
     stubCustodyTransitions(db, [])
     const deps: LocalLabWorkerContinuationDeps = {
       prepareLaunchAuthority: returningPreparedAuthority(
-        testCodexLabStructuredLaunchBinding(),
+        testCodexLabStructuredLaunchBinding({ dispatchId: prepared.started.dispatch.id }),
         async () => {
           throw new Error('rollback also failed')
         }
@@ -644,7 +680,22 @@ describe('local laboratory worker continuation', () => {
                   {
                     evidence: socketEvidence,
                     identitySha256: sha256(JSON.stringify(socketEvidence))
-                  }
+                  },
+                  createLabGatewayPolicyReceipt({
+                    schemaVersion: 1,
+                    policyId: 'lgp1_continuation-test',
+                    credentialSha256: 'a'.repeat(64),
+                    binding: {
+                      runId: prepared.started.dispatch.run_id,
+                      taskId: prepared.started.dispatch.task_id,
+                      dispatchId,
+                      terminalHandle: IDENTITY.handle,
+                      terminalPaneKey: IDENTITY.paneKey
+                    },
+                    revoked: false,
+                    workerDoneAccepted: false,
+                    terminal: false
+                  })
                 )
               )
             )
@@ -707,7 +758,7 @@ describe('local laboratory worker continuation', () => {
     stubCustodyTransitions(db, [])
     const deps: LocalLabWorkerContinuationDeps = {
       prepareLaunchAuthority: returningPreparedAuthority(
-        testCodexLabStructuredLaunchBinding(),
+        testCodexLabStructuredLaunchBinding({ dispatchId: prepared.started.dispatch.id }),
         async () => false
       ),
       createStructuredSession: async (args) => {
@@ -753,7 +804,7 @@ describe('local laboratory worker continuation', () => {
     stubCustodyTransitions(db, [])
     const deps: LocalLabWorkerContinuationDeps = {
       prepareLaunchAuthority: returningPreparedAuthority(
-        testCodexLabStructuredLaunchBinding(),
+        testCodexLabStructuredLaunchBinding({ dispatchId: prepared.started.dispatch.id }),
         async () => false
       ),
       createStructuredSession: async (args) => {

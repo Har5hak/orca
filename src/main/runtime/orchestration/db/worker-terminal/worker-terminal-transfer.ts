@@ -31,6 +31,16 @@ export function findTransferableWorkerTerminalResource(
       candidate.process_incarnation === params.processIncarnation &&
       candidate.host_scope === params.hostScope
   )
+  const unresolvedLabCustody = this.db.prepare(
+    `SELECT 1 FROM codex_lab_runtime_custody
+      WHERE dispatch_id = ? AND state != 'released'`
+  )
+  if (exact.some((candidate) => unresolvedLabCustody.get(candidate.owner_dispatch_id))) {
+    throw new OrchestrationError(
+      'terminal_release_in_progress',
+      `Terminal ${params.terminalHandle} has unreleased Codex laboratory custody; finish cleanup or use another terminal.`
+    )
+  }
   if (
     exact.some((candidate) =>
       ['requested', 'releasing', 'unknown'].includes(candidate.release_state)

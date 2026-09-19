@@ -3,6 +3,7 @@ import { OrchestrationError } from '../../../../orchestration/orchestration-erro
 import { defineMethod } from '../../../core'
 import {
   exposeDispatchContext,
+  exposeCodexLabRuntimeCustody,
   exposeObservation,
   exposeWorker,
   inspectWorkerTerminal,
@@ -72,7 +73,8 @@ export const ORCHESTRATION_WORKER_CONTROL_METHODS = [
         projection: projectFleetWorker(runtime, db, params.dispatch),
         terminal: observation.exact ? observation.terminal : null,
         observation: exposeObservation(observation),
-        terminalResource: resource ? exposeWorkerTerminalResource(resource) : null
+        terminalResource: resource ? exposeWorkerTerminalResource(resource) : null,
+        labRuntime: exposeCodexLabRuntimeCustody(db, params.dispatch)
       }
     }
   }),

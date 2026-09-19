@@ -2,7 +2,10 @@ import { createHash } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CODEX_LAB_RUNTIME_ROOT } from '../../../../orchestration/lab-profile/codex-lab-launch-contract'
 import { testCodexLabStructuredLaunchBinding } from '../../../../orchestration/lab-profile/codex-lab-structured-launch-binding-test-support'
-import type { LabGatewayPolicy } from '../../../../orchestration/lab-profile/dispatch-gateway-policy'
+import {
+  createLabGatewayPolicyReceipt,
+  type LabGatewayPolicy
+} from '../../../../orchestration/lab-profile/dispatch-gateway-policy'
 import { buildLabGatewayServerReceipt } from '../../../../orchestration/lab-profile/dispatch-gateway-server-receipt'
 import type { StructuredWorkerIdentity } from '../../../../structured-worker-identity'
 import {
@@ -65,7 +68,8 @@ describe('local Codex laboratory gateway authority', () => {
       {
         evidence,
         identitySha256: createHash('sha256').update(JSON.stringify(evidence)).digest('hex')
-      }
+      },
+      createLabGatewayPolicyReceipt(policy)
     )
     const start = vi.fn(async () => receipt)
     const stop = vi.fn(async () => undefined)

@@ -3,6 +3,7 @@ import type {
   LAB_READONLY_SUPERVISED_PROFILE_ID
 } from '../../lab-profile/codex-lab-launch-contract'
 import type { LabGatewayOperation } from '../../lab-profile/dispatch-gateway-policy-contract'
+import type { CodexLabLaunchReceiptV1 } from '../../lab-profile/codex-lab-launch-receipt'
 
 export const CODEX_LAB_RUNTIME_CUSTODY_STATES = [
   'planned',
@@ -58,6 +59,23 @@ export type CodexLabGatewayPublicReceipt = Readonly<{
   }>
   endpointIdentitySha256: string
   processIncarnationSha256: string
+  policyReceipt: Readonly<{
+    schema: 'orca.lab-gateway-policy-public.v1'
+    policyId: string
+    binding: Readonly<{
+      runIdSha256: string
+      taskIdSha256: string
+      dispatchIdSha256: string
+      terminalHandleSha256: string
+      terminalPaneKeySha256: string
+    }>
+    allowedOperations: readonly LabGatewayOperation[]
+    state: 'active'
+    workerDoneAccepted: false
+    unwiredBoundaries: readonly string[]
+    sourcePolicyDigest: string
+    receiptSha256: string
+  }>
   allowedOperations: readonly LabGatewayOperation[]
   lifecycleSource: 'injected-per-request'
   receiptSha256: string
@@ -95,6 +113,7 @@ export type CodexLabRuntimeCustody = Readonly<{
     authJsonAbsent: true
   }> | null
   gatewayReceipt: CodexLabGatewayPublicReceipt | null
+  launchReceipt: CodexLabLaunchReceiptV1 | null
   provider: CodexLabRuntimeProviderCustody | null
   cleanup: Readonly<Record<CodexLabRuntimeCleanupResource, CodexLabRuntimeCleanupEntry>>
   revision: number
@@ -131,6 +150,11 @@ export type CodexLabRuntimeExternalAuthEvidence = CodexLabRuntimeCustodyIdentity
 export type CodexLabRuntimeGatewayEvidence = CodexLabRuntimeCustodyIdentity &
   Readonly<{
     receipt: CodexLabGatewayPublicReceipt
+  }>
+
+export type CodexLabRuntimeLaunchReceiptEvidence = CodexLabRuntimeCustodyIdentity &
+  Readonly<{
+    receipt: CodexLabLaunchReceiptV1
   }>
 
 export type CodexLabRuntimeProviderEvidence = CodexLabRuntimeCustodyIdentity &

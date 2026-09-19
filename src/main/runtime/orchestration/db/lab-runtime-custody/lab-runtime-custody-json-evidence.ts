@@ -1,5 +1,8 @@
 import { join } from 'node:path'
-import { LAB_GATEWAY_ALLOWED_OPERATIONS } from '../../lab-profile/dispatch-gateway-policy-contract'
+import {
+  LAB_GATEWAY_ALLOWED_OPERATIONS,
+  LAB_GATEWAY_UNWIRED_BOUNDARIES
+} from '../../lab-profile/dispatch-gateway-policy-contract'
 import type {
   CodexLabGatewayPublicReceipt,
   CodexLabRuntimeGatewayEvidence
@@ -13,16 +16,15 @@ import {
   requireStringValue,
   sha256
 } from './lab-runtime-custody-validation'
+import {
+  rejectSuspiciousJsonEvidence,
+  requireExactDataObject,
+  requireSafeCustodyLabel,
+  sameStrings,
+  snapshotExactArray
+} from './lab-runtime-custody-json-validation'
 
-const SAFE_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}$/u
-const SUSPICIOUS_JSON_KEY =
-  /(?:authorization|bearer|credential|dcap|password|secret|token|api.?key)/iu
-const SUSPICIOUS_JSON_VALUE =
-  /(?:\bbearer\s+|\blgw1_|\bdcap_|\bsk-[A-Za-z0-9]|access[_-]?token|refresh[_-]?token|private[_-]?key)/iu
-
-export function rejectSuspiciousJsonEvidence(value: unknown): void {
-  visitJsonEvidence(value, new Set<object>())
-}
+export { rejectSuspiciousJsonEvidence } from './lab-runtime-custody-json-validation'
 
 export function normalizeCodexLabGatewayEvidence(input: unknown): CodexLabRuntimeGatewayEvidence {
   const object = requireExactDataObject(input, 'gateway evidence', [
@@ -54,6 +56,7 @@ export function normalizeCodexLabGatewayPublicReceipt(
     'endpointIdentity',
     'endpointIdentitySha256',
     'processIncarnationSha256',
+    'policyReceipt',
     'allowedOperations',
     'lifecycleSource',
     'receiptSha256'
@@ -77,6 +80,11 @@ export function normalizeCodexLabGatewayPublicReceipt(
   const allowedOperations = snapshotExactArray(
     receipt.allowedOperations,
     'gateway allowed operations'
+  )
+  const policyReceipt = normalizeGatewayPolicyReceipt(
+    receipt.policyReceipt,
+    dispatchId,
+    receipt.policyId
   )
   if (!sameStrings(allowedOperations, LAB_GATEWAY_ALLOWED_OPERATIONS)) {
     throw new Error('Codex laboratory runtime gateway operations are invalid.')
@@ -106,7 +114,8 @@ export function normalizeCodexLabGatewayPublicReceipt(
       receipt.processIncarnationSha256,
       'gateway process incarnation digest'
     ),
-    allowedOperations: Object.freeze([...LAB_GATEWAY_ALLOWED_OPERATIONS]),
+    policyReceipt,
+    allowedOperations: LAB_GATEWAY_ALLOWED_OPERATIONS,
     lifecycleSource: 'injected-per-request' as const,
     receiptSha256: requireSha256Value(receipt.receiptSha256, 'gateway receipt digest')
   })
@@ -127,6 +136,7 @@ function requireGatewayReceiptDigests(receipt: CodexLabGatewayPublicReceipt): vo
     endpointIdentity: receipt.endpointIdentity,
     endpointIdentitySha256: receipt.endpointIdentitySha256,
     processIncarnationSha256: receipt.processIncarnationSha256,
+    policyReceipt: receipt.policyReceipt,
     allowedOperations: receipt.allowedOperations,
     lifecycleSource: receipt.lifecycleSource,
     dcapCustody: 'server-only'
@@ -140,112 +150,83 @@ function requireGatewayReceiptDigests(receipt: CodexLabGatewayPublicReceipt): vo
   }
 }
 
-function visitJsonEvidence(value: unknown, seen: Set<object>): void {
-  if (typeof value === 'string') {
-    if (SUSPICIOUS_JSON_VALUE.test(value)) {
-      throw new Error('Codex laboratory runtime custody rejected secret-like JSON evidence.')
-    }
-    return
-  }
-  if (value === null || typeof value === 'number' || typeof value === 'boolean') {
-    return
-  }
-  if (typeof value !== 'object' || seen.has(value)) {
-    throw new Error('Codex laboratory runtime custody JSON evidence is not serializable.')
-  }
-  seen.add(value)
-  if (Array.isArray(value)) {
-    visitJsonArray(value, seen)
-    seen.delete(value)
-    return
-  }
-  for (const key of Reflect.ownKeys(value)) {
-    if (typeof key !== 'string' || SUSPICIOUS_JSON_KEY.test(key)) {
-      throw new Error('Codex laboratory runtime custody rejected a suspicious JSON evidence key.')
-    }
-    visitJsonEvidence(requireDataField(value, key, 'JSON evidence'), seen)
-  }
-  seen.delete(value)
-}
-
-function requireExactDataObject(
+function normalizeGatewayPolicyReceipt(
   value: unknown,
-  field: string,
-  expectedKeys: readonly string[]
-): Readonly<Record<string, unknown>> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`Codex laboratory runtime custody ${field} must be an object.`)
-  }
-  const keys = Reflect.ownKeys(value)
+  dispatchId: string,
+  gatewayPolicyId: unknown
+): CodexLabGatewayPublicReceipt['policyReceipt'] {
+  const receipt = requireExactDataObject(value, 'gateway policy receipt', [
+    'schema',
+    'policyId',
+    'binding',
+    'allowedOperations',
+    'state',
+    'workerDoneAccepted',
+    'unwiredBoundaries',
+    'sourcePolicyDigest',
+    'receiptSha256'
+  ])
+  const binding = requireExactDataObject(receipt.binding, 'gateway lifecycle binding', [
+    'runIdSha256',
+    'taskIdSha256',
+    'dispatchIdSha256',
+    'terminalHandleSha256',
+    'terminalPaneKeySha256'
+  ])
+  const normalizedBinding = Object.freeze({
+    runIdSha256: requireSha256Value(binding.runIdSha256, 'Run id digest'),
+    taskIdSha256: requireSha256Value(binding.taskIdSha256, 'Task id digest'),
+    dispatchIdSha256: requireSha256Value(binding.dispatchIdSha256, 'Dispatch id digest'),
+    terminalHandleSha256: requireSha256Value(
+      binding.terminalHandleSha256,
+      'terminal handle digest'
+    ),
+    terminalPaneKeySha256: requireSha256Value(
+      binding.terminalPaneKeySha256,
+      'terminal pane key digest'
+    )
+  })
+  const allowedOperations = snapshotExactArray(
+    receipt.allowedOperations,
+    'gateway policy operations'
+  )
+  const unwiredBoundaries = snapshotExactArray(
+    receipt.unwiredBoundaries,
+    'gateway policy unwired boundaries'
+  )
+  const policyId = requireSafeCustodyLabel(
+    requireStringValue(receipt.policyId, 'gateway policy id'),
+    'gateway policy id'
+  )
+  const sourcePolicyDigest = requireSha256Value(
+    receipt.sourcePolicyDigest,
+    'gateway source policy digest'
+  )
+  const receiptSha256 = requireSha256Value(
+    receipt.receiptSha256,
+    'gateway public policy receipt digest'
+  )
+  const stable = Object.freeze({
+    schema: 'orca.lab-gateway-policy-public.v1' as const,
+    policyId,
+    binding: normalizedBinding,
+    allowedOperations: LAB_GATEWAY_ALLOWED_OPERATIONS,
+    state: 'active' as const,
+    workerDoneAccepted: false,
+    unwiredBoundaries: LAB_GATEWAY_UNWIRED_BOUNDARIES,
+    sourcePolicyDigest
+  })
   if (
-    keys.length !== expectedKeys.length ||
-    keys.some((key) => typeof key !== 'string' || !expectedKeys.includes(key))
+    receipt.schema !== 'orca.lab-gateway-policy-public.v1' ||
+    policyId !== gatewayPolicyId ||
+    normalizedBinding.dispatchIdSha256 !== sha256(dispatchId) ||
+    !sameStrings(allowedOperations, LAB_GATEWAY_ALLOWED_OPERATIONS) ||
+    receipt.state !== 'active' ||
+    receipt.workerDoneAccepted !== false ||
+    !sameStrings(unwiredBoundaries, LAB_GATEWAY_UNWIRED_BOUNDARIES) ||
+    receiptSha256 !== sha256(JSON.stringify(stable))
   ) {
-    throw new Error(`Codex laboratory runtime custody ${field} fields are invalid.`)
+    throw new Error('Codex laboratory runtime gateway policy receipt is invalid.')
   }
-  const snapshot: Record<string, unknown> = {}
-  for (const key of expectedKeys) {
-    snapshot[key] = requireDataField(value, key, field)
-  }
-  return Object.freeze(snapshot)
-}
-
-function snapshotExactArray(value: unknown, field: string): readonly unknown[] {
-  if (!Array.isArray(value)) {
-    throw new Error(`Codex laboratory runtime custody ${field} must be an array.`)
-  }
-  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length')
-  if (
-    !lengthDescriptor ||
-    !('value' in lengthDescriptor) ||
-    typeof lengthDescriptor.value !== 'number' ||
-    !Number.isSafeInteger(lengthDescriptor.value)
-  ) {
-    throw new Error(`Codex laboratory runtime custody ${field} is invalid.`)
-  }
-  const expectedKeys = Array.from({ length: lengthDescriptor.value }, (_, index) => String(index))
-  const keys = Reflect.ownKeys(value)
-  if (
-    keys.length !== expectedKeys.length + 1 ||
-    keys.some((key) => typeof key !== 'string') ||
-    !expectedKeys.every((key) => keys.includes(key)) ||
-    !keys.includes('length')
-  ) {
-    throw new Error(`Codex laboratory runtime custody ${field} is invalid.`)
-  }
-  return Object.freeze(expectedKeys.map((key) => requireDataField(value, key, field)))
-}
-
-function visitJsonArray(value: readonly unknown[], seen: Set<object>): void {
-  const keys = Reflect.ownKeys(value)
-  const expectedKeys = [...value.keys()].map(String)
-  if (
-    keys.length !== expectedKeys.length + 1 ||
-    keys.at(-1) !== 'length' ||
-    keys.slice(0, -1).some((key, index) => key !== expectedKeys[index])
-  ) {
-    throw new Error('Codex laboratory runtime custody JSON evidence array is invalid.')
-  }
-  for (const key of expectedKeys) {
-    visitJsonEvidence(requireDataField(value, key, 'JSON array'), seen)
-  }
-}
-
-function requireDataField(value: object, key: string, field: string): unknown {
-  const descriptor = Object.getOwnPropertyDescriptor(value, key)
-  if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) {
-    throw new Error(`Codex laboratory runtime custody ${field} must use data fields.`)
-  }
-  return descriptor.value
-}
-
-function sameStrings(left: readonly unknown[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index])
-}
-
-function requireSafeCustodyLabel(value: string, field: string): string {
-  if (!SAFE_LABEL_PATTERN.test(value) || SUSPICIOUS_JSON_VALUE.test(value)) {
-    throw new Error(`Codex laboratory runtime custody ${field} is invalid.`)
-  }
-  return value
+  return Object.freeze({ ...stable, receiptSha256 })
 }

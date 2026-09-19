@@ -8,6 +8,7 @@ import {
   type CodexLabDynamicToolGatewayBinding
 } from '../../../codex/codex-lab-dynamic-tool-host'
 import type { LabGatewayServerReceipt } from './dispatch-gateway-server'
+import { createLabGatewayPolicyReceipt } from './dispatch-gateway-policy'
 import {
   CODEX_WORKSPACE_CHATGPT_ADAPTER_ID,
   LAB_READONLY_SUPERVISED_PROFILE_ID,
@@ -55,6 +56,22 @@ export function testCodexLabDynamicToolGatewayBinding(
     mode: '0600' as const,
     type: 'socket' as const
   })
+  const policyReceipt = createLabGatewayPolicyReceipt({
+    schemaVersion: 1,
+    policyId: 'policy-757-structured',
+    credentialSha256: sha256(overrides.credential ?? TEST_LAB_GATEWAY_CREDENTIAL),
+    binding: {
+      runId: 'run-757-structured',
+      taskId: 'task-757-structured',
+      dispatchId,
+      terminalHandle: 'structworker_33333333-3333-4333-8333-333333333333',
+      terminalPaneKey:
+        'agent-session-11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222'
+    },
+    revoked: false,
+    workerDoneAccepted: false,
+    terminal: false
+  })
   const stableReceipt = Object.freeze({
     schema: 'orca.lab-dispatch-gateway.v1' as const,
     policyId: 'policy-757-structured',
@@ -65,6 +82,7 @@ export function testCodexLabDynamicToolGatewayBinding(
     endpointIdentity,
     endpointIdentitySha256: sha256(JSON.stringify(endpointIdentity)),
     processIncarnationSha256: '1'.repeat(64),
+    policyReceipt,
     allowedOperations: Object.freeze([
       'worker.status',
       'worker.check',
@@ -108,13 +126,17 @@ export function testCodexLabDynamicToolHost(
   return new CodexLabDynamicToolHost(testCodexLabDynamicToolGatewayBinding(overrides), callGateway)
 }
 
-export function testCodexLabStructuredLaunchBinding(): CodexLabStructuredLaunchBinding {
+export function testCodexLabStructuredLaunchBinding(
+  overrides: Readonly<{ dispatchId?: string }> = {}
+): CodexLabStructuredLaunchBinding {
+  const dispatchId = overrides.dispatchId ?? TEST_LAB_DISPATCH_ID
+  const gatewayEndpoint = `/private/tmp/orca-lab/runtime/dispatches/${dispatchId}/gateway.sock`
   const facts: CodexLabLaunchFacts = {
     platform: 'darwin',
     profile: LAB_READONLY_SUPERVISED_PROFILE_ID,
     adapter: CODEX_WORKSPACE_CHATGPT_ADAPTER_ID,
     dispatch: {
-      id: TEST_LAB_DISPATCH_ID,
+      id: dispatchId,
       runtimeRoot: '/private/tmp/orca-lab/runtime',
       codexHomeState: 'absent',
       fakeHomeState: 'absent'
@@ -128,7 +150,7 @@ export function testCodexLabStructuredLaunchBinding(): CodexLabStructuredLaunchB
       disposable: true
     },
     gateway: {
-      socketPath: TEST_LAB_GATEWAY_ENDPOINT,
+      socketPath: gatewayEndpoint,
       credential: TEST_LAB_GATEWAY_CREDENTIAL
     },
     binary: {
@@ -199,10 +221,13 @@ export function testCodexLabStructuredLaunchBinding(): CodexLabStructuredLaunchB
     }
   })
   return Object.freeze({
-    dispatchId: TEST_LAB_DISPATCH_ID,
+    dispatchId,
     plan,
     worktree,
-    labDynamicToolHostFactory: testCodexLabDynamicToolHostFactory()
+    labDynamicToolHostFactory: testCodexLabDynamicToolHostFactory({
+      dispatchId,
+      endpoint: gatewayEndpoint
+    })
   })
 }
 

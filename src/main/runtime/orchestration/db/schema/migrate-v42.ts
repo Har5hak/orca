@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS codex_lab_runtime_custody (
   login_start_accepted              INTEGER CHECK(login_start_accepted IN (0, 1)),
   auth_json_absent                  INTEGER CHECK(auth_json_absent IN (0, 1)),
   gateway_public_receipt            TEXT,
+  launch_receipt                    TEXT,
   provider_id                       TEXT,
   provider_terminal_resource_id     TEXT,
   provider_session_sha256           TEXT,

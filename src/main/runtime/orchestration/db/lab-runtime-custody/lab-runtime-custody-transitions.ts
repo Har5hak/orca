@@ -11,7 +11,7 @@ import type {
   CodexLabRuntimeProviderEvidence,
   PlanCodexLabRuntimeCustodyInput
 } from './lab-runtime-custody-contract'
-import { requireCustody } from './lab-runtime-custody-row'
+import { requireCustody, requireCustodyIdentity } from './lab-runtime-custody-row'
 import {
   advanceCustody,
   requireActiveAggregateCustody,
@@ -226,6 +226,9 @@ export function recordCodexLabRuntimeReady(
   identity: CodexLabRuntimeCustodyIdentity
 ): CodexLabRuntimeCustody {
   const evidence = normalizeCodexLabCustodyIdentity(identity)
+  if (!requireCustodyIdentity(this, evidence).launchReceipt) {
+    throw new Error('Codex laboratory runtime cannot become ready without its launch receipt.')
+  }
   return advanceCustody(this, { identity: evidence, from: 'provider_attached', to: 'ready' })
 }
 

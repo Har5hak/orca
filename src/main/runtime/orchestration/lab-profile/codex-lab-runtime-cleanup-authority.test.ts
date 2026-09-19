@@ -99,6 +99,7 @@ function database(
     configSha256: 'a'.repeat(64),
     auth: null,
     gatewayReceipt: null,
+    launchReceipt: null,
     provider: null,
     cleanup,
     revision: 1,

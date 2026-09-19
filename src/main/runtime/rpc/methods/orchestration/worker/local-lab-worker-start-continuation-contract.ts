@@ -7,6 +7,7 @@ import type {
   PreparedLocalLabLaunchAuthority
 } from './local-lab-launch-authority-contract'
 import type { createStructuredWorkerSessionForWorktree } from './worker-topology'
+import type { buildCodexLabLaunchReceipt } from '../../../../orchestration/lab-profile/codex-lab-launch-receipt'
 
 export type LocalLabWorkerContinuationDeps = Readonly<{
   prepareLaunchAuthority: (input: {
@@ -16,6 +17,7 @@ export type LocalLabWorkerContinuationDeps = Readonly<{
     lifecycle: LocalLabLaunchLifecycleRecorder
   }) => Promise<PreparedLocalLabLaunchAuthority>
   createStructuredSession?: typeof createStructuredWorkerSessionForWorktree
+  buildLaunchReceipt?: typeof buildCodexLabLaunchReceipt
   deliverPreamble?: typeof deliverWorkerDispatchPreamble
   tearDownFailedStart?: typeof tearDownFailedWorkerStart
 }>

@@ -47,6 +47,14 @@ export function requireCodexLabRuntimeCustodyInvariants(row: CodexLabRuntimeCust
   if (evidence.slice(level).some(Boolean)) {
     throw new Error('Codex laboratory runtime custody evidence has a lifecycle gap.')
   }
+  if (
+    (row.launchReceipt !== null && level !== 4) ||
+    (row.launchReceipt?.dispatchId !== undefined &&
+      row.launchReceipt.dispatchId !== row.dispatchId) ||
+    (row.state === 'ready' && row.launchReceipt === null)
+  ) {
+    throw new Error('Codex laboratory launch receipt does not match its custody state.')
+  }
   const expectedActiveLevel = ACTIVE_LEVELS[row.state]
   if (expectedActiveLevel !== undefined && level !== expectedActiveLevel) {
     throw new Error('Codex laboratory runtime custody evidence does not match its state.')
