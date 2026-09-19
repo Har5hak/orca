@@ -80,7 +80,11 @@ function createHarness(
     coordinatorPaneKey: COORDINATOR_PANE_KEY
   })
   const status = runtime.getStatus()
-  vi.spyOn(runtime, 'getStatus').mockReturnValue({ ...status, capabilities: [...capabilities] })
+  vi.spyOn(runtime, 'getStatus').mockReturnValue({
+    ...status,
+    appVersion: '0.0.0-test',
+    capabilities: [...capabilities]
+  })
   vi.spyOn(runtime, 'getTerminalPaneKey').mockReturnValue(COORDINATOR_PANE_KEY)
   vi.spyOn(runtime, 'getOrchestrationDispatchAuthority').mockReturnValue(null)
   vi.spyOn(runtime, 'getNestedWorkerMaxDepth').mockReturnValue(1)

@@ -85,6 +85,7 @@ function installHost() {
 
 function fakes() {
   const retireStructuredAgentSessionTabFromSnapshot = vi.fn(() => true)
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: this focused fixture implements every runtime method reached by the structured-start failure path.
   const runtime = {
     showTerminal: async () => ({ worktreeId: WORKTREE }),
     showManagedTerminalWorkspace: async () => ({ id: WORKTREE }),
@@ -104,11 +105,14 @@ function fakes() {
     getTerminalPaneKey: vi.fn(() => 'pane_1'),
     retireStructuredAgentSessionTabFromSnapshot
   } as unknown as OrcaRuntimeService
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: this focused fixture implements every database method reached by the structured-start failure path.
   const db = {
     createStartingWorkerDispatch: () => ({
       dispatch: { id: 'd_fail', depth: 0 },
       task: { id: 't1', spec: 'do the thing' }
     }),
+    getDispatchContextById: () => ({ id: 'd_fail', status: 'pending' }),
+    getWorkerDispatch: () => ({ dispatch_id: 'd_fail', state: 'starting' }),
     recordWorkerStage: () => {},
     prepareStartingWorkerAuthority: () => 'capability'
   } as unknown as OrchestrationDb
