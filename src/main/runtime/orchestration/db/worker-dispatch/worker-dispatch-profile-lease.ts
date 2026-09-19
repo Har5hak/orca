@@ -22,7 +22,20 @@ export function findWorkerProfileLeaseBlocker(
               worker.state,
               json_extract(worker.start_options, '$.profile.maxConcurrency') AS max_concurrency,
               json_type(worker.start_options, '$.profile.maxConcurrency') AS max_concurrency_type,
-              worker.residual_resources
+              worker.residual_resources,
+              EXISTS (
+                SELECT 1
+                FROM worker_terminal_resources resource
+                WHERE resource.owner_dispatch_id = worker.dispatch_id
+                  AND NOT (
+                    resource.ownership_state = 'owned'
+                    AND resource.release_state = 'not_requested'
+                  )
+                  AND NOT (
+                    resource.ownership_state = 'released'
+                    AND resource.release_state = 'released'
+                  )
+              ) AS terminal_cleanup_pending
        FROM worker_dispatches worker
        WHERE json_extract(worker.start_options, '$.profile.id') = ?
          AND (
@@ -59,7 +72,8 @@ export function findWorkerProfileLeaseBlocker(
     const cleanupPending =
       state === 'start_unknown' ||
       state === 'stop_unknown' ||
-      WORKER_SETTLED_STATES.some((settledState) => settledState === state)
+      WORKER_SETTLED_STATES.some((settledState) => settledState === state) ||
+      row.terminal_cleanup_pending === 1
     if (cleanupPending) {
       return { dispatchId, reason: 'cleanup_pending' }
     }

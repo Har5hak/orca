@@ -186,6 +186,53 @@ describe('worker execution-profile lease', () => {
     )
   })
 
+  it.each([
+    ['owned', 'unknown'],
+    ['owned', 'retained'],
+    ['user_owned', 'retained']
+  ])(
+    'fails closed on active terminal custody %s/%s even when capacity has a free slot',
+    (ownershipState, releaseState) => {
+      const d = createDb()
+      const first = d.createStartingWorkerDispatch({
+        creator: { kind: 'system' },
+        maxDepth: Number.MAX_SAFE_INTEGER,
+        taskSpec: 'anomalous active terminal custody',
+        taskRunId: 'run_legacy_local',
+        startOptions: profileStartOptions(2),
+        profileLease: { profileId: PROFILE_ID }
+      })
+      attachOwnedTerminal(d, first.dispatch.id, 'anomalous')
+      d.markWorkerDispatchReady(first.dispatch.id)
+      d.db
+        .prepare(
+          `UPDATE worker_terminal_resources
+           SET ownership_state = ?, release_state = ?
+           WHERE owner_dispatch_id = ?`
+        )
+        .run(ownershipState, releaseState, first.dispatch.id)
+
+      expect(() =>
+        d.createStartingWorkerDispatch({
+          creator: { kind: 'system' },
+          maxDepth: Number.MAX_SAFE_INTEGER,
+          taskSpec: 'must not consume capacity during anomalous custody',
+          taskRunId: 'run_legacy_local',
+          startOptions: profileStartOptions(2),
+          profileLease: { profileId: PROFILE_ID }
+        })
+      ).toThrowError(
+        expect.objectContaining({
+          code: 'lab_profile_refused',
+          data: expect.objectContaining({
+            reason: 'profile_cleanup_pending',
+            blocker: { dispatchId: first.dispatch.id, reason: 'cleanup_pending' }
+          })
+        })
+      )
+    }
+  )
+
   it('fails closed on cleanup pending even when bounded capacity has a free slot', () => {
     const d = createDb()
     const first = d.createStartingWorkerDispatch({

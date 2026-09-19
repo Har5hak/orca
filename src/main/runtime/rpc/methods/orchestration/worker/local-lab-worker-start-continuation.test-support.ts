@@ -61,7 +61,9 @@ export function harness(binding: CodexLabStructuredLaunchBinding) {
     taskSpec: 'Read the assigned repository and report one finding.',
     taskRunId: run.id,
     runtimeEpoch: 'runtime_task_757',
-    startOptions: { profile: { id: PROFILE } },
+    startOptions: {
+      profile: { id: PROFILE, maxConcurrency: LAB_READONLY_SUPERVISED_PROFILE_MAX_CONCURRENCY }
+    },
     profileLease: { profileId: PROFILE }
   })
   const resource = Object.freeze({ kind: 'created_lab_runtime', id: started.dispatch.id })
