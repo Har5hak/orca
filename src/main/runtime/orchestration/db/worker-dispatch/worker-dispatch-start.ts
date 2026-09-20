@@ -8,6 +8,7 @@ import { insertStartingDispatchContextRow } from '../dispatch-row-writer'
 import { recordedCreatorIdentity, type DispatchCreator } from '../dispatch-depth'
 import { transitionLifecycleWithDb } from '../lifecycle-transition'
 import { taskNotFoundError, taskNotStartableError } from '../../task-dispatch-refusal'
+import { reserveStartingWorkerProfileLease } from './worker-dispatch-profile-lease'
 
 export function createStartingWorkerDispatch(
   this: OrchestrationDb,
@@ -23,6 +24,7 @@ export function createStartingWorkerDispatch(
     taskDeps?: string[]
     taskParentId?: string
     startOptions: unknown
+    profileLease?: { profileId: string; maxConcurrency: number }
     launchTokenHash?: string
     retryOf?: string
     runtimeEpoch?: string
@@ -68,6 +70,17 @@ export function createStartingWorkerDispatch(
            ) VALUES (?, ?, ?, ?, 'pending')`
         )
         .run(receipt.callerFingerprint, receipt.requestId, receipt.method, receipt.payloadHash)
+    }
+    const id = generateId('ctx')
+    if (params.profileLease) {
+      reserveStartingWorkerProfileLease({
+        db: this.db,
+        dispatchId: id,
+        profileId: params.profileLease.profileId,
+        maxConcurrency: params.profileLease.maxConcurrency,
+        runtimeEpoch: params.runtimeEpoch ?? null,
+        startOptions: params.startOptions
+      })
     }
     const task = params.taskId
       ? this.getTask(params.taskId)
@@ -119,7 +132,6 @@ export function createStartingWorkerDispatch(
       )
     }
 
-    const id = generateId('ctx')
     const creatorDispatchId = this.resolveCreatorDispatchId(params.creator)
     if (params.mutationReceipt) {
       this.db
@@ -145,13 +157,15 @@ export function createStartingWorkerDispatch(
       creatorDispatchId,
       ...recordedCreatorIdentity(params.creator)
     })
-    this.db
-      .prepare(
-        `INSERT INTO worker_dispatches (
-           dispatch_id, runtime_epoch, state, stage, start_options
-         ) VALUES (?, ?, 'starting', 'accepted', ?)`
-      )
-      .run(id, params.runtimeEpoch ?? null, JSON.stringify(params.startOptions))
+    if (!params.profileLease) {
+      this.db
+        .prepare(
+          `INSERT INTO worker_dispatches (
+             dispatch_id, runtime_epoch, state, stage, start_options
+           ) VALUES (?, ?, 'starting', 'accepted', ?)`
+        )
+        .run(id, params.runtimeEpoch ?? null, JSON.stringify(params.startOptions))
+    }
     if (params.federation) {
       this.db
         .prepare(
