@@ -1,14 +1,19 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { test } from 'node:test'
 import {
+  SAME_CAP_CELLS,
+  SAME_CAP_MIGRATION_ONLY_CELLS,
   canaryAuthority,
+  entryAdmission,
+  main,
   validateSameCapWave,
   verifyCanaryAuthority
 } from './relay-production-same-cap-wave.mjs'
+import { readRelayWorkflow } from './relay-repository.mjs'
 
 const targetDigest = `sha256:${'a'.repeat(64)}`
 const rollbackDigest = `sha256:${'b'.repeat(64)}`
@@ -50,6 +55,82 @@ test('requires one canary or a bounded reviewed batch', () => {
     rollbackDigest,
     confirmation: `ROLL_RELAY_SAME_CAP ${targetDigest} production-gce-c30`
   }), /cells/)
+})
+
+test('rolls the migration-only cells but never mixes the two classes in one wave', () => {
+  for (const cellId of SAME_CAP_MIGRATION_ONLY_CELLS) {
+    assert.equal(SAME_CAP_CELLS.includes(cellId), true, cellId)
+    assert.equal(entryAdmission(cellId), 'migration-only', cellId)
+    assert.deepEqual(validateSameCapWave({
+      mode: 'canary-apply',
+      cellIds: cellId,
+      targetDigest,
+      rollbackDigest,
+      confirmation: `ROLL_RELAY_SAME_CAP ${targetDigest} ${cellId}`
+    }).cells, [cellId])
+  }
+  const cellIds = 'production-gce-c17,production-gce-c18'
+  assert.deepEqual(validateSameCapWave({
+    mode: 'batch-apply',
+    cellIds,
+    targetDigest,
+    rollbackDigest,
+    confirmation: `ROLL_RELAY_SAME_CAP ${targetDigest} ${cellIds}`,
+    canaryRunId: '42'
+  }).cells, ['production-gce-c17', 'production-gce-c18'])
+  // A mixed wave has no single selector delta for its later cells to offset from.
+  const mixed = 'production-gce-c7,production-gce-c17'
+  assert.throws(() => validateSameCapWave({
+    mode: 'batch-apply',
+    cellIds: mixed,
+    targetDigest,
+    rollbackDigest,
+    confirmation: `ROLL_RELAY_SAME_CAP ${targetDigest} ${mixed}`,
+    canaryRunId: '42'
+  }), /all general or all migration-only/)
+})
+
+test('seals a migration-only canary at the generation its wave leaves behind', () => {
+  const seal = (cellId) => canaryAuthority({
+    cellIds: cellId,
+    targetDigest,
+    rollbackDigest,
+    confirmation: `ROLL_RELAY_SAME_CAP ${targetDigest} ${cellId}`,
+    commitSha: 'c'.repeat(40),
+    runId: '42',
+    selectorGeneration: '11',
+    rehomeGeneration: '4'
+  })
+  // Isolate and restore are both no-ops on a migration-only cell, so nothing advances.
+  assert.equal(seal('production-gce-c17').selectorGeneration, 11)
+  assert.equal(seal('production-gce-c7').selectorGeneration, 13)
+  // That canary still authorizes a later batch of its own class; it is evidence about the image.
+  assert.equal(verifyCanaryAuthority(seal('production-gce-c17'), {
+    commitSha: 'c'.repeat(40),
+    runId: '42',
+    cellIds: 'production-gce-c17,production-gce-c18',
+    targetDigest,
+    rollbackDigest,
+    selectorGeneration: '11',
+    rehomeGeneration: '4'
+  }).cellId, 'production-gce-c17')
+})
+
+test('reports each approved cell\'s class and selector delta', () => {
+  const printed = []
+  const write = process.stdout.write.bind(process.stdout)
+  process.stdout.write = (chunk) => printed.push(String(chunk))
+  try {
+    main(['cell-class', '--cell-id', 'production-gce-c17'])
+    main(['cell-class', '--cell-id', 'production-gce-c7'])
+  } finally {
+    process.stdout.write = write
+  }
+  assert.deepEqual(printed.map((line) => JSON.parse(line)), [
+    { entryAdmission: 'migration-only', selectorWaveDelta: 0 },
+    { entryAdmission: 'general', selectorWaveDelta: 2 }
+  ])
+  assert.throws(() => main(['cell-class', '--cell-id', 'production-gce-c12']), /cells are invalid/)
 })
 
 test('binds rollback confirmation to the exact digest and ordered cells', () => {
@@ -94,6 +175,7 @@ test('seals and verifies canary authority for later batches', () => {
   assert.equal(verifyCanaryAuthority(authority, {
     commitSha: 'c'.repeat(40),
     runId: '42',
+    cellIds: 'production-gce-c8,production-gce-c9',
     targetDigest,
     rollbackDigest,
     selectorGeneration: '13',
@@ -102,6 +184,7 @@ test('seals and verifies canary authority for later batches', () => {
   assert.throws(() => verifyCanaryAuthority(authority, {
     commitSha: 'd'.repeat(40),
     runId: '42',
+    cellIds: 'production-gce-c8,production-gce-c9',
     targetDigest,
     rollbackDigest,
     selectorGeneration: '11',
@@ -116,8 +199,8 @@ test('reuses a canary across selector advances only within the same control epoc
     commitSha: 'c'.repeat(40), runId: '42', selectorGeneration: '11', rehomeGeneration: '4'
   })
   const expected = {
-    commitSha: 'c'.repeat(40), runId: '42', targetDigest, rollbackDigest,
-    selectorGeneration: '21', rehomeGeneration: '4'
+    commitSha: 'c'.repeat(40), runId: '42', cellIds: 'production-gce-c8,production-gce-c9',
+    targetDigest, rollbackDigest, selectorGeneration: '21', rehomeGeneration: '4'
   }
   for (const generation of ['13', '14', '21', '29']) {
     assert.equal(verifyCanaryAuthority(authority, {
@@ -191,6 +274,7 @@ test('a batch trusts a canary sealed by identical code at an ancestor commit', a
     const verifyAt = (commitSha, repositoryRoot) => verifyCanaryAuthority(authority, {
       commitSha,
       runId: '42',
+      cellIds: 'production-gce-c8,production-gce-c9',
       targetDigest,
       rollbackDigest,
       selectorGeneration: '21',
@@ -313,6 +397,7 @@ test('seals the override into the canary authority as audit trail only', () => {
   const expected = {
     commitSha: 'f'.repeat(40),
     runId: '42',
+    cellIds: 'production-gce-c8,production-gce-c9',
     targetDigest,
     rollbackDigest,
     selectorGeneration: '21',
@@ -336,4 +421,125 @@ test('seals the override into the canary authority as audit trail only', () => {
     verifyCanaryAuthority(canaryAuthority(sealed), expected).cellId,
     'production-gce-c7'
   )
+})
+
+function sealedCanary(cellId) {
+  return canaryAuthority({
+    cellIds: cellId,
+    targetDigest,
+    rollbackDigest,
+    confirmation: `ROLL_RELAY_SAME_CAP ${targetDigest} ${cellId}`,
+    commitSha: 'c'.repeat(40),
+    runId: '42',
+    selectorGeneration: '11',
+    rehomeGeneration: '4'
+  })
+}
+
+// Why: a migration-only cell holds zero hosts at a different cap and its wave advances no
+// selector, so rolling one is no evidence for a general batch, and the reverse is no evidence
+// either. Nothing but the sealed cell id says which class a canary actually proved.
+test('refuses a canary sealed on a cell of the other admission class', () => {
+  const expected = {
+    commitSha: 'c'.repeat(40),
+    runId: '42',
+    targetDigest,
+    rollbackDigest,
+    selectorGeneration: '99',
+    rehomeGeneration: '4'
+  }
+  const general = 'production-gce-c8,production-gce-c9'
+  const migrationOnly = SAME_CAP_MIGRATION_ONLY_CELLS.join(',')
+  assert.throws(
+    () => verifyCanaryAuthority(sealedCanary('production-gce-c17'), {
+      ...expected, cellIds: general
+    }),
+    /canary authority cell production-gce-c17 is migration-only, but this batch is general/
+  )
+  assert.throws(
+    () => verifyCanaryAuthority(sealedCanary('production-gce-c7'), {
+      ...expected, cellIds: migrationOnly
+    }),
+    /canary authority cell production-gce-c7 is general, but this batch is migration-only/
+  )
+  assert.equal(
+    verifyCanaryAuthority(sealedCanary('production-gce-c7'), {
+      ...expected, cellIds: general
+    }).cellId,
+    'production-gce-c7'
+  )
+  assert.equal(
+    verifyCanaryAuthority(sealedCanary('production-gce-c17'), {
+      ...expected, cellIds: migrationOnly
+    }).cellId,
+    'production-gce-c17'
+  )
+  // A caller that names no batch at all gets no verdict, rather than an unchecked class.
+  assert.throws(
+    () => verifyCanaryAuthority(sealedCanary('production-gce-c7'), expected),
+    /same-cap wave cells are invalid/
+  )
+})
+
+// The dispatch workflow is the only caller, so the class check only binds anything if that
+// step actually hands the batch over; run the step's own shell exactly as written.
+function verifyCanaryStepScript() {
+  const dispatch = readRelayWorkflow('deploy-relay-production-same-cap.yml')
+  const first = '          node dev/scripts/relay-production-same-cap-wave.mjs verify-canary \\\n'
+  const start = dispatch.indexOf(first)
+  assert.notEqual(start, -1, 'the dispatch workflow has no verify-canary step')
+  const last = '            --rehome-generation "${REHOME_GENERATION}"\n'
+  const end = dispatch.indexOf(last, start)
+  assert.notEqual(end, -1, 'the verify-canary step does not end at the rehome generation')
+  return dispatch.slice(start, end + last.length).replace(/^ {10}/gm, '')
+}
+
+async function runVerifyCanaryStep(authority, cellIds) {
+  const temporary = await mkdtemp(join(tmpdir(), 'relay-same-cap-verify-'))
+  try {
+    await mkdir(join(temporary, 'relay-same-cap-canary'), { recursive: true })
+    await writeFile(
+      join(temporary, 'relay-same-cap-canary', 'authority.json'),
+      JSON.stringify(authority)
+    )
+    return spawnSync('bash', ['-euo', 'pipefail', '-c', verifyCanaryStepScript()], {
+      cwd: new URL('../..', import.meta.url),
+      env: {
+        ...process.env,
+        RUNNER_TEMP: temporary,
+        GITHUB_SHA: authority.commitSha,
+        CANARY_RUN_ID: authority.runId,
+        CELL_IDS: cellIds,
+        TARGET_DIGEST: targetDigest,
+        ROLLBACK_DIGEST: rollbackDigest,
+        SELECTOR_GENERATION: '99',
+        REHOME_GENERATION: '4'
+      },
+      encoding: 'utf8'
+    })
+  } finally {
+    await rm(temporary, { recursive: true, force: true })
+  }
+}
+
+test('the batch gate hands its own cells to the canary check', async () => {
+  const accepted = await runVerifyCanaryStep(
+    sealedCanary('production-gce-c7'),
+    'production-gce-c8,production-gce-c9'
+  )
+  assert.equal(accepted.status, 0, accepted.stderr)
+  const crossed = await runVerifyCanaryStep(
+    sealedCanary('production-gce-c17'),
+    'production-gce-c8,production-gce-c9'
+  )
+  assert.equal(crossed.status, 1, crossed.stdout)
+  assert.match(
+    crossed.stderr,
+    /canary authority cell production-gce-c17 is migration-only, but this batch is general/
+  )
+  const migrationOnly = await runVerifyCanaryStep(
+    sealedCanary('production-gce-c17'),
+    SAME_CAP_MIGRATION_ONLY_CELLS.join(',')
+  )
+  assert.equal(migrationOnly.status, 0, migrationOnly.stderr)
 })
