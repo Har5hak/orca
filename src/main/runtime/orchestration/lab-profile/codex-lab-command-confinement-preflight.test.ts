@@ -35,6 +35,7 @@ import {
   captureSuccessfulConfinementRun,
   UNSUCCESSFUL_CONFINEMENT_PROCESS_RESULTS
 } from './codex-lab-command-confinement-preflight.test-support'
+import { SUPPORTED_CODEX_LAB_RELEASE } from './codex-lab-supported-binary'
 
 async function expectRefusal(
   input: CodexLabCommandConfinementPreflightInput,
@@ -208,7 +209,7 @@ describe('Codex laboratory command-confinement preflight', () => {
         })
 
         expect(version.status).toBe(0)
-        expect(version.stdout.trim()).toBe('codex-cli 0.154.0-alpha.6.2')
+        expect(version.stdout.trim()).toBe(`codex-cli ${SUPPORTED_CODEX_LAB_RELEASE.version}`)
         expect(spec.program).toBe(binaryPath)
         expect(execution.error).toBeUndefined()
         expect(execution.signal).toBeNull()
