@@ -18,6 +18,7 @@ export const WorkerStartParams = z
     on: OptionalString,
     run: OptionalString,
     from: requiredString('Missing --from'),
+    profile: OptionalWorkerLaunchPreference,
     worktree: OptionalString,
     name: OptionalString,
     repo: OptionalString,

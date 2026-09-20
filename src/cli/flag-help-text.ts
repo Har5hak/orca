@@ -107,7 +107,7 @@ export const FLAG_HELP_TEXT: Record<string, string> = {
   amount: '--amount <pixels>      Scroll distance in pixels',
   index: '--index <n>            Tab index to switch to',
   page: '--page <id>            Stable browser page id from `orca tab list --json`',
-  profile: '--profile <id>        Browser profile id',
+  profile: '--profile <id>        Profile id for this command',
   'show-profile': '--show-profile        Include tab profile in text output',
   format: '--format <png|jpeg>    Screenshot image format'
 }

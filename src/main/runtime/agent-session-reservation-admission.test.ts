@@ -97,6 +97,25 @@ describe('adopted handle chain seeding', () => {
   })
 })
 
+describe('durable permission posture', () => {
+  it('persists the host-authored posture and refuses a reacquisition that drops it', () => {
+    const { record } = applyAgentSessionReservation(
+      storeState(),
+      reserveRequest({ requiredPermissionPosture: 'manual' }),
+      LEASE_TTL_MS
+    )
+
+    expect(record.requiredPermissionPosture).toBe('manual')
+    expect(() =>
+      applyAgentSessionReservation(
+        storeState([record]),
+        reserveRequest({ expectedFence: record.lease.runtimeFence }),
+        LEASE_TTL_MS
+      )
+    ).toThrow('agent_session_conflict')
+  })
+})
+
 describe('adopted conversation ownership', () => {
   it('refuses when another record already holds the same conversation root', () => {
     // The held link names a leaf; the adoption names none. Same root is the whole test: keying on

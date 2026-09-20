@@ -112,6 +112,7 @@ export type AgentLaunchMode = 'structured' | 'terminal'
  *  other member is a reason the preference could not be applied to this launch. */
 export type AgentLaunchModeReason =
   | 'user_default'
+  | 'execution_profile'
   | 'remote_execution_host'
   | 'reused_terminal'
   | 'agent_without_structured_session'
@@ -127,7 +128,7 @@ export type AgentLaunchModeReason =
 export type AgentLaunchModeReceipt = {
   /** The mode the launch actually ran in. */
   mode: AgentLaunchMode
-  /** The user's settings default for a new agent tab. */
+  /** The user's default, or the profile-required mode when reason is `execution_profile`. */
   preferred: AgentLaunchMode
   reason: AgentLaunchModeReason
   /** One sentence, always present, so a fallback is never silent. */

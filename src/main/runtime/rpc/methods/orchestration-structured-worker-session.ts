@@ -34,6 +34,12 @@ import {
 } from '../../structured-worker-identity'
 import { createKeyedTrailingEdgeCoalescer } from '../../keyed-trailing-edge-coalescer'
 import { createStructuredAgentSessionForWorktree } from './structured-agent-session-create'
+import {
+  validatePersistedWorkerExecutionProfile,
+  validatePreparedWorkerExecutionProfile,
+  type WorkerStartExecutionProfileAdmission,
+  type WorkerStartExecutionProfileValidation
+} from './orchestration/worker/worker-start-execution-profile'
 
 type StructuredWorkerBinding = {
   sessionId: string
@@ -80,11 +86,16 @@ export async function createStructuredWorkerSession(args: {
   worktreeId: string
   agent: 'claude' | 'codex'
   dispatchId: string
+  executionProfile?: WorkerStartExecutionProfileAdmission
   /** The dispatch's own `--model`/`--effort`, already narrowed to the seedable string subset. */
   options?: Readonly<Record<string, string>>
   /** Retried whenever the session's journal moves, which is the structured idle edge. */
   onJournalActivity: (sessionId: string) => void
-}): Promise<{ identity: StructuredWorkerIdentity; host: StructuredAgentSessionHost }> {
+}): Promise<{
+  identity: StructuredWorkerIdentity
+  host: StructuredAgentSessionHost
+  profileValidation?: WorkerStartExecutionProfileValidation
+}> {
   const sessionId = randomUUID()
   // Registered BEFORE the session is created, because `attach` is what spawns the provider child
   // and the child's environment is read from this registry at spawn time. Registering afterwards
@@ -103,6 +114,8 @@ export async function createStructuredWorkerSession(args: {
     hostScope: { kind: 'local', hostId: 'local' }
   })
   let created: Awaited<ReturnType<typeof createStructuredAgentSessionForWorktree>> | undefined
+  let profileValidation: WorkerStartExecutionProfileValidation | undefined
+  const executionProfile = args.executionProfile
   try {
     created = await createStructuredAgentSessionForWorktree({
       runtime: args.runtime,
@@ -122,6 +135,18 @@ export async function createStructuredWorkerSession(args: {
       },
       worktree: `id:${args.worktreeId}`,
       agent: args.agent,
+      ...(executionProfile
+        ? {
+            requiredPermissionPosture: executionProfile.requiredPermissionPosture,
+            onPrepared: (prepared) => {
+              profileValidation = validatePreparedWorkerExecutionProfile({
+                admission: executionProfile,
+                prepared,
+                expectedWorktreeId: args.worktreeId
+              })
+            }
+          }
+        : {}),
       // Absent, the host seeds the user's saved selection — the same fallback a chat gets.
       ...(args.options ? { options: args.options } : {}),
       // Dispatching a worker is background work; it must not pull the surface away from the user.
@@ -141,6 +166,13 @@ export async function createStructuredWorkerSession(args: {
         'A structured worker must run on the local execution host outside WSL.'
       )
     }
+    if (executionProfile) {
+      profileValidation = validatePersistedWorkerExecutionProfile({
+        admission: executionProfile,
+        validation: profileValidation,
+        record
+      })
+    }
     const holderId = structuredWorkerHoldId(args.dispatchId)
     await host.hold(sessionId, holderId)
     const disposeSubscription = subscribeForRedrive(host, sessionId, args.onJournalActivity)
@@ -150,7 +182,11 @@ export async function createStructuredWorkerSession(args: {
       holderId,
       disposeSubscription
     })
-    return { identity, host }
+    return {
+      identity,
+      host,
+      ...(profileValidation ? { profileValidation } : {})
+    }
   } catch (error) {
     // A start that fails after the session exists would otherwise strand a live provider child
     // that no dispatch owns and that nothing else in the runtime will ever retire.

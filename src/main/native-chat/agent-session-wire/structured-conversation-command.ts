@@ -156,6 +156,9 @@ export function runStructuredConversationCommand(
               },
               location: record.location,
               accountHome: record.accountHome,
+              ...(record.requiredPermissionPosture
+                ? { requiredPermissionPosture: record.requiredPermissionPosture }
+                : {}),
               provider: record.provider,
               agent: record.provider,
               runtimeKind: 'native',

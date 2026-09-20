@@ -26,12 +26,15 @@ import {
   isAgentSessionLaunchArgs,
   isAgentSessionLaunchEnv,
   isAgentSessionOptions,
-  type AgentSessionAccountHome,
   type AgentSessionExecutionLocation,
   type AgentSessionLaunchArgs,
   type AgentSessionLaunchEnv,
   type AgentSessionRecord
 } from '../../shared/agent-session-record'
+import type {
+  AgentSessionAccountHome,
+  AgentSessionRequiredPermissionPosture
+} from '../../shared/agent-session-launch-constraints'
 import {
   agentSessionProviderHandleRoot,
   type AgentSessionHandleProvider,
@@ -48,6 +51,7 @@ export type AgentSessionReserveRequest = {
   location: AgentSessionExecutionLocation
   provider: AgentSessionHandleProvider
   accountHome: AgentSessionAccountHome
+  requiredPermissionPosture?: AgentSessionRequiredPermissionPosture
   /** Arguments pinned on first reservation so owner replacement repeats the same launch. */
   launchArgs?: AgentSessionLaunchArgs
   /** Current launch input validated here but never written to the durable record. */
@@ -176,9 +180,10 @@ export function applyAgentSessionReservation(
     !agentSessionExecutionLocationsEqual(existing.location, request.location) ||
     existing.provider !== request.provider ||
     existing.accountHome.variable !== request.accountHome.variable ||
-    existing.accountHome.path !== request.accountHome.path
+    existing.accountHome.path !== request.accountHome.path ||
+    existing.requiredPermissionPosture !== request.requiredPermissionPosture
   ) {
-    // Why: location, provider, and account are the session identity; changing one is a fork.
+    // Why: location, provider, account, and enforced posture are durable session identity.
     throw new Error('agent_session_conflict')
   }
   if (request.expectedFence === null) {
@@ -245,6 +250,9 @@ function createAgentSessionRecord(
     // record's current fence — so an adopted link must be minted at that same fence.
     providerHandleChain: request.adoptedHandleLink ? [request.adoptedHandleLink] : [],
     accountHome: request.accountHome,
+    ...(request.requiredPermissionPosture
+      ? { requiredPermissionPosture: request.requiredPermissionPosture }
+      : {}),
     ...(request.options ? { options: { ...request.options } } : {}),
     ...(request.launchArgs ? { launchArgs: [...request.launchArgs] } : {}),
     createdAt: request.now,

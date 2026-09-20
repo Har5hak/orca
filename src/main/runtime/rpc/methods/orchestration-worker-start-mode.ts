@@ -59,6 +59,15 @@ export function decideWorkerStartMode(args: {
   })
 }
 
+export function executionProfileWorkerStartMode(profileId: string): WorkerStartModeReceipt {
+  return {
+    mode: 'structured',
+    preferred: 'structured',
+    reason: 'execution_profile',
+    detail: `Execution profile ${profileId} requires a structured chat session worker.`
+  }
+}
+
 export async function resolveWorkerStartModeOnHost(
   runtime: Pick<OrcaRuntimeService, 'getStructuredAgentSessionCreateSupport'>,
   mode: WorkerStartModeReceipt,

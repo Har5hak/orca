@@ -24,7 +24,10 @@ const BYPASS_POLICY = { approvalPolicy: 'never', sandbox: 'danger-full-access' }
  * deliberate `sandbox_mode = "workspace-write"` and make every file write in a Manual session
  * need an approval it did not need before. This still resets Yolo's `danger-full-access`.
  */
-const MANUAL_POLICY = { approvalPolicy: 'on-request', sandbox: 'workspace-write' } as const
+export const CODEX_STRUCTURED_MANUAL_PERMISSION_POLICY = {
+  approvalPolicy: 'on-request',
+  sandbox: 'workspace-write'
+} as const
 
 /**
  * The Agent Permissions setting as app-server thread policy.
@@ -45,5 +48,5 @@ export function codexStructuredPermissionPolicyForSettings(
 ): CodexStructuredPermissionPolicy {
   return resolvedTuiAgentArgsBypassPermissions('codex', settings, process.platform)
     ? BYPASS_POLICY
-    : MANUAL_POLICY
+    : CODEX_STRUCTURED_MANUAL_PERMISSION_POLICY
 }

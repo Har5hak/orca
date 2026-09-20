@@ -129,6 +129,35 @@ export function reserveStartingWorkerProfileLease(args: {
     .run(args.dispatchId, args.runtimeEpoch, JSON.stringify(args.startOptions))
 }
 
+export function assertWorkerProfileNestedStartAllowed(
+  db: Database.Database,
+  creatorDispatchId: string | null
+): void {
+  if (!creatorDispatchId) {
+    return
+  }
+  const row = db
+    .prepare(
+      `SELECT json_extract(start_options, '$.profile.id') AS profile_id,
+              json_extract(start_options, '$.profile.nestedWorkerStarts') AS nested_worker_starts
+       FROM worker_dispatches
+       WHERE dispatch_id = ?`
+    )
+    .get(creatorDispatchId)
+  if (row?.nested_worker_starts !== 'forbidden') {
+    return
+  }
+  throw new OrchestrationError(
+    'execution_profile_refused',
+    `Execution profile ${String(row.profile_id)} forbids nested worker starts.`,
+    {
+      profileId: row.profile_id,
+      reason: 'nested_worker_forbidden',
+      blocker: { dispatchId: creatorDispatchId, reason: 'profile_parent' }
+    }
+  )
+}
+
 function readProfileReceipt(value: unknown): { id: unknown; maxConcurrency: unknown } {
   const profile =
     typeof value === 'object' && value !== null ? Reflect.get(value, 'profile') : undefined

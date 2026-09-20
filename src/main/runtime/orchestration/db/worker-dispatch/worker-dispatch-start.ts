@@ -8,7 +8,10 @@ import { insertStartingDispatchContextRow } from '../dispatch-row-writer'
 import { recordedCreatorIdentity, type DispatchCreator } from '../dispatch-depth'
 import { transitionLifecycleWithDb } from '../lifecycle-transition'
 import { taskNotFoundError, taskNotStartableError } from '../../task-dispatch-refusal'
-import { reserveStartingWorkerProfileLease } from './worker-dispatch-profile-lease'
+import {
+  assertWorkerProfileNestedStartAllowed,
+  reserveStartingWorkerProfileLease
+} from './worker-dispatch-profile-lease'
 
 export function createStartingWorkerDispatch(
   this: OrchestrationDb,
@@ -72,6 +75,8 @@ export function createStartingWorkerDispatch(
         .run(receipt.callerFingerprint, receipt.requestId, receipt.method, receipt.payloadHash)
     }
     const id = generateId('ctx')
+    const creatorDispatchId = this.resolveCreatorDispatchId(params.creator)
+    assertWorkerProfileNestedStartAllowed(this.db, creatorDispatchId)
     if (params.profileLease) {
       reserveStartingWorkerProfileLease({
         db: this.db,
@@ -132,7 +137,6 @@ export function createStartingWorkerDispatch(
       )
     }
 
-    const creatorDispatchId = this.resolveCreatorDispatchId(params.creator)
     if (params.mutationReceipt) {
       this.db
         .prepare(

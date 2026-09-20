@@ -12,9 +12,32 @@ const STRUCTURED_HANDLE = 'structworker_abc'
 const TERMINAL_HANDLE = 'term_worker'
 
 const createStructuredWorkerSessionForWorktree = vi.fn(
-  async (args: { effects: { kind: string }[] }) => {
+  async (args: { effects: { kind: string }[]; executionProfile?: { id: string } }) => {
     args.effects.push({ kind: 'terminal' })
-    return { identity: { handle: STRUCTURED_HANDLE, sessionId: 'sess_1' }, host: {} }
+    return {
+      identity: { handle: STRUCTURED_HANDLE, sessionId: 'sess_1' },
+      host: {},
+      ...(args.executionProfile
+        ? {
+            profileValidation: {
+              id: 'structured-write-v1',
+              maxConcurrency: 1,
+              provider: 'codex',
+              permissionPosture: {
+                required: 'manual',
+                enforcedAt: 'every-provider-acquisition'
+              },
+              worktree: { requested: 'new-child', resolvedId: 'repo::child' },
+              account: {
+                route: 'selected-account-home',
+                variable: 'CODEX_HOME',
+                homeSha256: 'a'.repeat(64)
+              },
+              attachFingerprint: 'attach-fingerprint'
+            }
+          }
+        : {})
+    }
   }
 )
 const createExistingWorktreeWorkerTerminal = vi.fn(async () => ({ handle: TERMINAL_HANDLE }))
@@ -42,6 +65,38 @@ const STRUCTURED_DEFAULT = {
   agentCmdOverrides: {},
   agentDefaultArgs: {},
   agentDefaultEnv: {}
+}
+
+type WorkerStartResult = {
+  state: string
+  mode: { mode: string; preferred: string; reason: string; detail: string }
+  profile?: Record<string, unknown>
+  dispatchId: string
+}
+
+function isWorkerStartResult(value: unknown): value is WorkerStartResult {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+  const mode = 'mode' in value ? value.mode : null
+  const profile = 'profile' in value ? value.profile : undefined
+  return (
+    'state' in value &&
+    typeof value.state === 'string' &&
+    typeof mode === 'object' &&
+    mode !== null &&
+    'mode' in mode &&
+    typeof mode.mode === 'string' &&
+    'preferred' in mode &&
+    typeof mode.preferred === 'string' &&
+    'reason' in mode &&
+    typeof mode.reason === 'string' &&
+    'detail' in mode &&
+    typeof mode.detail === 'string' &&
+    (profile === undefined || (typeof profile === 'object' && profile !== null)) &&
+    'dispatchId' in value &&
+    typeof value.dispatchId === 'string'
+  )
 }
 
 describe('worker-start honours the settings default', () => {
@@ -108,21 +163,23 @@ describe('worker-start honours the settings default', () => {
       }
       return settings as never
     })
-    const task = db.createTask({ spec: 'settings-driven task', runId })
+    const inlineSpec = typeof overrides.spec === 'string' ? overrides.spec : undefined
+    const task = inlineSpec ? undefined : db.createTask({ spec: 'settings-driven task', runId })
     const method = ORCHESTRATION_METHODS.find(
       (candidate) => candidate.name === 'orchestration.workerStart'
     )!
     const params = method.params!.parse({
-      task: task.id,
+      ...(task ? { task: task.id } : { spec: inlineSpec }),
       from: 'term_coord',
       worktree: 'current',
       agent: 'claude',
       ...overrides
     })
-    return (await method.handler(params, { runtime })) as {
-      state: string
-      mode: { mode: string; preferred: string; reason: string; detail: string }
+    const result = await method.handler(params, { runtime })
+    if (!isWorkerStartResult(result)) {
+      throw new Error('worker start returned an invalid result')
     }
+    return result
   }
 
   function mockWorktreeCreation() {
@@ -266,6 +323,57 @@ describe('worker-start honours the settings default', () => {
     })
     expect(createExistingWorktreeWorkerTerminal).toHaveBeenCalledTimes(1)
     expect(createStructuredWorkerSessionForWorktree).not.toHaveBeenCalled()
+  })
+
+  it('forces the Codex profile through structured placement and atomically refuses a second slot', async () => {
+    mockWorktreeCreation()
+    const profileRequest = {
+      profile: 'structured-write-v1',
+      agent: 'codex',
+      worktree: 'new-child',
+      name: 'profile-canary',
+      setup: 'skip'
+    }
+
+    const first = await startWorker(
+      { ...STRUCTURED_DEFAULT, experimentalStructuredNativeChat: false },
+      { ...profileRequest, spec: 'profile task one' }
+    )
+
+    expect(first).toMatchObject({
+      state: 'ready',
+      mode: { mode: 'structured', preferred: 'structured', reason: 'execution_profile' },
+      profile: {
+        id: 'structured-write-v1',
+        maxConcurrency: 1,
+        provider: 'codex',
+        worktree: { resolvedId: 'repo::child' }
+      }
+    })
+    expect(JSON.parse(db.getWorkerDispatch(first.dispatchId)!.start_options)).toMatchObject({
+      profile: {
+        id: 'structured-write-v1',
+        maxConcurrency: 1,
+        nestedWorkerStarts: 'forbidden'
+      }
+    })
+
+    await expect(
+      startWorker(STRUCTURED_DEFAULT, {
+        ...profileRequest,
+        name: 'profile-refused',
+        spec: 'profile task refused'
+      })
+    ).rejects.toMatchObject({
+      code: 'execution_profile_refused',
+      data: expect.objectContaining({ reason: 'profile_capacity_exhausted' })
+    })
+    expect(
+      db.db.prepare("SELECT id FROM tasks WHERE spec = 'profile task refused'").get()
+    ).toBeUndefined()
+    expect(db.db.prepare('SELECT COUNT(*) AS count FROM dispatch_contexts').get()).toEqual({
+      count: 1
+    })
   })
 
   it('tells a remote dispatch why its structured default did not apply', async () => {

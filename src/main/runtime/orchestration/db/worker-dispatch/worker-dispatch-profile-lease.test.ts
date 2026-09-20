@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { OrchestrationDb } from '../../db'
+import { assertWorkerProfileNestedStartAllowed } from './worker-dispatch-profile-lease'
 
 const PROFILE_ID = 'structured-write-v1'
 const CAPACITY = 2
 
 function profileStartOptions(maxConcurrency: unknown = CAPACITY): unknown {
-  return { profile: { id: PROFILE_ID, maxConcurrency } }
+  return {
+    profile: { id: PROFILE_ID, maxConcurrency, nestedWorkerStarts: 'forbidden' }
+  }
 }
 
 describe('worker execution-profile lease', () => {
@@ -164,5 +167,21 @@ describe('worker execution-profile lease', () => {
       startOptions: { worktree: 'current' }
     })
     expect(ordinary.worker).toMatchObject({ state: 'starting', stage: 'accepted' })
+  })
+
+  it('forbids a profiled worker from escaping its capacity through an ordinary nested start', () => {
+    const d = createDb()
+    const parent = start(d, 'profile parent')
+
+    expect(() => assertWorkerProfileNestedStartAllowed(d.db, parent.dispatch.id)).toThrowError(
+      expect.objectContaining({
+        code: 'execution_profile_refused',
+        data: expect.objectContaining({
+          reason: 'nested_worker_forbidden',
+          blocker: { dispatchId: parent.dispatch.id, reason: 'profile_parent' }
+        })
+      })
+    )
+    expect(() => assertWorkerProfileNestedStartAllowed(d.db, null)).not.toThrow()
   })
 })

@@ -48,7 +48,9 @@ export type AgentLaunchModeVocabulary = {
   terminal: string
   /** Per-reason wording a surface states differently. Orchestration names the `--terminal` flag
    *  in its reused-terminal detail, which would be meaningless in a phone's receipt. */
-  detailOverrides?: Partial<Record<Exclude<AgentLaunchModeReason, 'user_default'>, string>>
+  detailOverrides?: Partial<
+    Record<Exclude<AgentLaunchModeReason, 'user_default' | 'execution_profile'>, string>
+  >
 }
 
 export const DEFAULT_LAUNCH_VOCABULARY: AgentLaunchModeVocabulary = {
@@ -74,7 +76,10 @@ export type AgentLaunchModePlacement = {
   workspaceKind?: WorkspaceLaunchKind
 }
 
-const DOWNGRADE_DETAIL: Record<Exclude<AgentLaunchModeReason, 'user_default'>, string> = {
+const DOWNGRADE_DETAIL: Record<
+  Exclude<AgentLaunchModeReason, 'user_default' | 'execution_profile'>,
+  string
+> = {
   remote_execution_host: 'this launch runs on a remote execution host',
   reused_terminal: 'it reuses a running terminal agent',
   agent_without_structured_session: 'this agent has no structured session',
@@ -88,7 +93,7 @@ const DOWNGRADE_DETAIL: Record<Exclude<AgentLaunchModeReason, 'user_default'>, s
 
 const BLOCKER_REASON: Record<
   StructuredNativeChatBlocker,
-  Exclude<AgentLaunchModeReason, 'user_default'>
+  Exclude<AgentLaunchModeReason, 'user_default' | 'execution_profile'>
 > = {
   'reused-terminal': 'reused_terminal',
   'agent-without-structured-session': 'agent_without_structured_session',
@@ -103,7 +108,7 @@ const BLOCKER_REASON: Record<
 /** The host's own create-support verdict (`agentSession.createSupport`) in this vocabulary. */
 const HOST_SUPPORT_REASON: Record<
   'agent' | 'remote' | 'wsl',
-  Exclude<AgentLaunchModeReason, 'user_default'>
+  Exclude<AgentLaunchModeReason, 'user_default' | 'execution_profile'>
 > = {
   agent: 'structured_unsupported_on_host',
   remote: 'remote_execution_host',
@@ -214,7 +219,7 @@ export function downgradeAgentLaunchModeForHost(
 }
 
 function downgraded(
-  reason: Exclude<AgentLaunchModeReason, 'user_default'>,
+  reason: Exclude<AgentLaunchModeReason, 'user_default' | 'execution_profile'>,
   vocabulary: AgentLaunchModeVocabulary
 ): AgentLaunchModeReceipt {
   const why = vocabulary.detailOverrides?.[reason] ?? DOWNGRADE_DETAIL[reason]

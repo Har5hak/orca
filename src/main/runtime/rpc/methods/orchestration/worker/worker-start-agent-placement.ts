@@ -29,6 +29,10 @@ import {
   type WorkerSetupReceipt
 } from './worker-topology'
 import { createWorkerWorktree } from './worker-worktree-creation'
+import {
+  assertWorkerExecutionProfileMode,
+  type WorkerStartExecutionProfileAdmission
+} from './worker-start-execution-profile'
 
 /** Only what the placement itself reads. The runtime's own worktree accessors are untyped, so
  *  naming the two fields keeps `any` out of this module's unions. */
@@ -59,6 +63,7 @@ type WorkerAgentPlacementArgs = {
   mode: WorkerStartModeReceipt
   agent: TuiAgent | undefined
   launchPreferences: AgentLaunchPreferences | undefined
+  executionProfile?: WorkerStartExecutionProfileAdmission
   effects: WorkerEffect[]
   /** Attributes a throw to the step that was running, the way the caller's own stages do. */
   onStage: (stage: string) => void
@@ -134,6 +139,9 @@ async function placeInCreatedWorktree(
   }
   args.onStage('terminal_create')
   const mode = await resolveWorkerStartModeOnHost(args.runtime, args.mode, worktree.id, args.agent)
+  if (args.executionProfile) {
+    assertWorkerExecutionProfileMode(args.executionProfile, mode)
+  }
   return {
     mode,
     worktree,
@@ -160,6 +168,7 @@ async function createWorkerAgentSurface(
       worktreeId,
       agent: args.agent as TuiAgent,
       dispatchId: args.dispatchId,
+      ...(args.executionProfile ? { executionProfile: args.executionProfile } : {}),
       ...(args.launchPreferences ? { launchPreferences: args.launchPreferences } : {}),
       effects: args.effects
     })

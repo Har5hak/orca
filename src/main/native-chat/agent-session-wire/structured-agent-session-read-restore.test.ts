@@ -18,7 +18,7 @@ import { restoreStructuredAgentSessionRead } from './structured-agent-session-re
 const SESSION_ID = 'codex_read_restore_fixture'
 const WORKSPACE_ID = 'repo-1::/tmp/workspace'
 
-const RECORD = {
+const RECORD: AgentSessionRecord = {
   schemaVersion: 2,
   sessionId: SESSION_ID,
   location: {
@@ -38,10 +38,27 @@ const RECORD = {
     }
   ],
   accountHome: { variable: 'CODEX_HOME', path: '/tmp/codex-home' },
+  requiredPermissionPosture: 'manual',
   createdAt: 1,
   updatedAt: 2,
-  lease: { sessionId: SESSION_ID, runtimeKind: 'native', runtimeFence: 1 }
-} as unknown as AgentSessionRecord
+  lease: {
+    sessionId: SESSION_ID,
+    runtimeKind: 'native',
+    runtimeFence: 1,
+    handoffStage: null,
+    provenHandleLinkId: null,
+    ownerProcess: null,
+    reservedSpawnToken: null,
+    leaseDeadlineAt: 31_000,
+    lastRenewedAt: 1,
+    handoffOperationId: null,
+    journalCheckpoint: null,
+    claimKeyId: 'test-claim',
+    claimStatus: 'reserved',
+    unreconciled: false,
+    deathEvidence: null
+  }
+}
 
 const store = {
   getRecord: (sessionId: string) => (sessionId === SESSION_ID ? RECORD : null)
@@ -83,6 +100,8 @@ describe('a session whose journal is still the pre-SQLite format', () => {
     expect(disclosed.join('')).toContain(transcript)
     // Publishing it costs no agent process; acquisition still waits for the user.
     expect(restored!.hasProviderChild).toBe(false)
+    expect(restored!.params.requiredPermissionPosture).toBe('manual')
+    expect(restored!.params.envelope.payloadFingerprint).not.toBe('')
   })
 
   it('is published for a remnant whose log is gone', async () => {

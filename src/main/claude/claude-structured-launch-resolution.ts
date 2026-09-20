@@ -193,9 +193,11 @@ export function createClaudeStructuredLaunchResolver(
         : claudeSessionIdForOrcaSession(identity.sessionId)
     // `record.launchArgs` is deliberately not read: the configured CLI arguments are a terminal
     // concern, and the permission mode they used to smuggle in is an owned provider option now.
-    const permission = claudeStructuredPermissionOptions(
-      (await deps.resolvePermissionMode?.()) ?? 'default'
-    )
+    const permissionMode =
+      record.requiredPermissionPosture === 'manual'
+        ? 'default'
+        : ((await deps.resolvePermissionMode?.()) ?? 'default')
+    const permission = claudeStructuredPermissionOptions(permissionMode)
     const command = (deps.resolveCommand ?? resolveClaudeCommand)()
     const auth = await deps.resolveAuthPolicy()
     const overlay = await deps.resolveEnv?.()

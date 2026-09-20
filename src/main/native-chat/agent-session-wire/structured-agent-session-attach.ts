@@ -17,13 +17,16 @@ import type {
 import { claudeProviderHandleLink } from '../../claude/claude-structured-owner-identity'
 import { codexProviderHandleLink } from '../../codex/codex-structured-owner-identity'
 import type {
-  AgentSessionAccountHome,
   AgentSessionExecutionLocation,
   AgentSessionLaunchArgs,
   AgentSessionLaunchEnv,
   AgentSessionOwnerRuntimeKind,
   AgentSessionRecord
 } from '../../../shared/agent-session-record'
+import type {
+  AgentSessionAccountHome,
+  AgentSessionRequiredPermissionPosture
+} from '../../../shared/agent-session-launch-constraints'
 import {
   AGENT_SESSION_WIRE_REFUSAL_CODES,
   type AgentSessionMutationEnvelope,
@@ -60,6 +63,8 @@ export type AgentSessionAttachParams = {
   provider: AgentSessionHandleProvider
   agent: AgentSessionHandleProvider
   accountHome: AgentSessionAccountHome
+  /** Host-authored only; persists across recovery and is enforced at every provider spawn. */
+  requiredPermissionPosture?: AgentSessionRequiredPermissionPosture
   runtimeKind: AgentSessionOwnerRuntimeKind
   /** Host-resolved defaults for a create-by-intent; remote attach schemas do not accept them. */
   options?: Readonly<Record<string, string>>
@@ -103,6 +108,7 @@ export function attachFingerprintFields(params: AgentSessionAttachParams): Recor
     provider: params.provider,
     agent: params.agent,
     accountHome: params.accountHome,
+    requiredPermissionPosture: params.requiredPermissionPosture,
     runtimeKind: params.runtimeKind,
     providerHandle: params.providerHandle,
     // Which conversation this attaches to, so an adopting create and a blank one never share an
@@ -312,6 +318,9 @@ export function reserveRequestFor(input: {
     location: params.location,
     provider: params.provider,
     accountHome: params.accountHome,
+    ...(params.requiredPermissionPosture
+      ? { requiredPermissionPosture: params.requiredPermissionPosture }
+      : {}),
     ...(params.options ? { options: params.options } : {}),
     ...(authority.launchArgs ? { launchArgs: authority.launchArgs } : {}),
     ...(authority.launchEnv ? { launchEnv: authority.launchEnv } : {}),

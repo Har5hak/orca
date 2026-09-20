@@ -16,6 +16,9 @@ export class OrcaRuntimeWithStructuredAgentSessionLaunchTui extends OrcaRuntimeW
         throw new Error('agent_session_identity_required')
       }
       const provider = head.handle.provider
+      if (record.requiredPermissionPosture === 'manual') {
+        throw new Error('agent_session_permission_posture_tui_handoff_unsupported')
+      }
       const providerSessionId = provider === 'claude' ? head.handle.sessionId : head.handle.threadId
       const launchStartedAt = Date.now()
       const launched = await this.ensureAgentSession(

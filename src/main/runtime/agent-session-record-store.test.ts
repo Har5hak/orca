@@ -809,6 +809,10 @@ describe('orphans, claim keys, checkpoints, and unreadable rows', () => {
     [
       'missing live proof',
       (record: AgentSessionRecord) => Object.assign(record.lease, { provenHandleLinkId: null })
+    ],
+    [
+      'invalid required permission posture',
+      (record: AgentSessionRecord) => Object.assign(record, { requiredPermissionPosture: 'bypass' })
     ]
   ])('quarantines a record with %s', async (_name, corrupt) => {
     const first = await open()

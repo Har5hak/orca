@@ -18,7 +18,7 @@ import {
   type AgentSessionHandleProvider,
   type AgentSessionProviderHandleLink
 } from './agent-session-provider-handle'
-
+import type { AgentSessionAccountHome } from './agent-session-launch-constraints'
 export const AGENT_SESSION_RECORD_SCHEMA_VERSION = 2 as const
 
 export type AgentSessionWorkspaceKind = 'git-worktree' | 'folder'
@@ -34,13 +34,6 @@ export type AgentSessionExecutionLocation = {
   wslDistro: string | null
   workspaceId: string
   workspaceKind: AgentSessionWorkspaceKind
-}
-
-/** Account root pinned at launch by the account selector, so a resume cannot drift to another login. */
-export type AgentSessionAccountHome = {
-  variable: 'CLAUDE_CONFIG_DIR' | 'CODEX_HOME'
-  /** Host-resolved absolute path in the execution host's own path syntax. */
-  path: string
 }
 
 /** Provider launch environment captured by the host when the session is created. */
@@ -129,6 +122,8 @@ export type AgentSessionRecord = {
   provider: AgentSessionHandleProvider
   providerHandleChain: AgentSessionProviderHandleLink[]
   accountHome: AgentSessionAccountHome
+  /** Re-applied exactly on every provider acquisition, independent of later settings changes. */
+  requiredPermissionPosture?: 'manual'
   /** Provider options acknowledged for the next turn, restored across owner replacement. */
   options?: Record<string, string>
   rewind?: AgentSessionRewindRecord
@@ -344,6 +339,8 @@ export function isAgentSessionRecord(value: unknown): value is AgentSessionRecor
     (record.provider === 'claude' || record.provider === 'codex') &&
     isAgentSessionProviderHandleChain(record.providerHandleChain) &&
     isAgentSessionAccountHome(record.accountHome) &&
+    (record.requiredPermissionPosture === undefined ||
+      record.requiredPermissionPosture === 'manual') &&
     (record.options === undefined || isAgentSessionOptions(record.options)) &&
     (record.rewind === undefined || isAgentSessionRewindRecord(record.rewind)) &&
     (record.conversationCommand === undefined ||

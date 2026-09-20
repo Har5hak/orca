@@ -1,8 +1,6 @@
 import type { AgentSessionJournalIdentity } from '../../../shared/agent-session-journal-types'
-import type {
-  AgentSessionAccountHome,
-  AgentSessionExecutionLocation
-} from '../../../shared/agent-session-record'
+import type { AgentSessionExecutionLocation } from '../../../shared/agent-session-record'
+import type { AgentSessionAccountHome } from '../../../shared/agent-session-launch-constraints'
 import type { StructuredAgentSessionAdapter } from './structured-agent-session-adapter'
 
 type RoutedAgent = 'claude' | 'codex'

@@ -19,10 +19,10 @@ import type {
 } from '../../../shared/agent-session-journal-types'
 import type { AgentSessionProviderHandleLink } from '../../../shared/agent-session-provider-handle'
 import type {
-  AgentSessionAccountHome,
   AgentSessionExecutionLocation,
   AgentSessionProcessIdentity
 } from '../../../shared/agent-session-record'
+import type { AgentSessionAccountHome } from '../../../shared/agent-session-launch-constraints'
 import type {
   AgentSessionBackgroundTaskState,
   AgentSessionOptionsResult,

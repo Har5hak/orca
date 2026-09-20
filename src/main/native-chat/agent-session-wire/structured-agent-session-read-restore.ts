@@ -90,6 +90,9 @@ export function attachParamsForRecord(
     provider: record.provider,
     agent: record.provider,
     accountHome: record.accountHome,
+    ...(record.requiredPermissionPosture
+      ? { requiredPermissionPosture: record.requiredPermissionPosture }
+      : {}),
     runtimeKind: input.runtimeKind ?? record.lease.runtimeKind
   }
   return {

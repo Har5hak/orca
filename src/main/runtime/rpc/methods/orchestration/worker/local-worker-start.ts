@@ -25,6 +25,10 @@ import { tearDownFailedWorkerStart } from './failed-worker-start-teardown'
 import { requireWorkerAuthority, type WorkerEffect } from './worker-topology'
 import { prepareLocalWorkerStart } from './worker-start-validation'
 import { deliverAndSettleWorkerStartReadiness } from './worker-start-readiness-settlement'
+import {
+  profileStartOptions,
+  type WorkerStartExecutionProfileAdmission
+} from './worker-start-execution-profile'
 
 type WorkerStartMutation = {
   callerFingerprint: string
@@ -43,8 +47,18 @@ export async function startLocalWorker(args: {
   orchestrationMutation?: WorkerStartMutation
   /** Settings-driven; the executing host still gets to refuse below. */
   mode: WorkerStartModeReceipt
+  executionProfile?: WorkerStartExecutionProfileAdmission
 }): Promise<unknown> {
-  const { params, runtime, db, run, coordinatorPane, existingTask, orchestrationMutation } = args
+  const {
+    params,
+    runtime,
+    db,
+    run,
+    coordinatorPane,
+    existingTask,
+    orchestrationMutation,
+    executionProfile
+  } = args
   const requestedWorktree = params.worktree ?? 'current'
   const createsWorktree = requestedWorktree === 'new-child' || requestedWorktree === 'new-top-level'
   const { agent, launch } = prepareLocalWorkerStart({ params, createsWorktree, runtime })
@@ -92,7 +106,8 @@ export async function startLocalWorker(args: {
       ? params.setup
         ? 'explicit_request'
         : 'orchestration_default'
-      : 'existing_worktree'
+      : 'existing_worktree',
+    ...(executionProfile ? { profile: profileStartOptions(executionProfile) } : {})
   }
   const started = db.createStartingWorkerDispatch({
     creator: resolveDispatchCreator(runtime, params.from),
@@ -111,6 +126,14 @@ export async function startLocalWorker(args: {
     retryOf: params.retryOf,
     startOptions,
     runtimeEpoch: runtime.getRuntimeId(),
+    ...(executionProfile
+      ? {
+          profileLease: {
+            profileId: executionProfile.id,
+            maxConcurrency: executionProfile.maxConcurrency
+          }
+        }
+      : {}),
     mutationReceipt: orchestrationMutation
   })
   const effects: WorkerEffect[] = []
@@ -137,6 +160,7 @@ export async function startLocalWorker(args: {
       mode,
       agent,
       launchPreferences: launch.preferences,
+      ...(executionProfile ? { executionProfile } : {}),
       effects,
       onStage: (stage) => {
         failedStage = stage
@@ -222,6 +246,7 @@ export async function startLocalWorker(args: {
       setupReceipt,
       launchReceipt: launch.receipt,
       mode,
+      profileValidation: structuredSession?.profileValidation,
       timeoutMs: params.timeoutMs ?? 60_000,
       effects,
       terminalRevealWarning: placed.warning,

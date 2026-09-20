@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
+import { StructuredAgentSessionHost } from '../../../../../native-chat/agent-session-wire/structured-agent-session-host'
 
 const createStructuredWorkerSession = vi.fn(async (_args: Record<string, unknown>) => ({
   identity: { handle: 'structworker_1', sessionId: 'sess_1' },
@@ -16,7 +17,7 @@ vi.mock('../../orchestration-structured-worker-session', () => ({
 }))
 
 const { createStructuredWorkerSessionForWorktree } = await import('./worker-topology')
-const { prepareStructuredAgentSessionCreateForWorktree } =
+const { createStructuredAgentSessionForWorktree, prepareStructuredAgentSessionCreateForWorktree } =
   await import('../../structured-agent-session-create')
 
 async function createWith(launchPreferences?: Record<string, string>) {
@@ -100,5 +101,33 @@ describe('the create the seed options land in', () => {
     // replay rather than conflict.
     const [seeded, unseeded] = await Promise.all([prepare({ model: 'gpt-5.6-sol' }), prepare()])
     expect(seeded.envelope.payloadFingerprint).toBe(unseeded.envelope.payloadFingerprint)
+  })
+
+  it('runs profile validation before provider attach can spawn', async () => {
+    const host = StructuredAgentSessionHost.prototype
+    const attach = vi.spyOn(host, 'attach')
+
+    await expect(
+      createStructuredAgentSessionForWorktree({
+        runtime: {
+          resolveStructuredAgentSessionCreateIntent: async () => settingsResolved
+        } as never,
+        ensureHost: async () => host,
+        envelope: {
+          sessionId: 'sess_profile',
+          clientOperationId: 'op_profile',
+          expectedRuntimeFence: null,
+          payloadFingerprint: ''
+        },
+        worktree: 'id:repo::wt',
+        agent: 'codex',
+        caller: { callerKey: 'orchestration:dispatch:ctx_profile' },
+        activate: false,
+        onPrepared: () => {
+          throw new Error('profile_validation_failed')
+        }
+      })
+    ).rejects.toThrow('profile_validation_failed')
+    expect(attach).not.toHaveBeenCalled()
   })
 })

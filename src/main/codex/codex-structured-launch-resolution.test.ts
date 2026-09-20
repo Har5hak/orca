@@ -40,7 +40,10 @@ function resolverFor(
   value: AgentSessionRecord | null,
   resolveWorkspacePath: (workspaceId: string) => Promise<string> = async (id) => `/repos/${id}`,
   resolveRollout: () => Promise<string | null> = async () => null,
-  agentDefaultArgs: Record<string, string> = { codex: '' }
+  agentDefaultArgs: Record<string, string> = { codex: '' },
+  resolvePermissionPolicy: () => ReturnType<
+    typeof codexStructuredPermissionPolicyForSettings
+  > = () => codexStructuredPermissionPolicyForSettings({ agentDefaultArgs })
 ) {
   return createCodexStructuredLaunchResolver({
     store: { getRecord: () => value } as unknown as AgentSessionRecordStore,
@@ -48,7 +51,7 @@ function resolverFor(
     resolveCommand: () => '/usr/local/bin/codex',
     resolveRollout,
     isWindowsProcessStartTimeAvailable: () => true,
-    resolvePermissionPolicy: () => codexStructuredPermissionPolicyForSettings({ agentDefaultArgs })
+    resolvePermissionPolicy
   })
 }
 
@@ -126,6 +129,25 @@ describe('codex structured launch resolution', () => {
       approvalPolicy: 'never',
       sandbox: 'danger-full-access'
     })
+  })
+
+  it('reapplies a durable Manual constraint without consulting a later bypass setting', async () => {
+    const resolvePermissionPolicy = vi.fn(() => ({
+      approvalPolicy: 'never' as const,
+      sandbox: 'danger-full-access' as const
+    }))
+    const resolveLaunch = resolverFor(
+      record({ requiredPermissionPosture: 'manual' }),
+      undefined,
+      undefined,
+      undefined,
+      resolvePermissionPolicy
+    )
+
+    await expect(resolveLaunch({ identity: IDENTITY })).resolves.toMatchObject({
+      permissionPolicy: { approvalPolicy: 'on-request', sandbox: 'workspace-write' }
+    })
+    expect(resolvePermissionPolicy).not.toHaveBeenCalled()
   })
 
   it('bypasses approvals for a profile that never opened Agent settings', async () => {

@@ -12,7 +12,10 @@ import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import { resolveCodexCommand } from '../codex-cli/command'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
 import type { CodexStructuredLaunch } from './codex-structured-session-adapter'
-import type { CodexStructuredPermissionPolicy } from './codex-structured-permission-policy'
+import {
+  CODEX_STRUCTURED_MANUAL_PERMISSION_POLICY,
+  type CodexStructuredPermissionPolicy
+} from './codex-structured-permission-policy'
 import { resolvePinnedCodexRolloutProof } from './codex-tui-rollout-proof'
 import { isWindowsProcessStartTimeAvailable } from '../windows/windows-process-table'
 
@@ -72,7 +75,10 @@ export function createCodexStructuredLaunchResolver(
     })
     // `record.launchArgs` is deliberately not read: the configured CLI arguments are a terminal
     // concern, and the permission posture they used to smuggle in is derived per acquisition.
-    const permissionPolicy = deps.resolvePermissionPolicy?.()
+    const permissionPolicy =
+      record.requiredPermissionPosture === 'manual'
+        ? CODEX_STRUCTURED_MANUAL_PERMISSION_POLICY
+        : deps.resolvePermissionPolicy?.()
     const head = agentSessionProviderHandleChainHead(record.providerHandleChain)
     const resumeThreadId = head?.handle.provider === 'codex' ? head.handle.threadId : null
     return {

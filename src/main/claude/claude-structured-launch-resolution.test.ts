@@ -222,6 +222,18 @@ describe('claude structured launch resolution', () => {
     })
   })
 
+  it('reapplies a durable Manual constraint after the global setting changes to bypass', async () => {
+    const launch = await resolverFor(
+      record({ requiredPermissionPosture: 'manual' }),
+      undefined,
+      false,
+      { claude: '--dangerously-skip-permissions' }
+    )({ identity: IDENTITY })
+
+    expect(launch.options.extraArgs).toEqual({ 'replay-user-messages': null })
+    expect(launch.options.allowDangerouslySkipPermissions).toBeUndefined()
+  })
+
   // Manual is stored as an empty string, which owns the key and so beats the shipped default.
   it.each([[''], ['--model Opus']])(
     'leaves a Manual session prompting for args %s',

@@ -4,6 +4,7 @@ import { startFederatedWorker } from '../federation/federated-worker-start'
 import { startLocalWorker } from './local-worker-start'
 import {
   decideWorkerStartMode,
+  executionProfileWorkerStartMode,
   readWorkerStartModeSettings
 } from '../../orchestration-worker-start-mode'
 import { resolveOrchestrationCaller } from '../runs/run-scope'
@@ -13,6 +14,7 @@ import {
   resolveWorkerStartReadinessTimeoutMs
 } from '../../../../../../shared/orchestration-timing-budgets'
 import { assertWorkerStartTaskSpecWithinPromptBudget } from './worker-start-prompt-budget'
+import { resolveWorkerStartExecutionProfile } from './worker-start-execution-profile'
 
 export const ORCHESTRATION_WORKER_START_METHODS = [
   defineMethod({
@@ -49,10 +51,13 @@ export const ORCHESTRATION_WORKER_START_METHODS = [
         )
       }
       await assertWorkerStartTaskSpecWithinPromptBudget(params.spec ?? existingTask!.spec)
-      const mode = decideWorkerStartMode({
-        params,
-        settings: readWorkerStartModeSettings(runtime)
-      })
+      const executionProfile = resolveWorkerStartExecutionProfile(params)
+      const mode = executionProfile
+        ? executionProfileWorkerStartMode(executionProfile.id)
+        : decideWorkerStartMode({
+            params,
+            settings: readWorkerStartModeSettings(runtime)
+          })
       if (params.on) {
         // A remote worker is always a terminal agent; the mode receipt rides along so the
         // coordinator still learns why its structured default did not apply.
@@ -74,7 +79,8 @@ export const ORCHESTRATION_WORKER_START_METHODS = [
         coordinatorPane,
         existingTask,
         orchestrationMutation,
-        mode
+        mode,
+        ...(executionProfile ? { executionProfile } : {})
       })
     }
   })

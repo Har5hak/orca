@@ -15,6 +15,7 @@ import {
   type WorkerEffect,
   type WorkerSetupReceipt
 } from './worker-topology'
+import type { WorkerStartExecutionProfileValidation } from './worker-start-execution-profile'
 
 /**
  * Delivers the dispatch preamble and settles the worker's start state on the strongest
@@ -38,6 +39,7 @@ export async function deliverAndSettleWorkerStartReadiness(args: {
   setupReceipt: WorkerSetupReceipt
   launchReceipt: OrchestrationWorkerLaunchReceipt
   mode: WorkerStartModeReceipt
+  profileValidation?: WorkerStartExecutionProfileValidation
   timeoutMs: number
   effects: WorkerEffect[]
   terminalRevealWarning: string | undefined
@@ -116,6 +118,7 @@ export async function deliverAndSettleWorkerStartReadiness(args: {
       setup: args.setupReceipt,
       launch: args.launchReceipt,
       mode: args.mode,
+      ...(args.profileValidation ? { profile: args.profileValidation } : {}),
       timeoutMs: args.timeoutMs,
       effects,
       ...(deliveredPrompt ? { prompt: deliveredPrompt } : {}),
@@ -147,6 +150,7 @@ export async function deliverAndSettleWorkerStartReadiness(args: {
     setup: args.setupReceipt,
     launch: args.launchReceipt,
     mode: args.mode,
+    ...(args.profileValidation ? { profile: args.profileValidation } : {}),
     timeoutMs: args.timeoutMs,
     effects,
     ...(deliveredPrompt ? { prompt: deliveredPrompt } : {}),

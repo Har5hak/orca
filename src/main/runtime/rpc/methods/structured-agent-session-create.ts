@@ -25,6 +25,7 @@ import {
 import type { StructuredAgentSessionHost } from '../../../native-chat/agent-session-wire/structured-agent-session-host'
 import type { StructuredAgentSessionCaller } from '../../../native-chat/agent-session-wire/structured-agent-session-host-types'
 import type { StructuredAgentSessionResumeSource } from '../../../../shared/structured-agent-session-create'
+import type { AgentSessionRequiredPermissionPosture } from '../../../../shared/agent-session-launch-constraints'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import {
   resolveUncommittedStructuredCreate,
@@ -53,6 +54,8 @@ export async function prepareStructuredAgentSessionCreateForWorktree(args: {
    *  `--model`/`--effort` the dispatch asked for; a chat the user opened passes nothing and keeps
    *  the saved selection. Narrowed by the caller, so `{}` never reaches the reservation. */
   options?: Readonly<Record<string, string>>
+  /** Host-authored execution constraint; ordinary chats omit it. */
+  requiredPermissionPosture?: AgentSessionRequiredPermissionPosture
 }): Promise<PreparedStructuredAgentSessionCreate> {
   // Adoption replay may need the record loaded from disk before source discovery can be skipped.
   let host = args.resumeFrom ? await args.ensureHost() : null
@@ -63,13 +66,23 @@ export async function prepareStructuredAgentSessionCreateForWorktree(args: {
     callerKey: args.caller.callerKey,
     ...(args.resumeFrom ? { resumeFrom: args.resumeFrom } : {})
   })
+  const resolvedWithPosture = {
+    ...resolved,
+    ...(args.requiredPermissionPosture
+      ? { requiredPermissionPosture: args.requiredPermissionPosture }
+      : {})
+  }
   const hostFingerprint = computeAgentSessionPayloadFingerprint({
     method: 'agentSession.attach',
     sessionId: args.envelope.sessionId,
-    fields: attachFingerprintFields({ ...resolved, envelope: args.envelope })
+    fields: attachFingerprintFields({ ...resolvedWithPosture, envelope: args.envelope })
   })
   host ??= await args.ensureHost()
-  const { agent: _resolvedAgent, provider: _resolvedProvider, ...resolvedAttach } = resolved
+  const {
+    agent: _resolvedAgent,
+    provider: _resolvedProvider,
+    ...resolvedAttach
+  } = resolvedWithPosture
   return {
     host,
     attachParams: {
@@ -130,6 +143,9 @@ export async function createStructuredAgentSessionForWorktree(args: {
   agent: 'claude' | 'codex'
   activate: boolean
   options?: Readonly<Record<string, string>>
+  requiredPermissionPosture?: AgentSessionRequiredPermissionPosture
+  /** Runs after host resolution and fingerprinting, before any provider process can spawn. */
+  onPrepared?: (prepared: PreparedStructuredAgentSessionCreate) => void
 }): Promise<AgentSessionMutationResult<AgentSessionAttachResult>> {
   const prepared: PreparedStructuredAgentSessionCreate | StructuredCreateRefused =
     await resolveUncommittedStructuredCreate(() =>
@@ -138,6 +154,7 @@ export async function createStructuredAgentSessionForWorktree(args: {
   if ('refusal' in prepared) {
     return { ok: false, refusal: prepared.refusal }
   }
+  args.onPrepared?.(prepared)
   return commitStructuredAgentSessionCreate({
     runtime: args.runtime,
     caller: args.caller,
