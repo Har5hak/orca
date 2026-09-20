@@ -40,7 +40,8 @@ type DistroState = {
   guestHome?: string
   codexHomePath?: string
   guestEndpointFilePath?: string
-  opencodeOverlayDir?: string; opencode2OverlayDir?: string
+  opencodeOverlayDir?: string
+  opencode2OverlayDir?: string
   failures: number
   cooldownUntil: number
   connectedAt?: number
@@ -101,7 +102,15 @@ export class WslHookRelayManager {
     return this.stateFor(distro)?.guestEndpointFilePath ?? null
   }
 
-  getOpenCodeOverlayDir(distro: string | null, agent: 'opencode' | 'opencode2' = 'opencode'): string | null { const state = this.stateFor(distro); return agent === 'opencode2' ? (state?.opencode2OverlayDir ?? null) : (state?.opencodeOverlayDir ?? null) }
+  getOpenCodeOverlayDir(
+    distro: string | null,
+    agent: 'opencode' | 'opencode2' = 'opencode'
+  ): string | null {
+    const state = this.stateFor(distro)
+    return agent === 'opencode2'
+      ? (state?.opencode2OverlayDir ?? null)
+      : (state?.opencodeOverlayDir ?? null)
+  }
 
   /** Kills every live relay. Non-permanent (hooks switched off mid-session) leaves the
    *  manager reusable, so re-enabling hooks can start relays again without an app restart. */
@@ -190,7 +199,8 @@ export class WslHookRelayManager {
       failures: existing?.failures ?? 0,
       // Why: instance-keyed and on the distro's persistent fs, so it outlives a relay
       // crash — dropping it would blank status on panes spawned mid-relaunch.
-      opencodeOverlayDir: existing?.opencodeOverlayDir, opencode2OverlayDir: existing?.opencode2OverlayDir,
+      opencodeOverlayDir: existing?.opencodeOverlayDir,
+      opencode2OverlayDir: existing?.opencode2OverlayDir,
       codexHomePath: requestedCodexHomePath ?? existing?.codexHomePath,
       cooldownUntil: 0
     }
