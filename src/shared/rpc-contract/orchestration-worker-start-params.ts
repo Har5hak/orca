@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { LAB_SUBSCRIPTION_NO_MCP_LAUNCH_PROFILE } from '../orchestration-worker-launch-profile'
 import { OptionalFiniteNumber, OptionalString, requiredString } from './rpc-param-primitives'
 
 export const OptionalWorkerLaunchPreference = z
@@ -29,6 +30,7 @@ export const WorkerStartParams = z
     agent: OptionalString,
     model: OptionalWorkerLaunchPreference,
     effort: OptionalWorkerLaunchPreference,
+    launchProfile: z.literal(LAB_SUBSCRIPTION_NO_MCP_LAUNCH_PROFILE).optional(),
     retryOf: OptionalString,
     timeoutMs: OptionalFiniteNumber,
     devMode: z.boolean().optional()
