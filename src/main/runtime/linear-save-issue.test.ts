@@ -645,6 +645,69 @@ describe('Linear save issue', () => {
     )
   })
 
+  it('restores an absent label description and deduplicates its unconfirmed replay', async () => {
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Test-only access to public runtime mixin methods omitted from the facade type.
+    const runtime = runtimeWithReceipts() as unknown as AdminInternals
+    const initial = {
+      id: 'label-1',
+      name: 'Needs QA',
+      color: '#fff',
+      description: 'Temporary description'
+    }
+    const restored = { ...initial, description: null }
+    runtime.resolveLinearTeamInput = vi.fn(async () => ({
+      id: 'team-1',
+      key: 'ENG',
+      name: 'Engineering',
+      workspaceId: 'workspace-1'
+    }))
+    runtime.getLinearTeamLabelsForWrite = vi
+      .fn()
+      .mockResolvedValueOnce([initial])
+      .mockResolvedValueOnce([restored])
+      .mockResolvedValueOnce([restored])
+    runtime.runLinearAgentWrite = vi.fn(
+      async (
+        write: (signal: AbortSignal) => Promise<unknown>,
+        unconfirmed: (cause?: string) => Error
+      ) => {
+        await write(new AbortController().signal)
+        throw unconfirmed('readback timed out')
+      }
+    )
+    const update = vi
+      .spyOn(linearAdmin, 'updateLabelDescriptionForAgent')
+      .mockResolvedValue(restored)
+    const request = {
+      teamInput: 'ENG',
+      labelInput: 'Needs QA',
+      description: '',
+      workspaceId: 'workspace-1',
+      writeId: '55555555-5555-4555-8555-555555555555'
+    }
+
+    await expect(runtime.linearLabelUpdateDescription(request)).rejects.toMatchObject({
+      code: 'linear_write_unconfirmed',
+      data: {
+        writeId: request.writeId,
+        retryCommandArgs: expect.arrayContaining(['--description='])
+      }
+    })
+    await expect(runtime.linearLabelUpdateDescription(request)).resolves.toMatchObject({
+      label: { description: null },
+      previousDescription: 'Temporary description',
+      meta: { writeId: request.writeId, deduplicated: true }
+    })
+    expect(update).toHaveBeenCalledTimes(1)
+    expect(update).toHaveBeenCalledWith(
+      'label-1',
+      '',
+      'workspace-1',
+      expect.any(Function),
+      expect.any(Object)
+    )
+  })
+
   it('delegates creates with the MCP-required team and title', async () => {
     const runtime = new OrcaRuntimeService()
     const create = vi.spyOn(runtime, 'linearIssueCreate').mockResolvedValue({

@@ -453,7 +453,7 @@ describe('orca linear CLI handlers', () => {
     )
   })
 
-  it('maps label description updates with an explicit team and workspace', async () => {
+  it.each(['Requires verification.', ''])('preserves label description %j', async (description) => {
     queueFixtures(callMock, okFixture('req_label_description', labelDescriptionResult()))
 
     await main(
@@ -467,7 +467,7 @@ describe('orca linear CLI handlers', () => {
         '--label',
         'Needs QA',
         '--description',
-        'Requires verification before release.',
+        description,
         '--workspace',
         'workspace-1',
         '--write-id',
@@ -482,7 +482,7 @@ describe('orca linear CLI handlers', () => {
       {
         teamInput: 'ENG',
         labelInput: 'Needs QA',
-        description: 'Requires verification before release.',
+        description,
         workspaceId: 'workspace-1',
         writeId: '22222222-2222-4222-8222-222222222222'
       },

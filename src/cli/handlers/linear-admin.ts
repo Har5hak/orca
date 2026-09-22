@@ -5,7 +5,11 @@ import type {
   LinearLabelDescriptionUpdateResult
 } from '../../shared/linear/agent-access'
 import type { CommandHandler } from '../dispatch'
-import { getOptionalStringFlag, getRequiredStringFlag } from '../flags'
+import {
+  getOptionalStringFlag,
+  getRequiredStringFlag,
+  getRequiredStringFlagAllowingEmpty
+} from '../flags'
 import { printResult } from '../format'
 import { formatLinearLabelDescriptionUpdate, formatLinearTaskUpdate } from '../linear-format'
 import { buildWriteTargetRequest, rejectAllWorkspaceForWrite } from '../linear-request-builders'
@@ -32,7 +36,7 @@ export const LINEAR_ADMIN_HANDLERS: Record<string, CommandHandler> = {
     const request: LinearLabelDescriptionUpdateRequest = {
       teamInput: getRequiredStringFlag(flags, 'team'),
       labelInput: getRequiredStringFlag(flags, 'label'),
-      description: getRequiredStringFlag(flags, 'description'),
+      description: getRequiredStringFlagAllowingEmpty(flags, 'description'),
       workspaceId: getOptionalStringFlag(flags, 'workspace'),
       writeId: getOptionalStringFlag(flags, 'write-id')
     }
