@@ -231,6 +231,38 @@ describe('Linear save issue', () => {
     })
   })
 
+  it('treats an absent label description and an empty request as already set', async () => {
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Test-only access to public runtime mixin methods omitted from the facade type.
+    const runtime = runtimeWithReceipts() as unknown as AdminInternals
+    const label = { id: 'label-1', name: 'Needs QA', color: '#fff', description: null }
+    runtime.resolveLinearTeamInput = vi.fn(async () => ({
+      id: 'team-1',
+      key: 'ENG',
+      name: 'Engineering',
+      workspaceId: 'workspace-1'
+    }))
+    runtime.getLinearTeamLabelsForWrite = vi.fn().mockResolvedValue([label])
+    runtime.runLinearAgentWrite = vi.fn()
+    const update = vi.spyOn(linearAdmin, 'updateLabelDescriptionForAgent')
+
+    await expect(
+      runtime.linearLabelUpdateDescription({
+        teamInput: 'ENG',
+        labelInput: 'Needs QA',
+        description: '',
+        workspaceId: 'workspace-1',
+        writeId: '66666666-6666-4666-8666-666666666666'
+      })
+    ).resolves.toMatchObject({
+      label: { description: null },
+      previousDescription: null,
+      meta: { alreadySet: true, deduplicated: false }
+    })
+
+    expect(runtime.runLinearAgentWrite).not.toHaveBeenCalled()
+    expect(update).not.toHaveBeenCalled()
+  })
+
   it('deduplicates label-description replays and rejects changed payloads before mutation', async () => {
     // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Test-only access to public runtime mixin methods omitted from the facade type.
     const runtime = runtimeWithReceipts() as unknown as AdminInternals

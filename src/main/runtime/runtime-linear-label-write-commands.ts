@@ -25,7 +25,7 @@ export class RuntimeLinearLabelWriteCommands extends RuntimeLinearProjectWriteCo
     const labels = await this.getLinearTeamLabelsForWrite(team.id, team.workspaceId)
     const label = this.resolveLinearLabel(params.labelInput, labels)
     const previousDescription = label.description ?? null
-    const alreadySet = previousDescription === params.description
+    const alreadySet = (previousDescription ?? '') === params.description
     const writeId = params.writeId ?? randomUUID()
     const method = 'linear.labelUpdateDescription'
     const receipt = this.linearMutationReceipt(writeId, method, {
