@@ -2,6 +2,7 @@ import type { RuntimeClientEvent } from '../../shared/runtime-client-events'
 import type { LinearIssueSummary } from '../../shared/linear/agent-access'
 
 export { randomUUID } from 'node:crypto'
+export { hashCanonical } from './rpc/orchestration-mutation-receipt'
 export { resolve } from 'node:path'
 export type { RuntimeClientEvent } from '../../shared/runtime-client-events'
 export type {
@@ -17,6 +18,8 @@ export type {
   LinearIssueSummary,
   LinearIssueTaskUpdateRequest,
   LinearIssueTaskUpdateResult,
+  LinearLabelDescriptionUpdateRequest,
+  LinearLabelDescriptionUpdateResult,
   LinearMcpIssueListRequest,
   LinearMcpIssueListResult,
   LinearIssueRelationWriteRequest,
@@ -73,6 +76,10 @@ export {
 } from '../linear/linear-issue-listing'
 export type { LinearIssueListOptions } from '../linear/linear-issue-query-documents'
 export { LinearWriteFailure } from '../linear/linear-issue-write-support'
+export {
+  listProjectMilestonesForAgent,
+  updateLabelDescriptionForAgent
+} from '../linear/linear-admin-mutations'
 export {
   LinearAgentAccessError,
   getLinearCurrentIssueFromWorktree,

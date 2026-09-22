@@ -25,6 +25,7 @@ export type LinearIssueSummary = {
   priorityLabel?: LinearPriorityLabel
   estimate?: number | null
   dueDate?: string | null
+  projectMilestone?: LinearNamedEntity | null
   branchName?: string | null
   createdAt?: string | null
   updatedAt?: string | null
@@ -205,7 +206,7 @@ export type LinearTeamStatesResult = {
 
 export type LinearTeamLabelsResult = {
   team: LinearTeamSummary
-  labels: (LinearNamedEntity & { id: string; name: string })[]
+  labels: (LinearNamedEntity & { id: string; name: string; description?: string | null })[]
   meta: { workspaceId: string; returned: number }
 }
 
@@ -267,6 +268,7 @@ export type LinearIssueTaskUpdateResult = {
     estimate?: number | null
     dueDate?: string | null
     labels?: LinearNamedEntity[]
+    projectMilestone?: LinearNamedEntity | null
   }
   current: {
     assignee?: LinearUserSummary | null
@@ -274,8 +276,15 @@ export type LinearIssueTaskUpdateResult = {
     estimate?: number | null
     dueDate?: string | null
     labels?: LinearNamedEntity[]
+    projectMilestone?: LinearNamedEntity | null
   }
-  meta: { workspaceId: string; alreadySet: boolean }
+  meta: { workspaceId: string; alreadySet: boolean; writeId?: string; deduplicated?: boolean }
+}
+
+export type LinearLabelDescriptionUpdateResult = {
+  label: { id: string; name: string; description: string | null }
+  previousDescription: string | null
+  meta: { workspaceId: string; alreadySet: boolean; writeId: string; deduplicated: boolean }
 }
 
 export type LinearCommentAddResult = {

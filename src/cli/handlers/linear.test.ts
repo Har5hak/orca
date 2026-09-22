@@ -404,6 +404,101 @@ describe('orca linear CLI handlers', () => {
     )
   })
 
+  it('maps milestone set and clear through current and explicit workspace targets', async () => {
+    queueFixtures(
+      callMock,
+      okFixture('req_milestone_set', taskUpdateResult('projectMilestone')),
+      okFixture('req_milestone_clear', taskUpdateResult('projectMilestone'))
+    )
+
+    await main(
+      [
+        'linear',
+        'milestone',
+        'set',
+        '--current',
+        '--to',
+        'Public beta',
+        '--workspace',
+        'workspace-1',
+        '--write-id',
+        '11111111-1111-4111-8111-111111111111',
+        '--json'
+      ],
+      '/tmp/repo'
+    )
+    await main(['linear', 'milestone', 'clear', 'ENG-123', '--json'], '/tmp/repo')
+
+    expect(callMock).toHaveBeenNthCalledWith(
+      1,
+      'linear.issueUpdateTask',
+      expect.objectContaining({
+        current: true,
+        workspaceId: 'workspace-1',
+        operation: 'projectMilestone',
+        projectMilestone: 'Public beta',
+        writeId: '11111111-1111-4111-8111-111111111111'
+      }),
+      { timeoutMs: 75_000 }
+    )
+    expect(callMock).toHaveBeenNthCalledWith(
+      2,
+      'linear.issueUpdateTask',
+      expect.objectContaining({
+        input: 'ENG-123',
+        operation: 'projectMilestone',
+        projectMilestone: null
+      }),
+      { timeoutMs: 75_000 }
+    )
+  })
+
+  it('maps label description updates with an explicit team and workspace', async () => {
+    queueFixtures(callMock, okFixture('req_label_description', labelDescriptionResult()))
+
+    await main(
+      [
+        'linear',
+        'label',
+        'description',
+        'set',
+        '--team',
+        'ENG',
+        '--label',
+        'Needs QA',
+        '--description',
+        'Requires verification before release.',
+        '--workspace',
+        'workspace-1',
+        '--write-id',
+        '22222222-2222-4222-8222-222222222222',
+        '--json'
+      ],
+      '/tmp/repo'
+    )
+
+    expect(callMock).toHaveBeenCalledWith(
+      'linear.labelUpdateDescription',
+      {
+        teamInput: 'ENG',
+        labelInput: 'Needs QA',
+        description: 'Requires verification before release.',
+        workspaceId: 'workspace-1',
+        writeId: '22222222-2222-4222-8222-222222222222'
+      },
+      { timeoutMs: 75_000 }
+    )
+  })
+
+  it('documents the Linear administration flags without contacting the runtime', async () => {
+    await main(['linear', 'milestone', 'set', '--help'], '/tmp/repo')
+    await main(['linear', 'label', 'description', 'set', '--help'], '/tmp/repo')
+
+    const output = vi.mocked(console.log).mock.calls.flat().join('\n')
+    expect(output).toMatch(/--to <milestone>[\s\S]*--description <text>[\s\S]*--write-id <uuid>/)
+    expect(callMock).not.toHaveBeenCalled()
+  })
+
   it('requires exact write targets for issue writes', async () => {
     await main(['linear', 'comment', 'add', '--body', 'done'], '/tmp/repo')
 
@@ -750,6 +845,18 @@ function relationWriteResult(): unknown {
       relationship: 'blockedBy'
     },
     operation: 'add',
+    meta: { workspaceId: 'workspace-1', alreadySet: false }
+  }
+}
+
+function labelDescriptionResult(): unknown {
+  return {
+    label: {
+      id: 'label-1',
+      name: 'Needs QA',
+      description: 'Requires verification before release.'
+    },
+    previousDescription: null,
     meta: { workspaceId: 'workspace-1', alreadySet: false }
   }
 }

@@ -12,6 +12,7 @@ import {
   LinearIssueRelationWrite,
   LinearIssueSetState,
   LinearIssueUpdateTask,
+  LinearLabelUpdateDescription,
   LinearProjectList,
   LinearSaveIssue,
   LinearTeamLookup,
@@ -93,7 +94,17 @@ export const LINEAR_AGENT_ACCESS_METHODS = [
   defineMethod({
     name: 'linear.issueUpdateTask',
     params: LinearIssueUpdateTask,
-    handler: async (params, { runtime }) => runtime.linearIssueUpdateTask(params)
+    handler: async (params, { runtime }) =>
+      runtime.linearIssueUpdateTask({ ...params, writeId: parseLinearWriteId(params.writeId) })
+  }),
+  defineMethod({
+    name: 'linear.labelUpdateDescription',
+    params: LinearLabelUpdateDescription,
+    handler: async (params, { runtime }) =>
+      runtime.linearLabelUpdateDescription({
+        ...params,
+        writeId: parseLinearWriteId(params.writeId)
+      })
   }),
   defineMethod({
     name: 'linear.issueRelationWrite',

@@ -143,7 +143,13 @@ function formatCommandFlagHelp(flag: string, commandPath: string[]): string {
     return '--write-id <uuid>     Retry id from linear_write_unconfirmed'
   }
   if (command.startsWith('linear ') && flag === 'to') {
+    if (command === 'linear milestone set') {
+      return '--to <milestone>      Exact project milestone name or id'
+    }
     return '--to <state>          Exact Linear workflow state name'
+  }
+  if (command === 'linear label description set' && flag === 'description') {
+    return '--description <text>  New Linear label description'
   }
   if (command === 'linear comment add' && flag === 'reply-to') {
     return '--reply-to <id>       Comment id to reply to'

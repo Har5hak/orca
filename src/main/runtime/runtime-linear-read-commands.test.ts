@@ -21,7 +21,11 @@ function createCommands(): RuntimeLinearReadCommands {
     },
     listResolvedWorktrees: async () => [],
     setWorktreeMeta: () => {},
-    emitClientEvent: () => {}
+    emitClientEvent: () => {},
+    beginMutationReceipt: () => ({ disposition: 'started', receipt: null }),
+    checkpointMutationReceipt: () => {},
+    completeMutationReceipt: () => {},
+    discardMutationReceipt: () => {}
   })
 }
 

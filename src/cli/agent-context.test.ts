@@ -105,4 +105,27 @@ describe('agent-context over the live registry', () => {
     expect(claudeTeams?.argumentMode).toBe('passthrough')
     expect(claudeTeams?.flags).toEqual([])
   })
+
+  it('advertises Linear milestone and label-description administration contracts', () => {
+    const schema = buildAgentContext(COMMAND_SPECS)
+    const milestone = schema.commands.find((command) => command.command === 'linear milestone set')
+    const labelDescription = schema.commands.find(
+      (command) => command.command === 'linear label description set'
+    )
+
+    expect(milestone).toMatchObject({
+      flags: expect.arrayContaining(['current', 'to', 'write-id', 'workspace', 'json']),
+      positionalArgs: ['id']
+    })
+    expect(labelDescription).toMatchObject({
+      flags: expect.arrayContaining([
+        'team',
+        'label',
+        'description',
+        'write-id',
+        'workspace',
+        'json'
+      ])
+    })
+  })
 })
