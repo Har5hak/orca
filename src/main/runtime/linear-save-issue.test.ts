@@ -249,6 +249,41 @@ describe('Linear save issue', () => {
     expect(update).not.toHaveBeenCalled()
   })
 
+  it('restores a stored empty label description to null', async () => {
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Test-only access to public runtime mixin methods omitted from the facade type.
+    const runtime = runtimeWithReceipts() as unknown as AdminInternals
+    const initial = { id: 'label-1', name: 'Needs QA', color: '#fff', description: '' }
+    const restored = { ...initial, description: null }
+    runtime.resolveLinearTeamInput = vi.fn(async () => ({
+      id: 'team-1',
+      key: 'ENG',
+      name: 'Engineering',
+      workspaceId: 'workspace-1'
+    }))
+    runtime.getLinearTeamLabelsForWrite = vi.fn().mockResolvedValue([initial])
+    runtime.runLinearAgentWrite = vi.fn(async (write: (signal: AbortSignal) => Promise<unknown>) =>
+      write(new AbortController().signal)
+    )
+    const update = vi
+      .spyOn(linearAdmin, 'updateLabelDescriptionForAgent')
+      .mockResolvedValue(restored)
+
+    await expect(
+      runtime.linearLabelUpdateDescription({
+        teamInput: 'ENG',
+        labelInput: 'Needs QA',
+        description: '',
+        workspaceId: 'workspace-1',
+        writeId: '77777777-7777-4777-8777-777777777777'
+      })
+    ).resolves.toMatchObject({
+      label: { description: null },
+      previousDescription: '',
+      meta: { alreadySet: false, deduplicated: false }
+    })
+    expect(update).toHaveBeenCalledOnce()
+  })
+
   it('deduplicates label-description replays and rejects changed payloads before mutation', async () => {
     // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Test-only access to public runtime mixin methods omitted from the facade type.
     const runtime = runtimeWithReceipts() as unknown as AdminInternals

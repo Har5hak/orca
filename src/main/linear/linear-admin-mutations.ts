@@ -70,7 +70,11 @@ export async function updateLabelDescriptionForAgent(
     throw new LinearWriteFailure('failed', 'Not connected to Linear')
   }
   return runLinearWrite(entry, options.signal, async (client) => {
-    const result = await (await client.issueLabel(labelId)).update({ description })
+    const result = await (
+      await client.issueLabel(labelId)
+    ).update({
+      description: description.length === 0 ? null : description
+    })
     if (!result.success) {
       throw new LinearWriteFailure('failed', 'Linear label update failed')
     }

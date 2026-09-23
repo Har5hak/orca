@@ -54,7 +54,7 @@ describe('Linear admin mutations', () => {
     update.mockResolvedValue({ success: true })
   })
 
-  it('confirms an empty label description when Linear reads it back as null', async () => {
+  it('clears an empty label description to null and confirms readback', async () => {
     const label = { id: 'label-1', name: 'Needs QA', color: '#fff', description: null }
     issueLabel.mockResolvedValueOnce({ update }).mockResolvedValueOnce(label)
     const { updateLabelDescriptionForAgent } = await import('./linear-admin-mutations')
@@ -63,7 +63,7 @@ describe('Linear admin mutations', () => {
       label
     )
 
-    expect(update).toHaveBeenCalledWith({ description: '' })
+    expect(update).toHaveBeenCalledWith({ description: null })
     expect(issueLabel).toHaveBeenCalledTimes(2)
   })
 

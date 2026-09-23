@@ -22,7 +22,8 @@ export class RuntimeLinearLabelWriteCommands extends RuntimeLinearProjectWriteCo
     const labels = await this.getLinearTeamLabelsForWrite(team.id, team.workspaceId)
     const label = this.resolveLinearLabel(params.labelInput, labels)
     const previousDescription = label.description ?? null
-    const alreadySet = (previousDescription ?? '') === params.description
+    const targetDescription = params.description.length === 0 ? null : params.description
+    const alreadySet = previousDescription === targetDescription
     const writeId = params.writeId ?? randomUUID()
     const method = 'linear.labelUpdateDescription'
     const receipt = this.linearMutationReceipt(writeId, method, {
@@ -51,7 +52,7 @@ export class RuntimeLinearLabelWriteCommands extends RuntimeLinearProjectWriteCo
       ) as LinearLabelDescriptionUpdateResult | null
       const refreshed = await this.getLinearTeamLabelsForWrite(team.id, team.workspaceId)
       const observed = refreshed.find((candidate) => candidate.id === label.id)
-      if (!recorded || !observed || (observed.description ?? '') !== params.description) {
+      if (!recorded || !observed || (observed.description ?? null) !== targetDescription) {
         throw linearError(
           'linear_invalid_write_id',
           'The completed write receipt no longer matches the Linear label.'
@@ -70,7 +71,7 @@ export class RuntimeLinearLabelWriteCommands extends RuntimeLinearProjectWriteCo
     if (receipt.disposition === 'pending') {
       const refreshed = await this.getLinearTeamLabelsForWrite(team.id, team.workspaceId)
       const observed = refreshed.find((candidate) => candidate.id === label.id)
-      if (!observed || (observed.description ?? '') !== params.description) {
+      if (!observed || (observed.description ?? null) !== targetDescription) {
         throw this.linearUpdateUnconfirmed(
           writeId,
           team.workspaceId,
