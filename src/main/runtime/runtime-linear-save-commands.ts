@@ -112,10 +112,21 @@ export class RuntimeLinearSaveCommands extends RuntimeLinearCommentCommands {
         issueId: target.issue.id,
         projectMilestoneId: update.fields.projectMilestoneId
       })
-      const retryCommand =
-        update.fields.projectMilestoneId === null
-          ? `orca linear milestone clear ${this.commandToken(target.issue.identifier, 'ISSUE_ID')} --workspace=${this.commandToken(target.workspaceId, 'WORKSPACE_ID')} --write-id=${writeId} --json`
-          : `orca linear milestone set ${this.commandToken(target.issue.identifier, 'ISSUE_ID')} --to=${this.commandToken(update.fields.projectMilestoneId ?? '', 'MILESTONE_ID')} --workspace=${this.commandToken(target.workspaceId, 'WORKSPACE_ID')} --write-id=${writeId} --json`
+      const retryCommandArgs = [
+        'orca',
+        'linear',
+        'milestone',
+        update.fields.projectMilestoneId === null ? 'clear' : 'set',
+        target.issue.identifier,
+        ...(update.fields.projectMilestoneId === null
+          ? []
+          : [`--to=${update.fields.projectMilestoneId ?? ''}`]),
+        `--workspace=${target.workspaceId}`,
+        `--write-id=${writeId}`,
+        '--json'
+      ]
+      const unconfirmed = (cause?: string) =>
+        this.linearUpdateUnconfirmed(writeId, target.workspaceId, null, cause, retryCommandArgs)
       if (receipt.disposition === 'completed') {
         // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Completed receipts are written from this exact result contract below.
         const recorded = JSON.parse(receipt.receipt ?? 'null') as LinearIssueTaskUpdateResult | null
@@ -141,12 +152,7 @@ export class RuntimeLinearSaveCommands extends RuntimeLinearCommentCommands {
           target.workspaceId
         )
         if (!this.linearTaskFieldAlreadySet(params.operation, observed, update)) {
-          throw this.linearUpdateUnconfirmed(
-            writeId,
-            target.workspaceId,
-            retryCommand,
-            'The original mutation is still pending and was not sent again.'
-          )
+          throw unconfirmed('The original mutation is still pending and was not sent again.')
         }
         // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Pending receipts are written from the checkpoint contract below.
         const checkpoint = JSON.parse(receipt.receipt ?? 'null') as {
@@ -167,7 +173,11 @@ export class RuntimeLinearSaveCommands extends RuntimeLinearCommentCommands {
             deduplicated: true
           }
         }
-        this.completeMutationReceipt(writeId, method, receipt.payloadHash, JSON.stringify(result))
+        try {
+          this.completeMutationReceipt(writeId, method, receipt.payloadHash, JSON.stringify(result))
+        } catch (error) {
+          throw unconfirmed(error instanceof Error ? error.message : undefined)
+        }
         return result
       }
       this.checkpointMutationReceipt(
@@ -179,25 +189,21 @@ export class RuntimeLinearSaveCommands extends RuntimeLinearCommentCommands {
       let confirmedRecord = alreadySet ? current : null
       try {
         if (!alreadySet) {
-          confirmedRecord = await this.runLinearAgentWrite(
-            async (signal) => {
-              const updated = await updateLinearIssueForAgent(
-                target.issue.id,
-                update.fields,
-                target.workspaceId,
-                { signal }
+          confirmedRecord = await this.runLinearAgentWrite(async (signal) => {
+            const updated = await updateLinearIssueForAgent(
+              target.issue.id,
+              update.fields,
+              target.workspaceId,
+              { signal }
+            )
+            if (!this.linearTaskFieldAlreadySet(params.operation, updated, update)) {
+              throw new LinearWriteFailure(
+                'unconfirmed',
+                'Linear task field update could not be confirmed.'
               )
-              if (!this.linearTaskFieldAlreadySet(params.operation, updated, update)) {
-                throw new LinearWriteFailure(
-                  'unconfirmed',
-                  'Linear task field update could not be confirmed.'
-                )
-              }
-              return updated
-            },
-            (cause) =>
-              this.linearUpdateUnconfirmed(writeId, target.workspaceId, retryCommand, cause)
-          )
+            }
+            return updated
+          }, unconfirmed)
         }
         try {
           await this.notifyLinearLinkedIssueUpdated(target.workspaceId, target.issue.identifier)
@@ -208,12 +214,7 @@ export class RuntimeLinearSaveCommands extends RuntimeLinearCommentCommands {
           ? current
           : await this.readLinearAgentIssueWriteRecord(target.issue.id, target.workspaceId)
         if (!this.linearTaskFieldAlreadySet(params.operation, finalRecord, update)) {
-          throw this.linearUpdateUnconfirmed(
-            writeId,
-            target.workspaceId,
-            retryCommand,
-            'The final Linear read did not contain the requested milestone.'
-          )
+          throw unconfirmed('The final Linear read did not contain the requested milestone.')
         }
         const result = this.linearTaskUpdateResult(
           params.operation,
@@ -231,12 +232,7 @@ export class RuntimeLinearSaveCommands extends RuntimeLinearCommentCommands {
           confirmedRecord &&
           !(error instanceof LinearAgentAccessError && error.code === 'linear_write_unconfirmed')
         ) {
-          throw this.linearUpdateUnconfirmed(
-            writeId,
-            target.workspaceId,
-            retryCommand,
-            error instanceof Error ? error.message : undefined
-          )
+          throw unconfirmed(error instanceof Error ? error.message : undefined)
         }
         if (
           !(error instanceof LinearAgentAccessError && error.code === 'linear_write_unconfirmed')

@@ -87,6 +87,7 @@ export {
   resolveLegacyLinearLinkWorkspace,
   searchLinearIssuesForAgents
 } from '../linear/issue-context'
+export { resolveWorkspaceSelector as resolveLinearWorkspaceSelector } from '../linear/issue-context-workspaces'
 export {
   classifyLinearError,
   linearError,

@@ -3,6 +3,8 @@ import {
   type LinearIssueTaskUpdateRequest,
   type LinearIssueTaskUpdateResult,
   type LinearIssueSummary,
+  type LinearLabelDescriptionUpdateRequest,
+  type LinearLabelDescriptionUpdateResult,
   getLinearTeamLabelsOrThrow,
   linearError,
   sameStringSet,
@@ -10,11 +12,6 @@ import {
   LinearAgentAccessError,
   updateLabelDescriptionForAgent
 } from './runtime-linear-command-dependencies'
-import type {
-  LinearLabelDescriptionUpdateRequest,
-  LinearLabelDescriptionUpdateResult
-} from './runtime-linear-command-dependencies'
-import { quoteCliCommandArgument } from '../../shared/cli-command-argument'
 import { RuntimeLinearProjectWriteCommands } from './runtime-linear-project-write-commands'
 
 export class RuntimeLinearLabelWriteCommands extends RuntimeLinearProjectWriteCommands {
@@ -47,7 +44,6 @@ export class RuntimeLinearLabelWriteCommands extends RuntimeLinearProjectWriteCo
       `--write-id=${writeId}`,
       '--json'
     ]
-    const retryCommand = retryCommandArgs.map((value) => quoteCliCommandArgument(value)).join(' ')
     if (receipt.disposition === 'completed') {
       // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Completed receipts are written from this exact result contract below.
       const recorded = JSON.parse(
@@ -78,7 +74,7 @@ export class RuntimeLinearLabelWriteCommands extends RuntimeLinearProjectWriteCo
         throw this.linearUpdateUnconfirmed(
           writeId,
           team.workspaceId,
-          retryCommand,
+          null,
           'The original mutation is still pending and was not sent again.',
           retryCommandArgs
         )
@@ -99,7 +95,17 @@ export class RuntimeLinearLabelWriteCommands extends RuntimeLinearProjectWriteCo
         previousDescription: checkpoint.previousDescription,
         meta: { workspaceId: team.workspaceId, alreadySet: false, writeId, deduplicated: true }
       }
-      this.completeMutationReceipt(writeId, method, receipt.payloadHash, JSON.stringify(result))
+      try {
+        this.completeMutationReceipt(writeId, method, receipt.payloadHash, JSON.stringify(result))
+      } catch (error) {
+        throw this.linearUpdateUnconfirmed(
+          writeId,
+          team.workspaceId,
+          null,
+          error instanceof Error ? error.message : undefined,
+          retryCommandArgs
+        )
+      }
       return result
     }
     this.checkpointMutationReceipt(
@@ -109,50 +115,48 @@ export class RuntimeLinearLabelWriteCommands extends RuntimeLinearProjectWriteCo
       JSON.stringify({ previousDescription })
     )
     let updated = label
+    let confirmed = alreadySet
     try {
-      updated = alreadySet
-        ? label
-        : await this.runLinearAgentWrite(
-            (signal) =>
-              updateLabelDescriptionForAgent(
-                label.id,
-                params.description,
-                team.workspaceId,
-                async () => {
-                  const refreshed = await this.getLinearTeamLabelsForWrite(
-                    team.id,
-                    team.workspaceId
-                  )
-                  return refreshed.find((candidate) => candidate.id === label.id) ?? null
-                },
-                { signal }
-              ),
-            (cause) =>
-              this.linearUpdateUnconfirmed(
-                writeId,
-                team.workspaceId,
-                retryCommand,
-                cause,
-                retryCommandArgs
-              )
-          )
+      if (!alreadySet) {
+        updated = await this.runLinearAgentWrite(
+          (signal) =>
+            updateLabelDescriptionForAgent(label.id, params.description, team.workspaceId, {
+              signal
+            }),
+          (cause) =>
+            this.linearUpdateUnconfirmed(writeId, team.workspaceId, null, cause, retryCommandArgs)
+        )
+        confirmed = true
+      }
+      const result: LinearLabelDescriptionUpdateResult = {
+        label: {
+          id: updated.id,
+          name: updated.name,
+          description: updated.description ?? null
+        },
+        previousDescription,
+        meta: { workspaceId: team.workspaceId, alreadySet, writeId, deduplicated: false }
+      }
+      this.completeMutationReceipt(writeId, method, receipt.payloadHash, JSON.stringify(result))
+      return result
     } catch (error) {
+      if (
+        confirmed &&
+        !(error instanceof LinearAgentAccessError && error.code === 'linear_write_unconfirmed')
+      ) {
+        throw this.linearUpdateUnconfirmed(
+          writeId,
+          team.workspaceId,
+          null,
+          error instanceof Error ? error.message : undefined,
+          retryCommandArgs
+        )
+      }
       if (!(error instanceof LinearAgentAccessError && error.code === 'linear_write_unconfirmed')) {
         this.discardMutationReceipt(writeId)
       }
       throw error
     }
-    const result: LinearLabelDescriptionUpdateResult = {
-      label: {
-        id: updated.id,
-        name: updated.name,
-        description: updated.description ?? null
-      },
-      previousDescription,
-      meta: { workspaceId: team.workspaceId, alreadySet, writeId, deduplicated: false }
-    }
-    this.completeMutationReceipt(writeId, method, receipt.payloadHash, JSON.stringify(result))
-    return result
   }
 
   public resolveLinearLabel<T extends { id: string; name: string }>(input: string, labels: T[]): T {

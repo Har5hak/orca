@@ -94,7 +94,12 @@ export class RuntimeLinearReadCommands extends RuntimeLinearContextCommands {
     const labels = await this.getLinearTeamLabelsForWrite(team.id, team.workspaceId)
     return {
       team: this.linearTeamSummary(team),
-      labels: labels.map((label) => ({ id: label.id, name: label.name, color: label.color })),
+      labels: labels.map((label) => ({
+        id: label.id,
+        name: label.name,
+        color: label.color,
+        description: label.description ?? null
+      })),
       meta: { workspaceId: team.workspaceId, returned: labels.length }
     }
   }

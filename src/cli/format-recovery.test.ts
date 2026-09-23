@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { formatCliError, reportCliError } from './format'
+import { formatPinnedRetryCommandStep } from './cli-error'
 import { RuntimeClientError, RuntimeRpcFailureError } from './runtime-client'
 
 function selectorNotFound(): RuntimeRpcFailureError {
@@ -9,6 +10,23 @@ function selectorNotFound(): RuntimeRpcFailureError {
     ok: false,
     error: { code: 'selector_not_found', message: 'selector_not_found' },
     _meta: { runtimeId: 'runtime_local' }
+  })
+}
+
+function unconfirmedLinearRetry(): RuntimeRpcFailureError {
+  return new RuntimeRpcFailureError({
+    id: 'req_linear_retry',
+    ok: false,
+    error: {
+      code: 'linear_write_unconfirmed',
+      message: 'Linear may have applied the write.',
+      data: {
+        writeId: 'write-1',
+        nextSteps: ['Retry once with the exact `retryCommandArgs` from this error.'],
+        retryCommandArgs: ['orca', 'linear', 'milestone', 'clear', 'ENG-1', '--json']
+      }
+    },
+    _meta: { runtimeId: 'runtime_remote' }
   })
 }
 
@@ -96,6 +114,99 @@ describe('worktree selector recovery', () => {
 })
 
 describe('CLI error recovery', () => {
+  it('does not render an unsafe multiline retry command for Windows cmd', () => {
+    const args = [
+      'orca',
+      'linear',
+      'label',
+      'description',
+      'set',
+      '--description=line 1\r\nline 2',
+      '--write-id=11111111-1111-4111-8111-111111111111'
+    ]
+
+    const output = formatPinnedRetryCommandStep(args, 'win32', {
+      ComSpec: 'C:\\Windows\\System32\\cmd.exe'
+    })
+
+    expect(output).toContain('cannot represent an argument containing a line break safely')
+    expect(output).toContain(JSON.stringify(args))
+    expect(output).not.toContain('line 1\r\nline 2')
+  })
+
+  it('pins a non-secret remote route and refuses a secret-only local retry', () => {
+    const args = ['orca', 'linear', 'milestone', 'clear', 'ENG-1', '--write-id=write-1']
+
+    expect(
+      formatPinnedRetryCommandStep(
+        args,
+        'darwin',
+        {},
+        {
+          remoteEnvironmentSelector: 'gpu',
+          remoteRoutingRequired: true
+        }
+      )
+    ).toContain('--environment=gpu')
+    const secretOnly = formatPinnedRetryCommandStep(
+      args,
+      'darwin',
+      {},
+      {
+        remoteRoutingRequired: true
+      }
+    )
+    expect(secretOnly).toContain('same paired Orca runtime')
+    expect(secretOnly).toContain('write-1')
+    expect(secretOnly).not.toContain('ENG-1')
+    expect(secretOnly).not.toContain('orca linear')
+    expect(secretOnly).not.toContain('--pairing-code')
+  })
+
+  it('pins the non-secret remote route in JSON retry arguments', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    reportCliError(unconfirmedLinearRetry(), true, {
+      remoteEnvironmentSelector: 'gpu',
+      remoteRoutingRequired: true
+    })
+
+    const output = JSON.parse(String(log.mock.calls[0]?.[0]))
+    expect(output.error.data.retryCommandArgs).toEqual([
+      'orca',
+      'linear',
+      'milestone',
+      'clear',
+      'ENG-1',
+      '--json',
+      '--environment=gpu'
+    ])
+    log.mockRestore()
+  })
+
+  it('blocks a local JSON retry when only secret pairing can preserve the route', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    reportCliError(unconfirmedLinearRetry(), true, { remoteRoutingRequired: true })
+
+    const output = JSON.parse(String(log.mock.calls[0]?.[0]))
+    expect(output.error.data).not.toHaveProperty('retryCommandArgs')
+    expect(output.error.data).not.toHaveProperty('retryCommandArgsWithoutRouting')
+    expect(output.error.data).toMatchObject({
+      writeId: 'write-1',
+      retryRouting: {
+        required: true,
+        kind: 'pairing',
+        secretOmitted: true,
+        retryBlocked: true
+      }
+    })
+    expect(JSON.stringify(output)).not.toContain('ENG-1')
+    expect(JSON.stringify(output)).not.toContain('"orca"')
+    expect(JSON.stringify(output)).not.toContain('--pairing-code')
+    log.mockRestore()
+  })
+
   it('prints did-you-mean next steps for an unknown-command error carrying data', () => {
     const error = new RuntimeClientError('invalid_argument', 'Unknown command: worktree remov', {
       suggestions: ['worktree rm'],

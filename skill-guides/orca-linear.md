@@ -89,15 +89,15 @@ Prefer `label add` and `label remove` for incremental edits. `label set` replace
 Issue project milestones use the issue target contract and return the confirmed milestone in JSON:
 
 ```bash
-ORCA linear milestone set --current --to <milestone-id-or-exact-name> --write-id <uuid> --workspace <workspaceId> --json
-ORCA linear milestone clear ENG-123 --write-id <uuid> --workspace <workspaceId> --json
+ORCA linear milestone set --current --to <milestone-id-or-exact-name> --write-id <uuid> --workspace <workspace-id-or-unique-exact-name> --json
+ORCA linear milestone clear ENG-123 --write-id <uuid> --workspace <workspace-id-or-unique-exact-name> --json
 ```
 
 Update a team label description by exact label id or unique exact name. Read it back with `team labels`, whose JSON includes each label's `description`:
 
 ```bash
-ORCA linear label description set --team <key-or-id> --label <label-id-or-exact-name> --description <text> --write-id <uuid> --workspace <workspaceId> --json
-ORCA linear team labels --team <key-or-id> --workspace <workspaceId> --json
+ORCA linear label description set --team <key-id-or-unique-exact-name> --label <label-id-or-exact-name> --description <text> --write-id <uuid> --workspace <workspace-id-or-unique-exact-name> --json
+ORCA linear team labels --team <key-id-or-unique-exact-name> --workspace <workspace-id-or-unique-exact-name> --json
 ```
 
 Omit `--write-id` to mint one. JSON results return the durable id; an unconfirmed write's pinned retry preserves it so Orca can read back without sending the mutation twice.

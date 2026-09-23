@@ -1,11 +1,7 @@
 import type { LinearProjectMilestoneSummary } from '../../shared/linear/project-types'
 import type { LinearLabel } from '../../shared/linear/workspace-types'
 import { getClients } from './client'
-import {
-  confirmLinearWrite,
-  LinearWriteFailure,
-  runLinearWrite
-} from './linear-issue-write-support'
+import { LinearWriteFailure, runLinearWrite } from './linear-issue-write-support'
 
 const PROJECT_MILESTONES_QUERY = `
   query OrcaLinearProjectMilestones($id: String!, $first: Int!, $after: String) {
@@ -67,7 +63,6 @@ export async function updateLabelDescriptionForAgent(
   labelId: string,
   description: string,
   workspaceId: string,
-  readback: () => Promise<LinearLabel | null>,
   options: { signal?: AbortSignal } = {}
 ): Promise<LinearLabel> {
   const entry = getClients(workspaceId)[0]
@@ -79,12 +74,15 @@ export async function updateLabelDescriptionForAgent(
     if (!result.success) {
       throw new LinearWriteFailure('failed', 'Linear label update failed')
     }
-    return confirmLinearWrite('Label was updated but could not be retrieved', async () => {
-      const label = await readback()
-      if (!label || (label.description ?? '') !== description) {
-        throw new LinearWriteFailure('unconfirmed', 'Linear label update could not be confirmed')
-      }
-      return label
-    })
+    const label = await client.issueLabel(labelId)
+    if ((label.description ?? '') !== description) {
+      throw new LinearWriteFailure('unconfirmed', 'Linear label update could not be confirmed')
+    }
+    return {
+      id: label.id,
+      name: label.name,
+      color: label.color,
+      description: label.description ?? null
+    }
   })
 }

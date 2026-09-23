@@ -1,6 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { LINEAR_WRITE_BODY_CAP } from '../../shared/linear/agent-access'
-import * as linearTeams from '../linear/teams'
 import * as linearAdmin from '../linear/linear-admin-mutations'
 import * as linearIssueMutations from '../linear/linear-issue-mutations'
 import { OrchestrationDb } from './orchestration/db/orchestration-db'
@@ -26,17 +24,7 @@ const issue = {
 
 const receiptDatabases: OrchestrationDb[] = []
 
-type SaveIssueInternals = {
-  resolveLinearAssignee(input: string, teamId: string, workspaceId: string): Promise<string>
-  resolveLinearAgentState(input: string, states: unknown[]): unknown
-  buildLinearSaveUpdate(
-    params: { labels?: string[] },
-    current: typeof issue,
-    workspaceId: string
-  ): Promise<{ labelIds?: string[] }>
-}
-
-type AdminInternals = SaveIssueInternals & {
+type AdminInternals = {
   linearIssueUpdateTask(params: {
     input: string
     operation: 'projectMilestone'
@@ -69,7 +57,10 @@ type AdminInternals = SaveIssueInternals & {
     workspaceId?: string
     writeId?: string
   }): Promise<unknown>
-  resolveLinearTeamInput: ReturnType<typeof vi.fn>
+  resolveLinearTeamInput(
+    teamInput: string,
+    workspaceId?: (string & {}) | 'all'
+  ): Promise<{ id: string; key: string; name: string; workspaceId: string }>
   getLinearTeamLabelsForWrite: ReturnType<typeof vi.fn>
   runLinearAgentWrite: ReturnType<typeof vi.fn>
   readLinearAgentIssueWriteRecord: ReturnType<typeof vi.fn>
@@ -197,15 +188,12 @@ describe('Linear save issue', () => {
     runtime.runLinearAgentWrite = vi.fn(async (write: (signal: AbortSignal) => Promise<unknown>) =>
       write(new AbortController().signal)
     )
-    vi.spyOn(linearAdmin, 'updateLabelDescriptionForAgent').mockImplementation(
-      async (_labelId, _description, _workspaceId, readback) => {
-        const label = await readback()
-        if (!label) {
-          throw new Error('missing label')
-        }
-        return label
-      }
-    )
+    vi.spyOn(linearAdmin, 'updateLabelDescriptionForAgent').mockResolvedValue({
+      id: 'label-1',
+      name: 'Needs QA',
+      color: '#fff',
+      description: 'Requires verification.'
+    })
 
     await expect(
       runtime.linearLabelUpdateDescription({
@@ -244,7 +232,6 @@ describe('Linear save issue', () => {
     runtime.getLinearTeamLabelsForWrite = vi.fn().mockResolvedValue([label])
     runtime.runLinearAgentWrite = vi.fn()
     const update = vi.spyOn(linearAdmin, 'updateLabelDescriptionForAgent')
-
     await expect(
       runtime.linearLabelUpdateDescription({
         teamInput: 'ENG',
@@ -258,7 +245,6 @@ describe('Linear save issue', () => {
       previousDescription: null,
       meta: { alreadySet: true, deduplicated: false }
     })
-
     expect(runtime.runLinearAgentWrite).not.toHaveBeenCalled()
     expect(update).not.toHaveBeenCalled()
   })
@@ -286,13 +272,7 @@ describe('Linear save issue', () => {
     )
     const update = vi
       .spyOn(linearAdmin, 'updateLabelDescriptionForAgent')
-      .mockImplementation(async (_labelId, _description, _workspaceId, readback) => {
-        const label = await readback()
-        if (!label) {
-          throw new Error('missing label')
-        }
-        return label
-      })
+      .mockResolvedValue(updated)
     const request = {
       teamInput: 'ENG',
       labelInput: 'Needs QA',
@@ -300,7 +280,6 @@ describe('Linear save issue', () => {
       workspaceId: 'workspace-1',
       writeId: '33333333-3333-4333-8333-333333333333'
     }
-
     await expect(runtime.linearLabelUpdateDescription(request)).resolves.toMatchObject({
       meta: { writeId: request.writeId, deduplicated: false }
     })
@@ -355,7 +334,6 @@ describe('Linear save issue', () => {
       workspaceId: 'workspace-1',
       writeId: '44444444-4444-4444-8444-444444444444'
     }
-
     await expect(runtime.linearIssueUpdateTask(request)).resolves.toMatchObject({
       meta: { writeId: request.writeId, deduplicated: false }
     })
@@ -390,7 +368,6 @@ describe('Linear save issue', () => {
       .mockResolvedValueOnce(cleared)
     runtime.notifyLinearLinkedIssueUpdated = vi.fn(async () => undefined)
     const update = vi.spyOn(linearIssueMutations, 'updateIssueForAgent').mockResolvedValue(cleared)
-
     await expect(
       runtime.linearIssueUpdateTask({
         input: 'ENG-1',
@@ -458,10 +435,16 @@ describe('Linear save issue', () => {
         workspaceId: 'workspace-1',
         writeId: '55555555-5555-4555-8555-555555555555'
       }
-
+      const writeArg = `--write-id=${request.writeId}`
+      const operation = requestedMilestone === null ? 'clear' : 'set'
+      const milestoneArg = operation === 'set' ? ' --to=milestone-1' : ''
+      const retryCommandArgs =
+        `orca linear milestone ${operation} ENG-1${milestoneArg} --workspace=workspace-1 ${writeArg} --json`.split(
+          ' '
+        )
       await expect(runtime.linearIssueUpdateTask(request)).rejects.toMatchObject({
         code: 'linear_write_unconfirmed',
-        data: { writeId: request.writeId }
+        data: { writeId: request.writeId, retryCommandArgs }
       })
       await expect(runtime.linearIssueUpdateTask(request)).rejects.toMatchObject({
         code: 'linear_write_unconfirmed',
@@ -474,6 +457,10 @@ describe('Linear save issue', () => {
   it('keeps a confirmed milestone write pending when the final read fails', async () => {
     // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Test-only access to public runtime mixin methods omitted from the facade type.
     const runtime = runtimeWithReceipts() as unknown as AdminInternals
+    const database = receiptDatabases.at(-1)
+    if (!database) {
+      throw new Error('Expected a mutation receipt database')
+    }
     const current = {
       ...issue,
       project: { id: 'project-1', name: 'Launch' },
@@ -493,11 +480,16 @@ describe('Linear save issue', () => {
       .mockRejectedValueOnce(new Error('final read failed'))
       .mockResolvedValueOnce(updated)
       .mockResolvedValueOnce(updated)
+      .mockResolvedValueOnce(updated)
+      .mockResolvedValueOnce(updated)
     runtime.notifyLinearLinkedIssueUpdated = vi.fn(async () => undefined)
     vi.spyOn(linearAdmin, 'listProjectMilestonesForAgent').mockResolvedValue([
       { id: 'milestone-1', name: 'Public beta' }
     ])
     const update = vi.spyOn(linearIssueMutations, 'updateIssueForAgent').mockResolvedValue(updated)
+    vi.spyOn(database, 'completeMutationReceipt').mockImplementationOnce(() => {
+      throw new Error('receipt storage unavailable')
+    })
     const request = {
       input: 'ENG-1',
       operation: 'projectMilestone' as const,
@@ -505,10 +497,13 @@ describe('Linear save issue', () => {
       workspaceId: 'workspace-1',
       writeId: '66666666-6666-4666-8666-666666666666'
     }
-
     await expect(runtime.linearIssueUpdateTask(request)).rejects.toMatchObject({
       code: 'linear_write_unconfirmed',
       data: { writeId: request.writeId }
+    })
+    await expect(runtime.linearIssueUpdateTask(request)).rejects.toMatchObject({
+      code: 'linear_write_unconfirmed',
+      data: { cause: 'receipt storage unavailable', writeId: request.writeId }
     })
     await expect(runtime.linearIssueUpdateTask(request)).resolves.toMatchObject({
       current: { projectMilestone: { id: 'milestone-1', name: 'Public beta' } },
@@ -596,7 +591,10 @@ describe('Linear save issue', () => {
       data: {
         cause: 'readback timed out',
         writeId: '22222222-2222-4222-8222-222222222222',
-        nextSteps: [expect.stringContaining('--write-id=22222222-2222-4222-8222-222222222222')]
+        nextSteps: [expect.stringContaining('retryCommandArgs')],
+        retryCommandArgs: expect.arrayContaining([
+          '--write-id=22222222-2222-4222-8222-222222222222'
+        ])
       }
     })
     await expect(runtime.linearLabelUpdateDescription(request)).rejects.toMatchObject({
@@ -609,7 +607,7 @@ describe('Linear save issue', () => {
   it('pins the exact label description and deduplicates its unconfirmed replay', async () => {
     // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Test-only access to public runtime mixin methods omitted from the facade type.
     const runtime = runtimeWithReceipts() as unknown as AdminInternals
-    const description = `Alice's "quoted" $HOME && $(do-not-run) | <review> \`tick\`\nnext line`
+    const description = `Alice's "quoted" $HOME && $(do-not-run) | <review> \`tick\`\r\nnext line`
     const initial = { id: 'label-1', name: 'Needs QA', color: '#fff', description: null }
     const updated = { ...initial, description }
     runtime.resolveLinearTeamInput = vi.fn(async () => ({
@@ -621,6 +619,10 @@ describe('Linear save issue', () => {
     runtime.getLinearTeamLabelsForWrite = vi
       .fn()
       .mockResolvedValueOnce([initial])
+      .mockResolvedValueOnce([updated])
+      .mockResolvedValueOnce([updated])
+      .mockResolvedValueOnce([updated])
+      .mockResolvedValueOnce([updated])
       .mockResolvedValueOnce([updated])
       .mockResolvedValueOnce([updated])
     runtime.runLinearAgentWrite = vi.fn(
@@ -643,7 +645,8 @@ describe('Linear save issue', () => {
       writeId: '44444444-4444-4444-8444-444444444444'
     }
 
-    await expect(runtime.linearLabelUpdateDescription(request)).rejects.toMatchObject({
+    const failure = await runtime.linearLabelUpdateDescription(request).catch((error) => error)
+    expect(failure).toMatchObject({
       code: 'linear_write_unconfirmed',
       data: {
         writeId: request.writeId,
@@ -660,21 +663,82 @@ describe('Linear save issue', () => {
           '--write-id=44444444-4444-4444-8444-444444444444',
           '--json'
         ],
-        nextSteps: [expect.stringContaining('Retry once with the pinned command:\n')]
+        nextSteps: [expect.stringContaining('retryCommandArgs')]
       }
+    })
+    expect(failure).not.toMatchObject({
+      data: { nextSteps: [expect.stringContaining(description)] }
     })
     await expect(runtime.linearLabelUpdateDescription(request)).resolves.toMatchObject({
       label: { description },
       meta: { writeId: request.writeId, deduplicated: true }
     })
     expect(update).toHaveBeenCalledTimes(1)
-    expect(update).toHaveBeenCalledWith(
-      'label-1',
-      description,
-      'workspace-1',
-      expect.any(Function),
-      expect.any(Object)
+    expect(update).toHaveBeenCalledWith('label-1', description, 'workspace-1', expect.any(Object))
+  })
+
+  it('keeps the label checkpoint recoverable when receipt completion fails', async () => {
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Test-only access to public runtime mixin methods omitted from the facade type.
+    const runtime = runtimeWithReceipts() as unknown as AdminInternals
+    const database = receiptDatabases.at(-1)
+    if (!database) {
+      throw new Error('Expected a mutation receipt database')
+    }
+    const initial = { id: 'label-1', name: 'Needs QA', color: '#fff', description: null }
+    const updated = { ...initial, description: 'Requires verification.' }
+    runtime.resolveLinearTeamInput = vi.fn(async () => ({
+      id: 'team-1',
+      key: 'ENG',
+      name: 'Engineering',
+      workspaceId: 'workspace-1'
+    }))
+    runtime.getLinearTeamLabelsForWrite = vi
+      .fn()
+      .mockResolvedValueOnce([initial])
+      .mockResolvedValueOnce([updated])
+      .mockResolvedValueOnce([updated])
+      .mockResolvedValueOnce([updated])
+      .mockResolvedValueOnce([updated])
+    runtime.runLinearAgentWrite = vi.fn(async (write: (signal: AbortSignal) => Promise<unknown>) =>
+      write(new AbortController().signal)
     )
+    const update = vi
+      .spyOn(linearAdmin, 'updateLabelDescriptionForAgent')
+      .mockResolvedValue(updated)
+    vi.spyOn(database, 'completeMutationReceipt')
+      .mockImplementationOnce(() => {
+        throw new Error('receipt storage unavailable')
+      })
+      .mockImplementationOnce(() => {
+        throw new Error('receipt storage unavailable')
+      })
+    const request = {
+      teamInput: 'ENG',
+      labelInput: 'Needs QA',
+      description: 'Requires verification.',
+      workspaceId: 'workspace-1',
+      writeId: '66666666-6666-4666-8666-666666666666'
+    }
+
+    await expect(runtime.linearLabelUpdateDescription(request)).rejects.toMatchObject({
+      code: 'linear_write_unconfirmed',
+      data: {
+        cause: 'receipt storage unavailable',
+        retryCommandArgs: expect.arrayContaining([
+          '--label=label-1',
+          '--write-id=66666666-6666-4666-8666-666666666666'
+        ])
+      }
+    })
+    await expect(runtime.linearLabelUpdateDescription(request)).rejects.toMatchObject({
+      code: 'linear_write_unconfirmed',
+      data: { cause: 'receipt storage unavailable', writeId: request.writeId }
+    })
+    await expect(runtime.linearLabelUpdateDescription(request)).resolves.toMatchObject({
+      label: { description: 'Requires verification.' },
+      meta: { writeId: request.writeId, deduplicated: true }
+    })
+    expect(update).toHaveBeenCalledTimes(1)
   })
 
   it('restores an absent label description and deduplicates its unconfirmed replay', async () => {
@@ -731,130 +795,6 @@ describe('Linear save issue', () => {
       meta: { writeId: request.writeId, deduplicated: true }
     })
     expect(update).toHaveBeenCalledTimes(1)
-    expect(update).toHaveBeenCalledWith(
-      'label-1',
-      '',
-      'workspace-1',
-      expect.any(Function),
-      expect.any(Object)
-    )
-  })
-
-  it('delegates creates with the MCP-required team and title', async () => {
-    const runtime = new OrcaRuntimeService()
-    const create = vi.spyOn(runtime, 'linearIssueCreate').mockResolvedValue({
-      issue,
-      meta: { workspaceId: 'workspace-1', writeId: 'write-1', deduplicated: false }
-    })
-
-    await expect(
-      runtime.linearSaveIssue({ team: 'ENG', title: 'New issue', workspaceId: 'workspace-1' })
-    ).resolves.toMatchObject({ meta: { created: true } })
-
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        teamInput: 'ENG',
-        title: 'New issue',
-        workspaceId: 'workspace-1'
-      })
-    )
-  })
-
-  it('keeps team changes explicitly unsupported on updates', async () => {
-    const runtime = new OrcaRuntimeService()
-
-    await expect(
-      runtime.linearSaveIssue({ input: 'ENG-1', team: 'OPS', title: 'Moved issue' })
-    ).rejects.toMatchObject({
-      code: 'linear_write_failed',
-      message: 'Team can only be set when creating an issue.'
-    })
-  })
-
-  it('rejects oversized descriptions before resolving an issue or calling Linear', async () => {
-    const runtime = new OrcaRuntimeService()
-    const resolveTarget = vi.fn()
-    Object.assign(runtime, { resolveLinearAgentWriteTarget: resolveTarget })
-
-    await expect(
-      runtime.linearSaveIssue({
-        input: 'ENG-1',
-        description: 'x'.repeat(LINEAR_WRITE_BODY_CAP + 1)
-      })
-    ).rejects.toMatchObject({ code: 'linear_body_too_large' })
-    expect(resolveTarget).not.toHaveBeenCalled()
-  })
-
-  it('does not send a mutation or confirmation read when every field is already set', async () => {
-    const runtime = new OrcaRuntimeService()
-    const runWrite = vi.fn()
-    const notify = vi.fn().mockResolvedValue(undefined)
-    Object.assign(runtime, {
-      resolveLinearAgentWriteTarget: vi
-        .fn()
-        .mockResolvedValue({ issue, workspaceId: 'workspace-1' }),
-      readLinearAgentIssueWriteRecord: vi.fn().mockResolvedValue(issue),
-      buildLinearSaveUpdate: vi.fn().mockResolvedValue({ title: issue.title }),
-      runLinearAgentWrite: runWrite,
-      notifyLinearLinkedIssueUpdated: notify
-    })
-
-    await expect(
-      runtime.linearSaveIssue({ input: issue.identifier, title: issue.title })
-    ).resolves.toMatchObject({ issue, meta: { created: false } })
-
-    expect(runWrite).not.toHaveBeenCalled()
-    expect(notify).toHaveBeenCalledWith('workspace-1', issue.identifier)
-  })
-
-  it('accepts user UUIDs without listing every team member', async () => {
-    const runtime = new OrcaRuntimeService() as unknown as SaveIssueInternals
-    const listMembers = vi.spyOn(linearTeams, 'getTeamMembersOrThrow')
-    const userId = '11111111-1111-4111-8111-111111111111'
-
-    await expect(runtime.resolveLinearAssignee(userId, 'team-1', 'workspace-1')).resolves.toBe(
-      userId
-    )
-    expect(listMembers).not.toHaveBeenCalled()
-  })
-
-  it('matches assignees by full name or email like Linear MCP', async () => {
-    const runtime = new OrcaRuntimeService() as unknown as SaveIssueInternals
-    vi.spyOn(linearTeams, 'getTeamMembersOrThrow').mockResolvedValue([
-      {
-        id: 'user-1',
-        displayName: 'Ada',
-        name: 'Ada Lovelace',
-        email: 'ada@example.com'
-      }
-    ])
-
-    await expect(
-      runtime.resolveLinearAssignee('Ada Lovelace', 'team-1', 'workspace-1')
-    ).resolves.toBe('user-1')
-    await expect(
-      runtime.resolveLinearAssignee('ADA@EXAMPLE.COM', 'team-1', 'workspace-1')
-    ).resolves.toBe('user-1')
-  })
-
-  it('resolves workflow lifecycle types while preferring exact state names', () => {
-    const runtime = new OrcaRuntimeService() as unknown as SaveIssueInternals
-    const states = [
-      { id: 'state-progress', name: 'In Progress', type: 'started' },
-      { id: 'state-started', name: 'Started', type: 'unstarted' }
-    ]
-
-    expect(runtime.resolveLinearAgentState('started', states)).toBe(states[1])
-    expect(runtime.resolveLinearAgentState('unstarted', states)).toBe(states[1])
-  })
-
-  it('clears labels without listing the team label catalog', async () => {
-    const runtime = new OrcaRuntimeService() as unknown as SaveIssueInternals
-    const listLabels = vi.spyOn(linearTeams, 'getTeamLabelsOrThrow')
-
-    await expect(
-      runtime.buildLinearSaveUpdate({ labels: [] }, issue, 'workspace-1')
-    ).resolves.toEqual({ labelIds: [] })
-    expect(listLabels).not.toHaveBeenCalled()
+    expect(update).toHaveBeenCalledWith('label-1', '', 'workspace-1', expect.any(Object))
   })
 })

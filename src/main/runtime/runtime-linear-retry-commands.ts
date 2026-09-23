@@ -40,7 +40,7 @@ export class RuntimeLinearRetryCommands extends RuntimeLinearCommandBase {
   public linearUpdateUnconfirmed(
     writeId: string,
     workspaceId: string,
-    command: string,
+    command: string | null,
     cause?: string,
     retryCommandArgs?: readonly string[]
   ): LinearAgentAccessError {
@@ -52,8 +52,8 @@ export class RuntimeLinearRetryCommands extends RuntimeLinearCommandBase {
         workspaceId,
         nextSteps: [
           retryCommandArgs
-            ? `Retry once with the pinned command:\n${command}`
-            : `Retry once with the pinned command: \`${command}\`.`
+            ? "Retry once with the exact `retryCommandArgs` from this error's JSON output."
+            : `Retry once with the pinned command: \`${command ?? ''}\`.`
         ],
         ...(retryCommandArgs ? { retryCommandArgs } : {}),
         ...(cause ? { cause: sanitizeLinearErrorMessage(cause) } : {})

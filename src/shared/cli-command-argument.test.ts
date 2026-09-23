@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
-import { quoteCliCommandArgument } from './cli-command-argument'
+import { quoteCliCommandArgument, renderCliCommandArguments } from './cli-command-argument'
 
 describe('quoteCliCommandArgument', () => {
   it.runIf(process.platform !== 'win32')('round trips arbitrary text through /bin/sh', () => {
@@ -27,5 +27,23 @@ describe('quoteCliCommandArgument', () => {
         ComSpec: 'C:\\Windows\\System32\\cmd.exe'
       })
     ).toBe('"literal "^%"PATH"^%" & ""quoted"""')
+  })
+
+  it('renders argument vectors for the caller shell and rejects cmd line breaks', () => {
+    expect(
+      renderCliCommandArguments(['orca', 'literal $HOME'], 'win32', {
+        ComSpec: 'powershell.exe'
+      })
+    ).toEqual({ ok: true, command: "& orca 'literal $HOME'" })
+    expect(
+      renderCliCommandArguments(['orca', 'line 1\r\nline 2'], 'win32', {
+        ComSpec: 'C:\\Windows\\System32\\cmd.exe'
+      })
+    ).toEqual({ ok: false, reason: 'cmd_line_break' })
+    expect(
+      renderCliCommandArguments(['orca', '--description=!PATH!'], 'win32', {
+        ComSpec: 'C:\\Windows\\System32\\cmd.exe'
+      })
+    ).toEqual({ ok: false, reason: 'cmd_delayed_expansion' })
   })
 })

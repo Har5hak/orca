@@ -130,6 +130,14 @@ function formatCommandFlagHelp(flag: string, commandPath: string[]): string {
   if (command === 'linear list-issues' && flag === 'workspace') {
     return '--workspace <id|all>  Connected Linear workspace id, or all'
   }
+  if (
+    ['linear milestone set', 'linear milestone clear', 'linear label description set'].includes(
+      command
+    ) &&
+    flag === 'workspace'
+  ) {
+    return '--workspace <id|name> Connected Linear workspace id or unique exact name'
+  }
   if (command.startsWith('linear ') && flag === 'workspace') {
     return '--workspace <id>      Connected Linear workspace id'
   }
@@ -150,6 +158,9 @@ function formatCommandFlagHelp(flag: string, commandPath: string[]): string {
   }
   if (command === 'linear label description set' && flag === 'description') {
     return '--description <text>  New Linear label description'
+  }
+  if (command === 'linear label description set' && flag === 'team') {
+    return '--team <key|id|name>  Linear team key, id, or unique exact name'
   }
   if (command === 'linear comment add' && flag === 'reply-to') {
     return '--reply-to <id>       Comment id to reply to'

@@ -6,7 +6,8 @@ import {
   getLinearCurrentIssueFromWorktree,
   resolveLegacyLinearLinkWorkspace,
   linearError,
-  listLinearTeamsOrThrow
+  listLinearTeamsOrThrow,
+  resolveLinearWorkspaceSelector
 } from './runtime-linear-command-dependencies'
 import type {
   LinearCurrentIssueContextHints,
@@ -82,19 +83,23 @@ export class RuntimeLinearTeamWriteCommands extends RuntimeLinearDedupeCommands 
     workspaceId: string
     workspaceName?: string
   }> {
-    this.validateLinearCreateWorkspaceScope(workspaceId === 'all' ? undefined : workspaceId)
+    const resolvedWorkspaceId =
+      workspaceId === 'all' ? 'all' : this.resolveLinearWorkspaceInput(workspaceId)
     let teams: Awaited<ReturnType<typeof listLinearTeamsOrThrow>>
     try {
-      teams = await listLinearTeamsOrThrow(workspaceId ?? 'all')
+      teams = await listLinearTeamsOrThrow(resolvedWorkspaceId ?? 'all')
     } catch (error) {
       throw this.mapLinearReadFailure(error)
     }
     const normalized = teamInput.toLocaleLowerCase()
     const idMatches = teams.filter((team) => team.id.toLocaleLowerCase() === normalized)
+    const keyMatches = teams.filter((team) => team.key.toLocaleLowerCase() === normalized)
     const matches =
       idMatches.length > 0
         ? idMatches
-        : teams.filter((team) => team.key.toLocaleLowerCase() === normalized)
+        : keyMatches.length > 0
+          ? keyMatches
+          : teams.filter((team) => team.name.toLocaleLowerCase() === normalized)
     if (matches.length === 1 && matches[0].workspaceId) {
       return {
         id: matches[0].id,
@@ -140,8 +145,7 @@ export class RuntimeLinearTeamWriteCommands extends RuntimeLinearDedupeCommands 
       })
     }
 
-    const scope = parent?.workspaceId ?? workspaceId
-    this.validateLinearCreateWorkspaceScope(scope)
+    const scope = parent?.workspaceId ?? this.resolveLinearWorkspaceInput(workspaceId)
     let teams: Awaited<ReturnType<typeof listLinearTeamsOrThrow>>
     try {
       teams = await listLinearTeamsOrThrow(scope ?? 'all')
@@ -202,16 +206,15 @@ export class RuntimeLinearTeamWriteCommands extends RuntimeLinearDedupeCommands 
   }
 
   public validateLinearCreateWorkspaceScope(workspaceId: string | undefined): void {
-    if (!workspaceId) {
-      return
+    this.resolveLinearWorkspaceInput(workspaceId)
+  }
+
+  public resolveLinearWorkspaceInput(workspaceInput: string | undefined): string | undefined {
+    if (!workspaceInput) {
+      return undefined
     }
     const workspaces = getLinearStatus().workspaces ?? []
-    if (workspaces.length > 0 && !workspaces.some((workspace) => workspace.id === workspaceId)) {
-      throw linearError(
-        'linear_invalid_workspace',
-        `No connected Linear workspace matched ${workspaceId}.`
-      )
-    }
+    return resolveLinearWorkspaceSelector({ workspaceId: workspaceInput }, workspaces)?.id
   }
   async linearResolveCurrentIssue(
     context?: LinearCurrentIssueContextHints

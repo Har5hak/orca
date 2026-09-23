@@ -193,7 +193,7 @@ export const LINEAR_COMMAND_SPECS: CommandSpec[] = [
     path: ['linear', 'milestone', 'set'],
     summary: 'Set a Linear issue project milestone',
     usage:
-      'orca linear milestone set [<id>] [--current] --to <milestoneId-or-exact-name> [--write-id <uuid>] [--workspace <id>] [--json]',
+      'orca linear milestone set [<id>] [--current] --to <milestoneId-or-exact-name> [--write-id <uuid>] [--workspace <id-or-exact-name>] [--json]',
     allowedFlags: [...GLOBAL_FLAGS, 'current', 'to', 'write-id', 'workspace', 'id'],
     positionalArgs: ['id'],
     examples: ['orca linear milestone set --current --to "Public beta" --json']
@@ -202,7 +202,7 @@ export const LINEAR_COMMAND_SPECS: CommandSpec[] = [
     path: ['linear', 'milestone', 'clear'],
     summary: 'Clear a Linear issue project milestone',
     usage:
-      'orca linear milestone clear [<id>] [--current] [--write-id <uuid>] [--workspace <id>] [--json]',
+      'orca linear milestone clear [<id>] [--current] [--write-id <uuid>] [--workspace <id-or-exact-name>] [--json]',
     allowedFlags: [...GLOBAL_FLAGS, 'current', 'write-id', 'workspace', 'id'],
     positionalArgs: ['id'],
     examples: ['orca linear milestone clear ENG-123 --json']
@@ -211,7 +211,7 @@ export const LINEAR_COMMAND_SPECS: CommandSpec[] = [
     path: ['linear', 'label', 'description', 'set'],
     summary: 'Update a Linear label description',
     usage:
-      'orca linear label description set --team <key|id> --label <labelId-or-exact-name> --description <text> [--write-id <uuid>] [--workspace <id>] [--json]',
+      'orca linear label description set --team <key|id|exact-name> --label <labelId-or-exact-name> --description <text> [--write-id <uuid>] [--workspace <id-or-exact-name>] [--json]',
     allowedFlags: [...GLOBAL_FLAGS, 'team', 'label', 'description', 'write-id', 'workspace'],
     examples: [
       'orca linear label description set --team ENG --label "Needs QA" --description "Requires verification" --json'

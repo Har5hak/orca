@@ -12,14 +12,25 @@ export function resolveWorkspaceSelector(
   if (workspaces.length === 0) {
     return null
   }
-  const byId = selectors.workspaceId
-    ? workspaces.find((workspace) => workspace.id === selectors.workspaceId)
+  const normalizedWorkspace = selectors.workspaceId?.toLocaleLowerCase()
+  const byId = normalizedWorkspace
+    ? workspaces.find((workspace) => workspace.id.toLocaleLowerCase() === normalizedWorkspace)
     : null
+  const byName =
+    normalizedWorkspace && !byId
+      ? workspaces.filter(
+          (workspace) => workspace.organizationName.toLocaleLowerCase() === normalizedWorkspace
+        )
+      : []
+  if (byName.length > 1) {
+    throw ambiguousWorkspaceInput(byName, selectors.workspaceId ?? '')
+  }
+  const byWorkspace = byId ?? byName[0] ?? null
   const byOrg = selectors.organizationUrlKey
     ? workspaces.find((workspace) => workspace.organizationUrlKey === selectors.organizationUrlKey)
     : null
 
-  if (selectors.workspaceId && !byId) {
+  if (selectors.workspaceId && !byWorkspace) {
     throw unknownWorkspace(selectors.workspaceId)
   }
   if (selectors.organizationUrlKey && !byOrg) {
@@ -31,14 +42,34 @@ export function resolveWorkspaceSelector(
       }
     )
   }
-  if (byId && byOrg && byId.id !== byOrg.id) {
+  if (byWorkspace && byOrg && byWorkspace.id !== byOrg.id) {
     throw linearError('linear_invalid_workspace', 'The issue URL and --workspace do not match.', {
       nextSteps: [
-        `Retry with --workspace ${byOrg.id} or use an issue URL from ${byId.organizationName}.`
+        `Retry with --workspace ${byOrg.id} or use an issue URL from ${byWorkspace.organizationName}.`
       ]
     })
   }
-  return byId ?? byOrg ?? null
+  return byWorkspace ?? byOrg ?? null
+}
+
+function ambiguousWorkspaceInput(
+  workspaces: LinearWorkspace[],
+  input: string
+): ReturnType<typeof linearError> {
+  const candidates: LinearWorkspaceCandidate[] = workspaces.map((workspace) => ({
+    id: workspace.id,
+    name: workspace.organizationName
+  }))
+  return linearError(
+    'linear_workspace_ambiguous',
+    `Multiple Linear workspaces exactly matched ${input}.`,
+    {
+      candidates,
+      nextSteps: candidates.map(
+        (candidate) => `Retry with --workspace ${candidate.id} for ${candidate.name}.`
+      )
+    }
+  )
 }
 
 export function unknownWorkspace(workspaceId: string): ReturnType<typeof linearError> {

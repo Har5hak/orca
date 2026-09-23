@@ -24,3 +24,28 @@ export function quoteCliCommandArgument(
     ? quotePowerShellNativeArgument(value)
     : quoteStartupArg(value, 'posix')
 }
+
+export type RenderCliCommandResult =
+  | { ok: true; command: string }
+  | { ok: false; reason: 'cmd_line_break' | 'cmd_delayed_expansion' }
+
+export function renderCliCommandArguments(
+  args: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env
+): RenderCliCommandResult {
+  const shell =
+    platform === 'win32'
+      ? resolveWindowsShellStartupFamily(
+          env.ORCA_TERMINAL_WINDOWS_SHELL ?? env.ORCA_WINDOWS_SHELL ?? env.ComSpec ?? env.COMSPEC
+        )
+      : 'posix'
+  if (shell === 'cmd' && args.some((arg) => /[\r\n]/.test(arg))) {
+    return { ok: false, reason: 'cmd_line_break' }
+  }
+  if (shell === 'cmd' && args.some((arg) => arg.includes('!'))) {
+    return { ok: false, reason: 'cmd_delayed_expansion' }
+  }
+  const command = args.map((arg) => quoteCliCommandArgument(arg, platform, env)).join(' ')
+  return { ok: true, command: shell === 'powershell' && command ? `& ${command}` : command }
+}

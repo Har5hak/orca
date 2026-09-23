@@ -216,9 +216,9 @@ describe('Linear teams', () => {
     const { getTeamLabelsOrThrow } = await import('./teams')
 
     await expect(getTeamLabelsOrThrow('team-1', 'workspace-1')).resolves.toEqual([
-      { id: 'label-1', name: 'Bug', color: '#ff0000' },
-      { id: 'label-2', name: 'Feature', color: '#ff0000' },
-      { id: 'label-3', name: 'Docs', color: '#ff0000' }
+      { id: 'label-1', name: 'Bug', color: '#ff0000', description: null },
+      { id: 'label-2', name: 'Feature', color: '#ff0000', description: null },
+      { id: 'label-3', name: 'Docs', color: '#ff0000', description: null }
     ])
 
     expect(entry.client.team).toHaveBeenCalledWith('team-1')
