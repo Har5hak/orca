@@ -10,7 +10,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { formatBase64PayloadByteCount } from './base64-payload-byte-count'
-import { quoteCliCommandArgument } from './shell-command-quote'
+import { quoteCliCommandArgument } from '../shared/cli-command-argument'
 import type {
   ComputerActionMetadata,
   ComputerActionResult,

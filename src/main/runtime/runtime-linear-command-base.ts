@@ -16,6 +16,23 @@ export type RuntimeLinearCommandPorts = {
     }
   ) => void
   emitClientEvent: (event: LinearLinkedIssueUpdatedEvent) => void
+  beginMutationReceipt: (params: { requestId: string; method: string; payloadHash: string }) => {
+    disposition: 'started' | 'pending' | 'completed'
+    receipt: string | null
+  }
+  checkpointMutationReceipt: (params: {
+    requestId: string
+    method: string
+    payloadHash: string
+    receipt: string
+  }) => void
+  completeMutationReceipt: (params: {
+    requestId: string
+    method: string
+    payloadHash: string
+    receipt: string
+  }) => void
+  discardMutationReceipt: (requestId: string) => void
 }
 
 // Why: browse reads sit at the chain root so write commands can re-enter them through `this`, as they did on the facade.
@@ -52,5 +69,35 @@ export class RuntimeLinearCommandBase extends RuntimeLinearBrowseCommands {
 
   protected emitClientEvent(event: LinearLinkedIssueUpdatedEvent): void {
     this.ports.emitClientEvent(event)
+  }
+
+  protected beginMutationReceipt(
+    requestId: string,
+    method: string,
+    payloadHash: string
+  ): { disposition: 'started' | 'pending' | 'completed'; receipt: string | null } {
+    return this.ports.beginMutationReceipt({ requestId, method, payloadHash })
+  }
+
+  protected checkpointMutationReceipt(
+    requestId: string,
+    method: string,
+    payloadHash: string,
+    receipt: string
+  ): void {
+    this.ports.checkpointMutationReceipt({ requestId, method, payloadHash, receipt })
+  }
+
+  protected completeMutationReceipt(
+    requestId: string,
+    method: string,
+    payloadHash: string,
+    receipt: string
+  ): void {
+    this.ports.completeMutationReceipt({ requestId, method, payloadHash, receipt })
+  }
+
+  protected discardMutationReceipt(requestId: string): void {
+    this.ports.discardMutationReceipt(requestId)
   }
 }

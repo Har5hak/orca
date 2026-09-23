@@ -5,7 +5,8 @@ import {
   linearError,
   readLinearIssueContext,
   getLinearTeamStatesOrThrow,
-  labelsForIds
+  labelsForIds,
+  listProjectMilestonesForAgent
 } from './runtime-linear-command-dependencies'
 import type {
   LinearIssueTaskUpdateRequest,
@@ -65,6 +66,7 @@ export class RuntimeLinearTaskFieldCommands extends RuntimeLinearLabelWriteComma
       estimate?: number | null
       dueDate?: string | null
       labelIds?: string[]
+      projectMilestoneId?: string | null
     }
     labels?: { id: string; name: string }[]
   } | null> {
@@ -114,6 +116,44 @@ export class RuntimeLinearTaskFieldCommands extends RuntimeLinearLabelWriteComma
         fields: { labelIds: nextIds },
         labels: labelsForIds(nextIds, [...(current.labels ?? []), ...labels])
       }
+    }
+    if (params.operation === 'projectMilestone') {
+      if (params.projectMilestone === undefined) {
+        throw linearError('linear_invalid_project', 'Pass a project milestone or clear it.')
+      }
+      if (params.projectMilestone === null) {
+        return { fields: { projectMilestoneId: null } }
+      }
+      if (!current.project?.id) {
+        throw linearError(
+          'linear_invalid_project',
+          'The issue must belong to a project before setting a milestone.'
+        )
+      }
+      let milestones: Awaited<ReturnType<typeof listProjectMilestonesForAgent>>
+      try {
+        milestones = await listProjectMilestonesForAgent(current.project.id, workspaceId)
+      } catch (error) {
+        throw this.mapLinearReadFailure(error)
+      }
+      const normalized = params.projectMilestone.toLocaleLowerCase()
+      const idMatch = milestones.find(
+        (milestone) => milestone.id.toLocaleLowerCase() === normalized
+      )
+      const nameMatches = milestones.filter(
+        (milestone) => milestone.name.toLocaleLowerCase() === normalized
+      )
+      const milestone = idMatch ?? (nameMatches.length === 1 ? nameMatches[0] : null)
+      if (!milestone) {
+        throw linearError(
+          'linear_invalid_project',
+          nameMatches.length > 1
+            ? `Multiple project milestones exactly matched "${params.projectMilestone}".`
+            : `No project milestone exactly matched "${params.projectMilestone}".`,
+          { milestones: milestones.map(({ id, name }) => ({ id, name })) }
+        )
+      }
+      return { fields: { projectMilestoneId: milestone.id } }
     }
     return null
   }

@@ -198,6 +198,9 @@ export async function updateIssue(
     if (updates.projectId !== undefined) {
       payload.projectId = updates.projectId
     }
+    if (updates.projectMilestoneId !== undefined) {
+      payload.projectMilestoneId = updates.projectMilestoneId
+    }
     if (updates.parentId !== undefined) {
       payload.parentId = updates.parentId
     }
@@ -258,6 +261,9 @@ export async function updateIssueForAgent(
     }
     if (updates.projectId !== undefined) {
       payload.projectId = updates.projectId
+    }
+    if (updates.projectMilestoneId !== undefined) {
+      payload.projectMilestoneId = updates.projectMilestoneId
     }
     if (updates.parentId !== undefined) {
       payload.parentId = updates.parentId

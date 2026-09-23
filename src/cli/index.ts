@@ -20,6 +20,7 @@ import { printHelp } from './help'
 import type { RuntimeClient } from './runtime-client'
 import { COMMAND_SPECS } from './specs'
 import { resolveOrchestrationCliExecutable } from './runtime/orchestration-recovery-command'
+import { retryRoutingContext } from './retry-routing-context'
 
 export { COMMAND_SPECS } from './specs'
 export { buildCurrentWorktreeSelector, normalizeWorktreeSelector } from './selectors'
@@ -182,7 +183,8 @@ export async function main(
     const worktreeSelector = parsed.flags.get('worktree')
     reportCliError(error, json, {
       commandPath: parsed.commandPath,
-      ...(typeof worktreeSelector === 'string' ? { worktreeSelector } : {})
+      ...(typeof worktreeSelector === 'string' ? { worktreeSelector } : {}),
+      ...retryRoutingContext(parsed.flags)
     })
     process.exitCode = 1
   }

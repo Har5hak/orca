@@ -81,14 +81,26 @@ export const LinearIssueSetState = LinearWriteTarget.extend({
 })
 
 export const LinearIssueUpdateTask = LinearWriteTarget.extend({
-  operation: z.enum(['assignee', 'priority', 'estimate', 'dueDate', 'labels']),
+  operation: z.enum(['assignee', 'priority', 'estimate', 'dueDate', 'labels', 'projectMilestone']),
   assigneeId: z.string().nullable().optional(),
   assigneeMe: z.boolean().optional(),
   priority: z.number().int().min(0).max(4).optional(),
   estimate: z.number().int().min(0).nullable().optional(),
   dueDate: OptionalLinearDueDateOrClear,
   labelMode: z.enum(['add', 'remove', 'set']).optional(),
-  labels: z.array(z.string()).optional()
+  labels: z.array(z.string()).optional(),
+  projectMilestone: z.string().nullable().optional(),
+  writeId: OptionalString
+})
+
+export const LinearLabelUpdateDescription = z.object({
+  teamInput: requiredString('Missing team'),
+  labelInput: requiredString('Missing label'),
+  description: z.string(),
+  writeId: OptionalString,
+  workspaceId: OptionalString.refine((value) => value !== 'all', {
+    message: '--workspace all is not valid for Linear writes'
+  })
 })
 
 export const LinearIssueAddComment = LinearWriteTarget.extend({

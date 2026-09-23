@@ -25,6 +25,7 @@ export type RawIssue = {
   state?: RawNamedEntity | null
   team?: (RawNamedEntity & { key?: string | null }) | null
   project?: RawNamedEntity | null
+  projectMilestone?: RawNamedEntity | null
   cycle?: RawNamedEntity | null
   assignee?: RawUser | null
   labels?: { nodes?: RawNamedEntity[]; pageInfo?: RawPageInfo } | null
@@ -124,6 +125,7 @@ export const ISSUE_FIELDS = `
   state { id name type color }
   team { id name key color }
   project { id name color }
+  projectMilestone { id name }
   cycle { id name }
   assignee { id displayName avatarUrl }
   labels(first: 50) { nodes { id name color } pageInfo { hasNextPage } }
@@ -230,6 +232,7 @@ export function mapIssue(issue: RawIssue): LinearIssueSummary {
     state: issue.state ?? null,
     team: issue.team ?? null,
     project: issue.project ?? null,
+    projectMilestone: issue.projectMilestone ?? null,
     cycle: issue.cycle ?? null,
     assignee: issue.assignee ?? null,
     labels: issue.labels?.nodes ?? [],

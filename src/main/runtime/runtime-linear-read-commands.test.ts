@@ -21,11 +21,39 @@ function createCommands(): RuntimeLinearReadCommands {
     },
     listResolvedWorktrees: async () => [],
     setWorktreeMeta: () => {},
-    emitClientEvent: () => {}
+    emitClientEvent: () => {},
+    beginMutationReceipt: () => ({ disposition: 'started', receipt: null }),
+    checkpointMutationReceipt: () => {},
+    completeMutationReceipt: () => {},
+    discardMutationReceipt: () => {}
   })
 }
 
 describe('RuntimeLinearReadCommands', () => {
+  it('preserves label descriptions in authoritative team-label readback', async () => {
+    const commands = createCommands()
+    vi.spyOn(commands, 'resolveLinearTeamInput').mockResolvedValue({
+      id: 'team-1',
+      key: 'ENG',
+      name: 'Engineering',
+      workspaceId: 'workspace-1'
+    })
+    vi.spyOn(commands, 'getLinearTeamLabelsForWrite').mockResolvedValue([
+      {
+        id: 'label-1',
+        name: 'Needs QA',
+        color: '#ffffff',
+        description: 'Requires verification.'
+      }
+    ])
+
+    await expect(
+      commands.linearTeamLabelsForAgents({ teamInput: 'ENG', workspaceId: 'workspace-1' })
+    ).resolves.toMatchObject({
+      labels: [{ id: 'label-1', name: 'Needs QA', description: 'Requires verification.' }]
+    })
+  })
+
   it('reports truncated project results at the top level', async () => {
     const commands = createCommands()
     vi.spyOn(commands, 'linearListProjects').mockResolvedValue({

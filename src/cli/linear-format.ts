@@ -6,6 +6,7 @@ import type {
   LinearMcpIssueListResult,
   LinearIssueContextResult,
   LinearIssueTaskUpdateResult,
+  LinearLabelDescriptionUpdateResult,
   LinearIssueRelationWriteResult,
   LinearSaveIssueResult,
   LinearProjectListResult,
@@ -33,6 +34,7 @@ export function formatLinearIssue(result: LinearIssueContextResult): string {
     `Assignee: ${issue.assignee?.displayName ?? 'unassigned'}`,
     `Project: ${issue.project?.name ?? 'none'}`
   ]
+  lines.push(`Milestone: ${issue.projectMilestone?.name ?? 'none'}`)
   lines.push(`Priority: ${formatPriority(issue.priority)}`)
   lines.push(`Estimate: ${issue.estimate ?? 'none'}`)
   if (issue.labels.length > 0) {
@@ -113,7 +115,12 @@ export function formatLinearTeamLabels(result: LinearTeamLabelsResult): string {
   if (result.labels.length === 0) {
     return `No Linear labels found for ${result.team.key}.`
   }
-  return result.labels.map((label) => `${label.name.padEnd(24)} ${label.id}`).join('\n')
+  return result.labels
+    .map((label) => {
+      const description = label.description ? ` ${label.description}` : ''
+      return `${label.name.padEnd(24)} ${label.id}${description}`
+    })
+    .join('\n')
 }
 
 export function formatLinearIssueList(result: LinearIssueListResult): string {
@@ -191,6 +198,13 @@ export function formatLinearTaskUpdate(result: LinearIssueTaskUpdateResult): str
   return `Updated ${result.issue.identifier} ${taskOperationLabel(result.operation)}${suffix}.`
 }
 
+export function formatLinearLabelDescriptionUpdate(
+  result: LinearLabelDescriptionUpdateResult
+): string {
+  const suffix = result.meta.alreadySet ? ' (already set)' : ''
+  return `Updated ${result.label.name} label description${suffix}.`
+}
+
 export function formatLinearRelationWrite(result: LinearIssueRelationWriteResult): string {
   const verb = result.operation === 'add' ? 'Added' : 'Removed'
   const suffix = result.meta.alreadySet
@@ -257,6 +271,9 @@ function formatPriority(priority: number | null | undefined): string {
 function taskOperationLabel(operation: LinearIssueTaskUpdateResult['operation']): string {
   if (operation === 'dueDate') {
     return 'due date'
+  }
+  if (operation === 'projectMilestone') {
+    return 'project milestone'
   }
   return operation
 }

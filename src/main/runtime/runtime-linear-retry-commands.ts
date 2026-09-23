@@ -2,12 +2,64 @@ import {
   type LinearAgentAccessError,
   type LinearAgentWriteTarget,
   type LinearCreateFieldIntent,
+  hashCanonical,
   linearError,
   sanitizeLinearErrorMessage
 } from './runtime-linear-command-dependencies'
 import { RuntimeLinearCommandBase } from './runtime-linear-command-base'
 
 export class RuntimeLinearRetryCommands extends RuntimeLinearCommandBase {
+  public linearMutationReceipt(
+    writeId: string,
+    method: string,
+    payload: unknown
+  ): {
+    payloadHash: string
+    disposition: 'started' | 'pending' | 'completed'
+    receipt: string | null
+  } {
+    const payloadHash = hashCanonical(payload)
+    try {
+      return { payloadHash, ...this.beginMutationReceipt(writeId, method, payloadHash) }
+    } catch (error) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'code' in error &&
+        error.code === 'request_mismatch'
+      ) {
+        throw linearError(
+          'linear_invalid_write_id',
+          'The write id was already used with a different Linear mutation.'
+        )
+      }
+      throw error
+    }
+  }
+
+  public linearUpdateUnconfirmed(
+    writeId: string,
+    workspaceId: string,
+    command: string | null,
+    cause?: string,
+    retryCommandArgs?: readonly string[]
+  ): LinearAgentAccessError {
+    return linearError(
+      'linear_write_unconfirmed',
+      'Linear may have applied the write, but Orca could not confirm it.',
+      {
+        writeId,
+        workspaceId,
+        nextSteps: [
+          retryCommandArgs
+            ? "Retry once with the exact `retryCommandArgs` from this error's JSON output."
+            : `Retry once with the pinned command: \`${command ?? ''}\`.`
+        ],
+        ...(retryCommandArgs ? { retryCommandArgs } : {}),
+        ...(cause ? { cause: sanitizeLinearErrorMessage(cause) } : {})
+      }
+    )
+  }
   public linearCreateStyleUnconfirmed(
     verb: 'comment' | 'attach' | 'create',
     writeId: string,

@@ -41,6 +41,7 @@ describe('Linear agent access RPC methods', () => {
   })
 
   it('routes agent write methods to the runtime server', async () => {
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: The dispatcher test provides every runtime method exercised below.
     const runtime = {
       getRuntimeId: () => 'test-runtime',
       linearIssueSetState: vi.fn().mockResolvedValue({ ok: true }),
@@ -52,6 +53,7 @@ describe('Linear agent access RPC methods', () => {
       linearIssueListForAgents: vi.fn().mockResolvedValue({ ok: true }),
       linearProjectListForAgents: vi.fn().mockResolvedValue({ ok: true }),
       linearIssueUpdateTask: vi.fn().mockResolvedValue({ ok: true }),
+      linearLabelUpdateDescription: vi.fn().mockResolvedValue({ ok: true }),
       linearIssueAddComment: vi.fn().mockResolvedValue({ ok: true }),
       linearIssueAttachLink: vi.fn().mockResolvedValue({ ok: true }),
       linearSaveIssue: vi.fn().mockResolvedValue({ ok: true }),
@@ -98,6 +100,16 @@ describe('Linear agent access RPC methods', () => {
         input: 'ENG-1',
         operation: 'dueDate',
         dueDate: '2026-06-30',
+        writeId: '44444444-4444-4444-8444-444444444444',
+        workspaceId: 'workspace-1'
+      })
+    )
+    const labelDescriptionResponse = await dispatcher.dispatch(
+      makeRequest('linear.labelUpdateDescription', {
+        teamInput: 'ENG',
+        labelInput: 'Needs QA',
+        description: 'Requires verification.',
+        writeId: '55555555-5555-4555-8555-555555555555',
         workspaceId: 'workspace-1'
       })
     )
@@ -159,6 +171,7 @@ describe('Linear agent access RPC methods', () => {
     expect(issueListResponse.ok).toBe(true)
     expect(projectListResponse.ok).toBe(true)
     expect(taskUpdateResponse.ok).toBe(true)
+    expect(labelDescriptionResponse.ok).toBe(true)
     expect(relationResponse.ok).toBe(true)
     expect(commentResponse.ok).toBe(true)
     expect(attachResponse.ok).toBe(true)
@@ -197,6 +210,14 @@ describe('Linear agent access RPC methods', () => {
       input: 'ENG-1',
       operation: 'dueDate',
       dueDate: '2026-06-30',
+      writeId: '44444444-4444-4444-8444-444444444444',
+      workspaceId: 'workspace-1'
+    })
+    expect(runtime.linearLabelUpdateDescription).toHaveBeenCalledWith({
+      teamInput: 'ENG',
+      labelInput: 'Needs QA',
+      description: 'Requires verification.',
+      writeId: '55555555-5555-4555-8555-555555555555',
       workspaceId: 'workspace-1'
     })
     expect(runtime.linearIssueRelationWrite).toHaveBeenCalledWith({

@@ -1,4 +1,5 @@
 import { computerUseErrorRecoveryData } from '../shared/computer-use-error-recovery'
+import { renderCliCommandArguments } from '../shared/cli-command-argument'
 import {
   matchAutomationOwnerConflict,
   stripAutomationOwnerConflictCode
@@ -12,6 +13,10 @@ export type CliErrorContext = {
   commandPath?: readonly string[]
   /** The `--worktree` value this invocation sent; the runtime's error never echoes it. */
   worktreeSelector?: string
+  /** Non-secret caller-side selector required to retry against the same remote runtime. */
+  remoteEnvironmentSelector?: string
+  /** True when a local retry could use a different receipt database and duplicate the write. */
+  remoteRoutingRequired?: boolean
 }
 
 function selectorRecovery(code: string | undefined, context: CliErrorContext) {
@@ -40,7 +45,7 @@ export function formatCliError(error: unknown, context: CliErrorContext = {}): s
   if (selector) {
     return formatMessageWithNextSteps(
       message,
-      nextStepsFromData(mergeSelectorRecovery(errorData(error), selector))
+      humanNextStepsFromData(mergeSelectorRecovery(errorData(error), selector), context)
     )
   }
   if (error instanceof RuntimeClientError && error.code === 'runtime_unavailable') {
@@ -56,7 +61,7 @@ export function formatCliError(error: unknown, context: CliErrorContext = {}): s
     return formatMessageWithNextSteps(stripAutomationOwnerConflictCode(message), conflict.nextSteps)
   }
   if (error instanceof RuntimeClientError) {
-    const nextSteps = nextStepsFromData(error.data)
+    const nextSteps = humanNextStepsFromData(error.data, context)
     if (nextSteps.length > 0) {
       return formatMessageWithNextSteps(message, nextSteps)
     }
@@ -74,7 +79,10 @@ export function formatCliError(error: unknown, context: CliErrorContext = {}): s
     return `${message}\nOrca is not running. Run 'orca open' first.`
   }
   if (error instanceof RuntimeRpcFailureError) {
-    return formatMessageWithNextSteps(message, nextStepsFromData(error.response.error.data))
+    return formatMessageWithNextSteps(
+      message,
+      humanNextStepsFromData(error.response.error.data, context)
+    )
   }
   return message
 }
@@ -92,17 +100,18 @@ export function reportCliError(error: unknown, json: boolean, context: CliErrorC
   if (json) {
     if (error instanceof RuntimeRpcFailureError) {
       const response = withAutomationOwnerConflictRecovery(error.response)
+      const recoveryData = selector
+        ? mergeSelectorRecovery(response.error.data, selector)
+        : response.error.data
       console.log(
         JSON.stringify(
-          selector
-            ? {
-                ...response,
-                error: {
-                  ...response.error,
-                  data: mergeSelectorRecovery(response.error.data, selector)
-                }
-              }
-            : response,
+          {
+            ...response,
+            error: {
+              ...response.error,
+              data: withRetryRoutingRecovery(recoveryData, context)
+            }
+          },
           null,
           2
         )
@@ -118,7 +127,7 @@ export function reportCliError(error: unknown, json: boolean, context: CliErrorC
           message: stripAutomationOwnerConflictCode(
             error instanceof Error ? error.message : String(error)
           ),
-          data: localCliErrorData(error, context)
+          data: withRetryRoutingRecovery(localCliErrorData(error, context), context)
         },
         _meta: {
           runtimeId: null
@@ -186,6 +195,93 @@ function nextStepsFromData(data: unknown): string[] {
     )
   }
   return []
+}
+
+function retryCommandArgsFromData(data: unknown): string[] | null {
+  if (!data || typeof data !== 'object' || !('retryCommandArgs' in data)) {
+    return null
+  }
+  const value = data.retryCommandArgs
+  return Array.isArray(value) && value.length > 0 && value.every((arg) => typeof arg === 'string')
+    ? value
+    : null
+}
+
+function withRetryRoutingRecovery(data: unknown, context: CliErrorContext): unknown {
+  const args = retryCommandArgsFromData(data)
+  if (
+    !args ||
+    !data ||
+    typeof data !== 'object' ||
+    (!context.remoteEnvironmentSelector && !context.remoteRoutingRequired)
+  ) {
+    return data
+  }
+  const recovery: Record<string, unknown> = { ...data }
+  if (context.remoteEnvironmentSelector) {
+    const routedArgs: string[] = []
+    for (let index = 0; index < args.length; index += 1) {
+      const arg = args[index]
+      if (arg === '--environment') {
+        index += 1
+      } else if (!arg.startsWith('--environment=')) {
+        routedArgs.push(arg)
+      }
+    }
+    routedArgs.push(`--environment=${context.remoteEnvironmentSelector}`)
+    return { ...recovery, retryCommandArgs: routedArgs }
+  }
+  delete recovery.retryCommandArgs
+  return {
+    ...recovery,
+    retryRouting: {
+      required: true,
+      kind: 'pairing',
+      secretOmitted: true,
+      retryBlocked: true
+    },
+    nextSteps: [
+      ...nextStepsFromData(data).filter((step) => !step.includes('`retryCommandArgs`')),
+      'Reconnect to the same paired Orca runtime, then repeat the original invocation with the same write id; Orca omitted the retry command and secret-bearing pairing selection.'
+    ]
+  }
+}
+
+export function formatPinnedRetryCommandStep(
+  args: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  routing: Pick<CliErrorContext, 'remoteEnvironmentSelector' | 'remoteRoutingRequired'> = {}
+): string {
+  if (routing.remoteRoutingRequired && !routing.remoteEnvironmentSelector) {
+    const writeId = args.find((arg) => arg.startsWith('--write-id='))?.slice('--write-id='.length)
+    const identity = writeId ? ` using the generated write id ${JSON.stringify(writeId)}` : ''
+    return `Reconnect to the same paired Orca runtime, then repeat the original mutation${identity}; Orca omitted the retry command and secret-bearing pairing selection.`
+  }
+  const routedArgs = routing.remoteEnvironmentSelector
+    ? [...args, `--environment=${routing.remoteEnvironmentSelector}`]
+    : args
+  const rendered = renderCliCommandArguments(routedArgs, platform, env)
+  if (!rendered.ok) {
+    const reason =
+      rendered.reason === 'cmd_line_break'
+        ? 'a Windows shell cannot represent an argument containing a line break safely'
+        : 'cmd.exe may expand exclamation marks when delayed expansion is enabled'
+    return `Retry once using the exact JSON argument vector ${JSON.stringify(routedArgs)} in PowerShell or a POSIX shell; Orca did not render a pasteable cmd.exe command because ${reason}.`
+  }
+  return `Retry once with the pinned command:\n${rendered.command}`
+}
+
+function humanNextStepsFromData(data: unknown, context: CliErrorContext): string[] {
+  const nextSteps = nextStepsFromData(data)
+  const retryCommandArgs = retryCommandArgsFromData(data)
+  if (!retryCommandArgs) {
+    return nextSteps
+  }
+  return [
+    ...nextSteps.filter((step) => !step.includes('`retryCommandArgs`')),
+    formatPinnedRetryCommandStep(retryCommandArgs, process.platform, process.env, context)
+  ]
 }
 
 function localCliErrorData(error: unknown, context: CliErrorContext): unknown {

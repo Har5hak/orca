@@ -91,6 +91,7 @@ export type {
   LinearWorkspaceCandidate,
   LinearWriteIssueRef,
   LinearIssueTaskUpdateResult,
+  LinearLabelDescriptionUpdateResult,
   LinearSaveIssueResult
 } from './agent-result-types'
 export type { LinearIssueActivityEntry, LinearIssueActivityValue } from './issue-activity'
@@ -129,7 +130,7 @@ export type LinearStatusSetRequest = LinearWriteTargetRequest & {
 }
 
 export type LinearIssueTaskUpdateRequest = LinearWriteTargetRequest & {
-  operation: 'assignee' | 'priority' | 'estimate' | 'dueDate' | 'labels'
+  operation: 'assignee' | 'priority' | 'estimate' | 'dueDate' | 'labels' | 'projectMilestone'
   assigneeId?: string | null
   assigneeMe?: boolean
   priority?: number
@@ -137,6 +138,16 @@ export type LinearIssueTaskUpdateRequest = LinearWriteTargetRequest & {
   dueDate?: string | null
   labelMode?: 'add' | 'remove' | 'set'
   labels?: string[]
+  projectMilestone?: string | null
+  writeId?: string
+}
+
+export type LinearLabelDescriptionUpdateRequest = {
+  teamInput: string
+  labelInput: string
+  description: string
+  workspaceId?: string
+  writeId?: string
 }
 
 export type LinearCommentAddRequest = LinearWriteTargetRequest & {

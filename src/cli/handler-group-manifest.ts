@@ -231,6 +231,9 @@ export const HANDLER_GROUPS: readonly HandlerGroup[] = [
       'linear label add',
       'linear label remove',
       'linear label set',
+      'linear label description set',
+      'linear milestone set',
+      'linear milestone clear',
       'linear comment add',
       'linear attach',
       'linear create'

@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { quoteCliCommandArgument } from './shell-command-quote'
+import { quoteCliCommandArgument } from '../shared/cli-command-argument'
 import { RuntimeRpcFailureError } from './runtime-client'
 import {
   formatCliError,

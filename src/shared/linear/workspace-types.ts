@@ -87,6 +87,7 @@ export type LinearLabel = {
   id: string
   name: string
   color: string
+  description?: string | null
 }
 
 export type LinearMember = {
