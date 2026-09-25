@@ -25,6 +25,10 @@ import { tearDownFailedWorkerStart } from './failed-worker-start-teardown'
 import { requireWorkerAuthority, type WorkerEffect } from './worker-topology'
 import { prepareLocalWorkerStart } from './worker-start-validation'
 import { deliverAndSettleWorkerStartReadiness } from './worker-start-readiness-settlement'
+import {
+  assertWorkerLaunchProfileWorkspace,
+  refuseWorkerLaunchProfileWithoutExternalIsolation
+} from './worker-launch-profile'
 
 type WorkerStartMutation = {
   callerFingerprint: string
@@ -73,6 +77,13 @@ export async function startLocalWorker(args: {
       coordinatorPane,
       resolvedWorktreeId: resolvedWorktree?.id
     })
+  }
+  if (params.launchProfile) {
+    if (!resolvedWorktree) {
+      throw new Error('Worker launch profile did not resolve a workspace.')
+    }
+    assertWorkerLaunchProfileWorkspace(resolvedWorktree)
+    refuseWorkerLaunchProfileWithoutExternalIsolation()
   }
   let mode = await resolveWorkerStartModeOnHost(runtime, args.mode, resolvedWorktree?.id, agent)
 

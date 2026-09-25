@@ -21,7 +21,10 @@ import { printResult } from '../format'
 import { BOOLEAN_FLAGS, parseArgs } from '../args'
 import { formatCommandHelp } from '../help'
 import { ORCHESTRATION_WORKER_COMMAND_SPECS } from '../specs/orchestration-worker-specs'
-import { ORCHESTRATION_WORKER_LAUNCH_PREFERENCES_RUNTIME_CAPABILITY } from '../../shared/protocol-version'
+import {
+  ORCHESTRATION_WORKER_LAUNCH_PREFERENCES_RUNTIME_CAPABILITY,
+  ORCHESTRATION_WORKER_LAUNCH_PROFILE_RUNTIME_CAPABILITY
+} from '../../shared/protocol-version'
 
 describe('orchestration worker-start CLI contract', () => {
   beforeEach(() => {
@@ -92,6 +95,7 @@ describe('orchestration worker-start CLI contract', () => {
         comment: 'Supervised from the Mac Run home',
         setup: 'run',
         agent: 'codex',
+        launchProfile: undefined,
         terminal: undefined,
         retryOf: undefined,
         timeoutMs: 90_000,
@@ -198,6 +202,49 @@ describe('orchestration worker-start CLI contract', () => {
           ['task', 'task_1'],
           ['agent', 'codex'],
           ['model', 'gpt-5.6-sol'],
+          ['from', 'term_coord']
+        ])
+      )
+    ).rejects.toMatchObject({ code: 'incompatible_runtime' })
+
+    expect(callMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('capability-gates and forwards the closed worker launch profile', async () => {
+    callMock
+      .mockResolvedValueOnce({
+        result: { capabilities: [ORCHESTRATION_WORKER_LAUNCH_PROFILE_RUNTIME_CAPABILITY] }
+      })
+      .mockResolvedValueOnce({
+        result: { taskId: 'task_1', dispatchId: 'ctx_1', state: 'ready' }
+      })
+
+    await invokeWorkerStart(
+      new Map<string, string | boolean>([
+        ['task', 'task_1'],
+        ['agent', 'claude'],
+        ['launch-profile', 'lab-subscription-no-mcp-v1'],
+        ['from', 'term_coord']
+      ])
+    )
+
+    expect(callMock).toHaveBeenNthCalledWith(1, 'status.get')
+    expect(callMock).toHaveBeenNthCalledWith(
+      2,
+      'orchestration.workerStart',
+      expect.objectContaining({ launchProfile: 'lab-subscription-no-mcp-v1' })
+    )
+  })
+
+  it('fails before worker-start when the runtime would strip the launch profile', async () => {
+    callMock.mockResolvedValueOnce({ result: { capabilities: [] } })
+
+    await expect(
+      invokeWorkerStart(
+        new Map<string, string | boolean>([
+          ['task', 'task_1'],
+          ['agent', 'claude'],
+          ['launch-profile', 'lab-subscription-no-mcp-v1'],
           ['from', 'term_coord']
         ])
       )

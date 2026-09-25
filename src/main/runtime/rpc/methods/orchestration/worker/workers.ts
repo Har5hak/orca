@@ -13,6 +13,7 @@ import {
   resolveWorkerStartReadinessTimeoutMs
 } from '../../../../../../shared/orchestration-timing-budgets'
 import { assertWorkerStartTaskSpecWithinPromptBudget } from './worker-start-prompt-budget'
+import { assertWorkerLaunchProfileRequest } from './worker-launch-profile'
 
 export const ORCHESTRATION_WORKER_START_METHODS = [
   defineMethod({
@@ -53,6 +54,7 @@ export const ORCHESTRATION_WORKER_START_METHODS = [
         params,
         settings: readWorkerStartModeSettings(runtime)
       })
+      assertWorkerLaunchProfileRequest({ params, mode })
       if (params.on) {
         // A remote worker is always a terminal agent; the mode receipt rides along so the
         // coordinator still learns why its structured default did not apply.
